@@ -10,7 +10,7 @@
     "dashboard"
   ],
   "engines": {
-    "node": ">=20.11"
+    "node": ">=20.19"
   },
   "scripts": {
     "dev": "npm run dev -w @to/server",
@@ -23,6 +23,7 @@
     "seed:demo": "npm run seed:demo -w @to/server",
     "bench": "npm run bench -w @to/server",
     "gates": "npm run gates -w @to/server",
-    "replay": "npm run replay -w @to/server"
+    "replay": "npm run replay -w @to/server",
+    "verify": "npm run typecheck && npm test && npm run gates"
   }
 }

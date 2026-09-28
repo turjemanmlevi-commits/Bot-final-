@@ -1,0 +1,28 @@
+filters:
+  and:
+    - 'note.type == "event"'
+views:
+  - type: table
+    name: Eventos
+    order:
+      - file.name
+      - note.venue
+      - note.provider
+      - note.onSaleAt
+      - note.startsAt
+      - note.limitPerAccount
+      - note.limitPerGroup
+      - note.limitPerOperation
+      - note.limitSemantics
+      - note.limitsVerified
+  - type: table
+    name: Límites sin verificar
+    filters:
+      or:
+        - 'note.limitsVerified != true'
+        - 'note.limitSemantics == "UNKNOWN"'
+    order:
+      - file.name
+      - note.limitSemantics
+      - note.limitsVerified
+      - note.limitsSource

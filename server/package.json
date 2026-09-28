@@ -1,0 +1,30 @@
+{
+  "name": "@to/server",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "vault:compile": "tsx src/cli/vault-compile.ts",
+    "seed:demo": "tsx src/cli/seed-demo.ts",
+    "bench": "tsx src/cli/bench.ts",
+    "gates": "tsx src/cli/gates.ts",
+    "replay": "tsx src/cli/replay.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@hono/node-server": "^1.19.17",
+    "@to/shared": "*",
+    "hono": "^4.13.10",
+    "tsx": "^4.23.15",
+    "yaml": "^2.9.1",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3"
+  }
+}

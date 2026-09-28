@@ -1,0 +1,23 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    { "query": "path:\"10 Recintos\"", "color": { "a": 1, "rgb": 1356419 } },
+    { "query": "path:\"20 Eventos\"", "color": { "a": 1, "rgb": 15105570 } },
+    { "query": "path:\"30 Proveedores\"", "color": { "a": 1, "rgb": 10181046 } },
+    { "query": "path:\"40 Operaciones\"", "color": { "a": 1, "rgb": 3066993 } },
+    { "query": "path:\"50 Sistema\"", "color": { "a": 1, "rgb": 3447003 } },
+    { "query": "path:\"60 Decisiones\"", "color": { "a": 1, "rgb": 9807270 } }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": true
+}

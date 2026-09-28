@@ -1,0 +1,12 @@
+{
+  "newFileLocation": "current",
+  "attachmentFolderPath": "_adjuntos",
+  "alwaysUpdateLinks": true,
+  "newLinkFormat": "shortest",
+  "useMarkdownLinks": false,
+  "propertiesInDocument": "visible",
+  "showUnsupportedFiles": false,
+  "userIgnoreFilters": [
+    "_plantillas/"
+  ]
+}
