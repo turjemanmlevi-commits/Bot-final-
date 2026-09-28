@@ -217,6 +217,18 @@ export class OperationService {
       case 'RUNNING':
         ctx.metrics.start(r.id);
         ctx.runners.start(r.id);
+        if ((from === 'ARMED' || from === 'FROZEN') && ctx.runners.kind(r.id) === 'MANUAL') {
+          const event = ctx.store.events.get(r.config.eventId);
+          const provider = ctx.registry.descriptor(r.config.providerId)?.name ?? r.config.providerId;
+          const notReady = r.config.accountIds.filter((id) => ctx.store.accounts.get(id)?.session.state !== 'READY').length;
+          const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          ctx.notifier?.announce?.(
+            `🚦 <b>¡Abre la venta! ${esc(r.config.name)}</b>\nEntrad ya en la web oficial de ${esc(provider)} (cola incluida). Las tareas con la zona, la cantidad y el precio máximo llegan ahora.` +
+              (notReady > 0 ? `\n⚠️ ${notReady} cuenta${notReady === 1 ? '' : 's'} sin «Sesión lista»: inicia sesión y púlsalo para recibir tu tarea.` : ''),
+            r.config.accountIds,
+            event?.url ?? ctx.registry.authorization(r.config.providerId)?.url ?? null,
+          );
+        }
         break;
       case 'PAUSED':
       case 'RECOVERING':

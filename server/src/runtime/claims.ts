@@ -424,9 +424,10 @@ export class ClaimService {
       claimId: claim.id,
       title: `Añade ${qty} entradas · ${target.label}`,
       instructions:
-        `Con la cuenta "${this.label(accountId)}", añade ${qty} entradas de ${target.label} al carrito` +
-        `${extras.length ? ` (${extras.join(', ')})` : ''}. Máximo ${money} por entrada con gastos. ` +
-        'NO pagues todavía: responde aquí cuántas quedaron en el carrito y a qué precio.',
+        `Con la cuenta "${this.label(accountId)}", en la web oficial, añade ${qty} entradas de ${target.label} al carrito` +
+        `${extras.length ? ` (${extras.join(', ')})` : ''}. Máximo ${money} por entrada con gastos incluidos. ` +
+        'En cuanto estén en el carrito, responde aquí cuántas son, a qué precio y cuántos minutos le quedan al carrito; ' +
+        'después paga en la web oficial y márcalo como pagado en Carritos. Si no hay entradas en esa zona por ese precio, pulsa «No pude» y te daremos la siguiente zona.',
       target: { sectionLabel: target.label, row: null, seats: [], qty, maxUnitPrice, currency: op.config.currency },
       deadlineMs: this.ctx.cfg.humanTaskDeadlineMs,
     });

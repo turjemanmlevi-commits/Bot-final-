@@ -246,6 +246,17 @@ export class TelegramNotifier implements Notifier {
     return { text: lines.join('\n'), keyboard };
   }
 
+  announce(text: string, accountIds: string[], link?: string | null): void {
+    const chats = new Set<string>();
+    if (this.chatId) chats.add(this.chatId);
+    for (const id of accountIds) {
+      const personal = this.runtime?.store.accounts.get(id)?.telegramChatId;
+      if (personal) chats.add(personal);
+    }
+    const keyboard: Button[][] | undefined = link ? [[{ text: '🌐 Abrir la web oficial', url: link }]] : undefined;
+    for (const chat of chats) this.send(chat, text, keyboard);
+  }
+
   notifyTask(task: HumanTask): void {
     const { text, keyboard } = this.taskMessage(task);
     for (const chat of this.chatsFor(task.accountId)) this.send(chat, text, keyboard);

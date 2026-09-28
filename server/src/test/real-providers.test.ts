@@ -226,6 +226,15 @@ describe('compra real coordinada (API + asistencia manual)', () => {
       accountIds: [ana.json.id, bea.json.id],
       cartExpiryAlertsSeconds: [300, 60],
     };
+    const announced: Array<{ text: string; accountIds: string[]; link: string | null }> = [];
+    app.runtime.ctx.notifier = {
+      enabled: true,
+      connected: true,
+      detail: 'prueba',
+      notifyAlert: () => undefined,
+      notifyTask: () => undefined,
+      announce: (text, accountIds, link) => announced.push({ text, accountIds, link: link ?? null }),
+    };
     const created = await call<OperationDetail>('POST', '/api/operations', config);
     assert.equal(created.status, 201, JSON.stringify(created.json));
     const opId = created.json.summary.id;
@@ -238,12 +247,20 @@ describe('compra real coordinada (API + asistencia manual)', () => {
     const tasks = async () => (await call<HumanTask[]>('GET', '/api/human-tasks')).json.filter((t) => t.operationId === opId);
     const sessionTasks = (await tasks()).filter((t) => t.kind === 'OPEN_SESSION' && t.state === 'OPEN');
     assert.equal(sessionTasks.length, 2, 'una tarea de inicio de sesión por cuenta');
-    for (const t of sessionTasks) assert.equal(t.link, rmEvent.url, 'la tarea lleva el enlace oficial del partido');
+    for (const t of sessionTasks) {
+      assert.equal(t.link, rmEvent.url, 'la tarea lleva el enlace oficial del partido');
+      assert.match(t.instructions, /antes de las 18:05/, 'hora de Madrid');
+      assert.match(t.instructions, /Plan: la venta abre a las 18:05\. Irás a por 1\) Lateral Este · Primer anfiteatro, 2\) Fondo Sur; hasta 2 entradas, máximo 120,00/);
+    }
 
     // Nadie ha iniciado sesión todavía y llega T0: en asistencia manual la operación arranca igual.
     await clock.advance(t0 - clock.now() + 1000);
     const running = await call<OperationDetail>('GET', `/api/operations/${opId}`);
     assert.equal(running.json.summary.state, 'RUNNING');
+    assert.equal(announced.length, 1, 'aviso de apertura a todo el grupo');
+    assert.match(announced[0]?.text ?? '', /Abre la venta/);
+    assert.match(announced[0]?.text ?? '', /2 cuentas sin «Sesión lista»/);
+    assert.equal(announced[0]?.link, rmEvent.url);
 
     // Ana inicia sesión en la web oficial y lo confirma.
     const anaSession = sessionTasks.find((t) => t.accountId === ana.json.id);

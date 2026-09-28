@@ -44,6 +44,8 @@ class FakeTelegram {
         if (method === 'getMe') return reply({ ok: true, result: { id: 1, is_bot: true, username: 'orquestador_prueba_bot' } });
         if (method === 'getUpdates') {
           const offset = Number(body.offset ?? 0);
+          // Como Telegram: pedir desde `offset` confirma (y borra) las anteriores.
+          this.updates = (this.updates as Array<{ update_id: number }>).filter((u) => u.update_id >= offset);
           const flush = () => {
             const out = (this.updates as Array<{ update_id: number }>).filter((u) => u.update_id >= offset);
             reply({ ok: true, result: out });
@@ -149,13 +151,12 @@ describe('Telegram', () => {
     assert.equal(n.status().mainChatConfigured, true);
     const test = await n.sendTest();
     assert.equal(test.ok, true, test.message);
-    assert.match(tg.messagesTo('555').at(-1) ?? '', /Prueba del Ticket Orchestrator/);
+    assert.ok(tg.messagesTo('555').some((t) => /Prueba del Ticket Orchestrator/.test(t)));
     assert.equal((await n.sendTest('404')).message.includes('no encuentra el chat'), true);
 
     const before = tg.messagesTo('555').length;
     tg.message(555, '/estado');
-    await until(() => tg.messagesTo('555').length > before, 'respuesta a /estado');
-    assert.match(tg.messagesTo('555').at(-1) ?? '', /No hay operaciones activas/);
+    await until(() => tg.messagesTo('555').slice(before).some((t) => /No hay operaciones activas/.test(t)), 'respuesta a /estado');
 
     // Tarea para la cuenta de Bea, que tiene su propio chat.
     const rt = h.app.runtime;
@@ -181,8 +182,7 @@ describe('Telegram', () => {
     // Solo el chat principal puede parar todo.
     const beforeBea = tg.messagesTo('777').length;
     tg.message(777, '/parar_todo', 'Bea');
-    await until(() => tg.messagesTo('777').length > beforeBea, 'respuesta a Bea');
-    assert.match(tg.messagesTo('777').at(-1) ?? '', /Solo el chat principal/);
+    await until(() => tg.messagesTo('777').slice(beforeBea).some((t) => /Solo el chat principal/.test(t)), 'respuesta a Bea');
     assert.equal(rt.ctx.safety.engagedFor({}), null);
     tg.message(555, '/parar_todo');
     await until(() => rt.ctx.safety.engagedFor({}) !== null, 'kill switch global');

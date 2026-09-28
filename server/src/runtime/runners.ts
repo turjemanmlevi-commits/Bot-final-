@@ -363,7 +363,8 @@ export class ManualRunner implements Runner {
   ) {}
 
   start(): void {
-    this.timer = this.ctx.clock.setInterval(() => this.tick(), 1000);
+    // 250 ms: en cuanto una persona marca «Sesión lista» o «No pude», recibe su siguiente tarea.
+    this.timer = this.ctx.clock.setInterval(() => this.tick(), 250);
     this.tick();
   }
 

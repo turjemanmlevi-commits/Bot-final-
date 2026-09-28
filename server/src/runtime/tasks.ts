@@ -6,6 +6,8 @@
  */
 
 import type { Account, HumanTask, HumanTaskKind, HumanTaskResponse, HumanTaskResponseInput, Id } from '@to/shared';
+import { formatMoney } from '@to/shared';
+import { wantFor } from '../domain/allocation';
 import { iso } from '../util/time';
 import type { Ctx } from './context';
 
@@ -86,6 +88,31 @@ export class HumanTaskService {
     return providerId ? (registry.authorization(providerId)?.url ?? null) : null;
   }
 
+  /** Hora local (zona del vault) de un instante ISO: «10:00». */
+  private clock(isoTime: string): string {
+    return new Intl.DateTimeFormat('es-ES', { timeZone: this.ctx.cfg.timeZone, hour: '2-digit', minute: '2-digit' }).format(new Date(isoTime));
+  }
+
+  /**
+   * Plan de una cuenta para la apertura de la venta: a qué zonas irá y en qué
+   * orden, cuántas entradas como mucho y a qué precio. Se envía antes de T0
+   * para que cada persona sepa qué hacer en cuanto entre, sin perder segundos.
+   */
+  planFor(operationId: Id, accountId: Id): string | null {
+    const op = this.ctx.store.operations.get(operationId);
+    if (!op) return null;
+    const targets = op.config.preferences.targets;
+    const alloc = this.ctx.store.allocations.get(operationId);
+    const cap = alloc ? wantFor(alloc, accountId) : null;
+    const zones = targets.length > 0 ? targets.map((t, i) => `${i + 1}) ${t}`).join(', ') : 'cualquier zona permitida';
+    const upTo = cap !== null && cap > 0 ? `hasta ${cap} entrada${cap === 1 ? '' : 's'}` : 'las entradas que te asigne el sistema';
+    return (
+      `Plan: la venta abre a las ${this.clock(op.config.t0)}. Irás a por ${zones}; ${upTo}, ` +
+      `máximo ${formatMoney(alloc?.maxUnitPrice ?? op.config.maxUnitPrice, op.config.currency)} por entrada con gastos. ` +
+      'Cuando llegue la hora te avisaremos y te diremos exactamente qué zona intentar.'
+    );
+  }
+
   openFor(accountId: Id, kind: HumanTaskKind, operationId?: Id | null): HumanTask | undefined {
     for (const t of this.ctx.store.humanTasks.values()) {
       if (t.accountId === accountId && t.kind === kind && t.state === 'OPEN' && (operationId === undefined || t.operationId === operationId)) return t;
@@ -99,15 +126,20 @@ export class HumanTaskService {
     if (existing) return existing;
     const provider = this.ctx.registry.descriptor(account.providerId)?.name ?? account.providerId;
     const challenge = account.session.challenge;
+    const op = operationId ? this.ctx.store.operations.get(operationId) : undefined;
+    const manual = !this.ctx.registry.automated(account.providerId, 'session.open');
+    const beforeT0 = op && Date.parse(op.config.t0) > this.ctx.now() ? ` antes de las ${this.clock(op.config.t0)}` : '';
+    const plan = operationId && manual ? this.planFor(operationId, account.id) : null;
+    const base = challenge
+      ? `Entra en ${provider} con la cuenta "${account.label}", resuelve el ${challenge.type} y pulsa "Sesión lista".`
+      : `Inicia sesión en ${provider} con la cuenta "${account.label}" en tu navegador (en la web oficial) y pulsa "Sesión lista"${beforeT0}.`;
     return this.create({
       operationId,
       accountId: account.id,
       kind: 'OPEN_SESSION',
       alert: !challenge,
       title,
-      instructions: challenge
-        ? `Entra en ${provider} con la cuenta "${account.label}", resuelve el ${challenge.type} y pulsa "Sesión lista".`
-        : `Inicia sesión en ${provider} con la cuenta "${account.label}" en tu navegador (en la web oficial) y pulsa "Sesión lista".`,
+      instructions: plan ? `${base} ${plan}` : base,
     });
   }
 
