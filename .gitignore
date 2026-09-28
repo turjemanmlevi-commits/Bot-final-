@@ -1,0 +1,15 @@
+node_modules/
+dist/
+data/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
+reports/*
+!reports/.gitkeep
+vault/.obsidian/workspace*.json
+vault/.obsidian/cache
+compiled/
+.DS_Store
+.vite/

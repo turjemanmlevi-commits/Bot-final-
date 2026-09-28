@@ -1,0 +1,28 @@
+{
+  "name": "ticket-orchestrator",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Ticket Orchestrator v4: orquestador speed-first con coordinación central de hasta diez cuentas legítimas, Venue Intelligence, Telegram, Dashboard y human-in-the-loop. Alcance automático terminal: CART_SECURED. Pago humano.",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "server",
+    "dashboard"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @to/server",
+    "dev:dashboard": "npm run dev -w @to/dashboard",
+    "build": "npm run build -w @to/dashboard",
+    "start": "npm run start -w @to/server",
+    "typecheck": "npm run typecheck -w @to/shared && npm run typecheck -w @to/server && npm run typecheck -w @to/dashboard",
+    "test": "npm run test -w @to/server",
+    "vault:compile": "npm run vault:compile -w @to/server",
+    "seed:demo": "npm run seed:demo -w @to/server",
+    "bench": "npm run bench -w @to/server",
+    "gates": "npm run gates -w @to/server",
+    "replay": "npm run replay -w @to/server"
+  }
+}
