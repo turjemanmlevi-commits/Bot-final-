@@ -22,6 +22,10 @@ export interface Notifier {
   readonly detail: string;
   notifyAlert(alert: import('@to/shared').Alert): void;
   notifyTask(task: import('@to/shared').HumanTask): void;
+  /** Estado detallado para el dashboard (bot, chat principal, chats vistos). */
+  status?(): import('@to/shared').TelegramStatus;
+  /** Envía un mensaje de prueba y espera la respuesta de Telegram. */
+  sendTest?(chatId?: string | null): Promise<{ ok: boolean; message: string }>;
 }
 
 export interface RuntimeConfig {
@@ -35,6 +39,7 @@ export interface RuntimeConfig {
   queuePollMs: number;
   sessionPollMs: number;
   clockSyncMs: number;
+  /** Plazo para responder una tarea de asistencia manual antes de pedir verificación. */
   humanTaskDeadlineMs: number;
   noProgressMs: number;
   circuitFailureThreshold: number;

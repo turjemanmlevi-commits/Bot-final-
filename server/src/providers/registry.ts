@@ -16,6 +16,7 @@ import {
   type ProviderAuthorization,
   type ProviderDescriptor,
 } from '@to/shared';
+import { ManualAssistProvider } from './manual';
 import type { ProviderAdapter } from './types';
 
 /** Capabilities que una persona puede ejecutar a mano si no hay automatización. */
@@ -66,6 +67,23 @@ export class ProviderRegistry {
 
   setAuthorizations(list: ProviderAuthorization[]): void {
     this.authorizations = new Map(list.map((a) => [a.providerId, a]));
+  }
+
+  /**
+   * Da de alta en asistencia manual cada proveedor del vault que no tiene
+   * adapter programado (MANUAL_ASSIST, o AUTHORIZED_API sin integración).
+   * Nunca se da de baja uno ya registrado: puede haber cuentas que lo usen.
+   * Devuelve los ids añadidos.
+   */
+  syncFromVault(list: ProviderAuthorization[]): string[] {
+    const added: string[] = [];
+    for (const a of list) {
+      if (this.adapters.has(a.providerId)) continue;
+      if (a.mode !== 'MANUAL_ASSIST' && a.mode !== 'AUTHORIZED_API') continue;
+      this.register(new ManualAssistProvider(a.providerId, a.name));
+      added.push(a.providerId);
+    }
+    return added;
   }
 
   authorization(providerId: string): ProviderAuthorization | null {

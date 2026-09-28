@@ -3,3 +3,4 @@ export * from './api';
 export * from './schemas';
 export * from './format';
 export * from './rules';
+export * from './vault-input';

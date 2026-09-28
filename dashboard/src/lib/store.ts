@@ -161,6 +161,9 @@ function apply(state: LiveState, messages: StreamMessage[]): LiveState {
       case 'vault':
         s = { ...s, vault: m.data };
         break;
+      case 'providers':
+        s = { ...s, providerAuthorizations: m.data };
+        break;
       case 'audit':
         s = { ...s, audit: [m.data, ...s.audit].slice(0, 400) };
         break;

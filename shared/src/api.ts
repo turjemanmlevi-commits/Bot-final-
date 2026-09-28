@@ -53,6 +53,8 @@ export interface CatalogEvent extends TicketEvent {
   /** Nota de Obsidian de la que sale el evento (ruta relativa al vault). */
   sourceFile: string;
   tags: string[];
+  /** Página oficial del evento (http/https) o null. Solo se muestra como enlace. */
+  url: string | null;
 }
 
 /** Autorización humana de capabilities por proveedor, declarada en el vault. */
@@ -65,6 +67,8 @@ export interface ProviderAuthorization {
   verifiedAt: IsoDateTime | null;
   notes: string;
   sourceFile: string;
+  /** Web oficial del proveedor (http/https) o null. */
+  url: string | null;
 }
 
 export interface VaultIssue {
@@ -213,7 +217,8 @@ export type StreamMessage =
   | { type: 'remove'; kind: EntityKind; id: string }
   | { type: 'system'; data: SystemStatus }
   | { type: 'audit'; data: AuditEvent }
-  | { type: 'vault'; data: VaultCompileReport };
+  | { type: 'vault'; data: VaultCompileReport }
+  | { type: 'providers'; data: ProviderAuthorization[] };
 
 /** Tipos de auditoría de alto volumen que no se emiten por el stream. */
 export const QUIET_AUDIT_TYPES: readonly string[] = [

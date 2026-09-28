@@ -126,10 +126,20 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
   }
   const t = input.t0Ms - input.now;
   const when = t > 0 ? `faltan ${formatDuration(t)}` : 'T0 alcanzado';
+  // En asistencia manual nada se automatiza: una persona puede iniciar sesión
+  // después de T0 y el runner le abrirá la tarea. No hay motivo para abortar.
+  const manual = p?.mode === 'MANUAL_ASSIST';
   if (input.accounts.length === 0) add('accounts', 'Cuentas listas', 'FAIL', 'La operación no tiene cuentas.');
   else if (ready === 0 && opening > 0) add('accounts', 'Cuentas listas', 'WARN', `Abriendo sesiones (${opening}/${input.accounts.length})…`);
-  else if (ready === 0) add('accounts', 'Cuentas listas', lastPhase ? 'FAIL' : 'WARN', `0/${input.accounts.length} cuentas listas (${when}).`, 'OPEN_SESSION');
-  else add('accounts', 'Cuentas listas', ready === input.accounts.length ? 'PASS' : 'WARN', `${ready}/${input.accounts.length} cuentas listas (${when}).`);
+  else if (ready === 0) {
+    add(
+      'accounts',
+      'Cuentas listas',
+      lastPhase && !manual ? 'FAIL' : 'WARN',
+      `0/${input.accounts.length} cuentas listas (${when}).${manual ? ' Cada persona: inicia sesión en la web oficial y pulsa «Sesión lista».' : ''}`,
+      'OPEN_SESSION',
+    );
+  } else add('accounts', 'Cuentas listas', ready === input.accounts.length ? 'PASS' : 'WARN', `${ready}/${input.accounts.length} cuentas listas (${when}).`);
 
   return {
     operationId: input.operationId,

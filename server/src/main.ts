@@ -27,7 +27,9 @@ function makeDriver(): JournalDriver {
 }
 
 async function main(): Promise<void> {
-  const notifier = env.telegramToken && env.telegramChatId ? new TelegramNotifier(env.telegramToken, env.telegramChatId) : null;
+  const notifier = env.telegramToken
+    ? new TelegramNotifier({ token: env.telegramToken, chatId: env.telegramChatId, apiBase: env.telegramApiBase, timeZone: env.timeZone })
+    : null;
   let app;
   try {
     app = await createApp({
@@ -38,6 +40,7 @@ async function main(): Promise<void> {
       simSeed: env.simSeed,
       notifier,
       watchVault: true,
+      cfg: { humanTaskDeadlineMs: env.manualTaskMinutes * 60_000 },
     });
   } catch (err) {
     log.error('No se pudo arrancar', { error: (err as Error).message });
@@ -59,7 +62,9 @@ async function main(): Promise<void> {
     console.log(`  API         ${url}/api/state`);
     console.log(`  Vault       ${env.vaultDir}${existsSync(env.vaultDir) ? '' : '  (NO EXISTE)'}`);
     console.log(`  Journal     ${env.journalDriver}${env.journalDriver === 'pglite' ? ` → ${path.join(env.dataDir, 'pglite')}` : ''}`);
-    console.log(`  Telegram    ${notifier ? 'activado' : 'desactivado'}`);
+    console.log(
+      `  Telegram    ${notifier ? (env.telegramChatId ? `activado (chat ${env.telegramChatId})` : 'token puesto, falta TELEGRAM_CHAT_ID: escribe /start al bot') : 'desactivado (ver «Configurar Telegram» en la guía)'}`,
+    );
     console.log('');
     console.log('  Demo: botón "Nueva demo" en el dashboard, o  npm run seed:demo');
     console.log('');

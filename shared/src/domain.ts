@@ -799,6 +799,11 @@ export interface HumanTask {
   createdAt: IsoDateTime;
   respondedAt: IsoDateTime | null;
   response: HumanTaskResponse | null;
+  /**
+   * Página oficial donde hacer la acción (la del evento o la del proveedor,
+   * según el vault). Solo es un enlace para la persona: el sistema no la visita.
+   */
+  link?: string | null | undefined;
 }
 
 export interface HumanTaskResponse {
@@ -884,5 +889,27 @@ export interface SystemStatus {
   killSwitches: KillSwitch[];
   circuits: CircuitState[];
   journal: { healthy: boolean; pending: number; lagMs: number; lastCommitAt: IsoDateTime | null; driver: 'postgres' | 'pglite' | 'memory' };
-  telegram: { enabled: boolean; connected: boolean; detail: string };
+  telegram: TelegramStatus;
+}
+
+export interface TelegramChatSeen {
+  chatId: string;
+  /** Nombre del chat o de la persona (solo en memoria, para ayudarte a configurar). */
+  name: string;
+  at: IsoDateTime;
+  /** true si ya es el chat principal o el de alguna cuenta. */
+  known: boolean;
+}
+
+export interface TelegramStatus {
+  /** Hay token configurado (TELEGRAM_BOT_TOKEN). */
+  enabled: boolean;
+  connected: boolean;
+  detail: string;
+  /** Usuario del bot (@...), cuando se ha podido comprobar el token. */
+  bot: string | null;
+  /** Hay chat principal configurado (TELEGRAM_CHAT_ID). */
+  mainChatConfigured: boolean;
+  /** Últimos chats que han escrito al bot, para averiguar su chat ID. */
+  recentChats: TelegramChatSeen[];
 }

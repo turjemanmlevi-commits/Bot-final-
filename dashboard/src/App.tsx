@@ -17,6 +17,7 @@ import { OperationsPage } from './pages/Operations';
 import { OverviewPage } from './pages/Overview';
 import { QualityPage } from './pages/Quality';
 import { SafetyPage } from './pages/Safety';
+import { SettingsPage } from './pages/Settings';
 import { TasksPage } from './pages/Tasks';
 import { VenueDetailPage, VenuesPage } from './pages/Venues';
 
@@ -141,6 +142,7 @@ function Shell() {
           <NavItem to="/seguridad" icon="shield" label="Seguridad" hot={Boolean(globalKill)} count={globalKill ? 1 : undefined} />
           <NavItem to="/calidad" icon="beaker" label="Calidad · gates" />
           <NavItem to="/auditoria" icon="scroll" label="Auditoría" />
+          <NavItem to="/ajustes" icon="gear" label="Ajustes · Telegram" hot={Boolean(s.system && !s.system.telegram.enabled)} />
         </div>
         <div className="nav-foot">
           <button type="button" className="btn" onClick={() => void newDemo()} disabled={busy}>
@@ -178,7 +180,18 @@ function Shell() {
           {s.system ? (
             <span className="small ink2">
               Modo <b>{s.system.mode === 'SIMULATION' ? 'simulación' : s.system.mode === 'MANUAL_ASSIST' ? 'asistencia manual' : 'mixto'}</b> · journal <b>{journal?.driver}</b>
-              {journal?.healthy ? '' : ' (degradado)'} · Telegram <b>{s.system.telegram.enabled ? (s.system.telegram.connected ? 'conectado' : 'sin conexión') : 'desactivado'}</b>
+              {journal?.healthy ? '' : ' (degradado)'} · Telegram{' '}
+              <NavLink to="/ajustes" title={s.system.telegram.detail}>
+                <b>
+                  {!s.system.telegram.enabled
+                    ? 'desactivado'
+                    : !s.system.telegram.connected
+                      ? 'sin conexión'
+                      : s.system.telegram.mainChatConfigured
+                        ? 'conectado'
+                        : 'falta el chat'}
+                </b>
+              </NavLink>
             </span>
           ) : null}
           <span className="spacer" />
@@ -219,6 +232,7 @@ function Shell() {
               <Route path="/seguridad" element={<SafetyPage />} />
               <Route path="/calidad" element={<QualityPage />} />
               <Route path="/auditoria" element={<AuditPage />} />
+              <Route path="/ajustes" element={<SettingsPage />} />
               <Route path="*" element={<div className="empty"><div className="big">No existe</div><NavLink to="/">Volver al resumen</NavLink></div>} />
             </Routes>
           )}

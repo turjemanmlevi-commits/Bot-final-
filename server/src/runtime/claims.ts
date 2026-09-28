@@ -443,7 +443,7 @@ export class ClaimService {
         { qty, unitPrice: r.unitPrice ?? claim.unitPrice, seats: r.seats ?? [], row: null, sectionLabel: task.target?.sectionLabel ?? claim.sectionLabel },
         'HUMAN',
         'HUMAN',
-        { cartRef: `manual-${claim.accountId}`, expiresAt: r.expiresAt ?? null, openUrl: null },
+        { cartRef: `manual-${claim.accountId}`, expiresAt: r.expiresAt ?? null, openUrl: task.link ?? null },
       );
     } else if (r.result === 'FAILED') {
       this.reject(claim, r.note ? `HUMAN_FAILED: ${r.note}` : 'HUMAN_FAILED', 'HUMAN');
@@ -462,7 +462,7 @@ export class ClaimService {
         { qty: r.qty ?? claim.qty, unitPrice: r.unitPrice ?? claim.unitPrice, seats: r.seats ?? [], row: claim.row, sectionLabel: claim.sectionLabel },
         'HUMAN',
         'HUMAN',
-        { cartRef: `manual-${claim.accountId}`, expiresAt: r.expiresAt ?? null, openUrl: null },
+        { cartRef: `manual-${claim.accountId}`, expiresAt: r.expiresAt ?? null, openUrl: task.link ?? null },
       );
     } else if (r.result === 'FAILED') {
       this.reject(claim, 'NOT_IN_CART', 'HUMAN');

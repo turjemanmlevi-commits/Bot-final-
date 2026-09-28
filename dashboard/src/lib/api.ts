@@ -10,6 +10,8 @@ import type {
   CircuitState,
   CommandRequest,
   CommandResult,
+  EventNoteInput,
+  EventNoteResult,
   GatesReport,
   HumanTask,
   HumanTaskResponseInput,
@@ -19,8 +21,11 @@ import type {
   OperationConfig,
   OperationDetail,
   ReplayReport,
+  TelegramTestResult,
   VaultCompileReport,
   VenueArtifact,
+  VenueQuickInput,
+  VenueQuickResult,
 } from '@to/shared';
 
 const ACTOR_KEY = 'to.actor';
@@ -119,4 +124,13 @@ export const Api = {
   gates: () => api<GatesReport | null>('/api/gates'),
   runGates: (full = false) => post<GatesReport>(`/api/gates/run${full ? '?full=1' : ''}`),
   seedDemo: (body: { startInSeconds?: number; scenarioId?: string }) => post<{ operationId: string; message: string }>('/api/demo/seed', body),
+  /** Crea la nota del evento en el vault (20 Eventos) y recompila. */
+  createEventNote: (input: EventNoteInput) => post<EventNoteResult>('/api/vault/events', input),
+  /** Actualiza las propiedades de la nota del evento conservando el resto. */
+  updateEventNote: (eventId: string, input: EventNoteInput) =>
+    api<EventNoteResult>(`/api/vault/events/${encodeURIComponent(eventId)}`, { method: 'PUT', body: input }),
+  /** Crea un recinto (carpeta con zonas y secciones) en el vault y recompila. */
+  createVenue: (input: VenueQuickInput) => post<VenueQuickResult>('/api/vault/venues', input),
+  /** Envía un mensaje de prueba por Telegram (al chat principal si no se indica otro). */
+  telegramTest: (chatId?: string | null) => post<TelegramTestResult>('/api/telegram/test', chatId ? { chatId } : {}),
 };

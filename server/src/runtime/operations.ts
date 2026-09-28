@@ -635,10 +635,14 @@ export class OperationService {
     if (now - last < 5000) return;
     this.lastNoProgressCheck.set(r.id, now);
     const started = r.startedAt ? Date.parse(r.startedAt) : now;
+    // En asistencia manual una persona tarda minutos (cola, selección): se avisa
+    // cuando ha pasado al menos el plazo de una tarea sin nada nuevo en carrito.
+    const manual = this.ctx.runners.kind(r.id) === 'MANUAL';
+    const threshold = manual ? Math.max(this.ctx.cfg.noProgressMs, this.ctx.cfg.humanTaskDeadlineMs) : this.ctx.cfg.noProgressMs;
     const confirmedRecently = [...this.ctx.store.claims.values()].some(
-      (c) => c.operationId === r.id && c.state === 'CONFIRMED' && now - Date.parse(c.updatedAt) < this.ctx.cfg.noProgressMs,
+      (c) => c.operationId === r.id && c.state === 'CONFIRMED' && now - Date.parse(c.updatedAt) < threshold,
     );
-    if (now - started > this.ctx.cfg.noProgressMs && !confirmedRecently) {
+    if (now - started > threshold && !confirmedRecently) {
       const alloc = this.ctx.store.allocations.get(r.id);
       this.ctx.alerts.raise({
         kind: 'NO_PROGRESS',
@@ -709,7 +713,14 @@ export class OperationService {
       killSwitches: [...ctx.store.killSwitches.values()],
       circuits: [...ctx.store.circuits.values()],
       journal: { healthy: j.healthy, pending: j.pending, lagMs: j.lagMs, lastCommitAt: j.lastCommitAt, driver: j.driver },
-      telegram: { enabled: ctx.notifier?.enabled ?? false, connected: ctx.notifier?.connected ?? false, detail: ctx.notifier?.detail ?? 'Desactivado' },
+      telegram: ctx.notifier?.status?.() ?? {
+        enabled: ctx.notifier?.enabled ?? false,
+        connected: ctx.notifier?.connected ?? false,
+        detail: ctx.notifier?.detail ?? 'Desactivado: falta TELEGRAM_BOT_TOKEN en .env',
+        bot: null,
+        mainChatConfigured: false,
+        recentChats: [],
+      },
     };
   }
 }

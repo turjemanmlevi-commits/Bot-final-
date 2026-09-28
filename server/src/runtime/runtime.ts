@@ -144,8 +144,11 @@ export class Runtime {
       ctx.journal.audit('vault.rejected', { errors: compiled.report.errors.length });
       return { applied: false, reason: 'El vault tiene errores: se mantiene la última compilación válida.' };
     }
+    const added = ctx.registry.syncFromVault(compiled.providers);
+    if (added.length > 0) ctx.journal.audit('provider.registered', { providerIds: added, mode: 'MANUAL_ASSIST' });
     ctx.registry.setAuthorizations(compiled.providers);
     store.providerAuthorizations = compiled.providers;
+    hub.publish({ type: 'providers', data: compiled.providers });
 
     const activeKeys = new Set<string>();
     for (const a of compiled.artifacts) {

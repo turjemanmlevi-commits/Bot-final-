@@ -56,7 +56,12 @@ export const AccountInputSchema = z.object({
   verification: z.enum(['UNVERIFIED', 'VERIFIED', 'NEEDS_ATTENTION']).optional(),
   eligibility: z.array(z.string().trim().min(1)).max(50).optional(),
   enabled: z.boolean().optional(),
-  telegramChatId: z.string().trim().max(40).nullable().optional(),
+  telegramChatId: z
+    .string()
+    .trim()
+    .regex(/^-?\d{1,20}$/, 'El chat ID de Telegram es un número (en los grupos empieza por -). Escribe /id al bot para verlo.')
+    .nullable()
+    .optional(),
 });
 export const AccountPatchSchema = AccountInputSchema.partial();
 
@@ -91,6 +96,11 @@ export const SessionHumanSchema = z.object({
   /** El humano confirma que ha resuelto el reto o iniciado sesión en el proveedor. */
   challenge: z.enum(CHALLENGE_TYPES).optional(),
   note: z.string().max(300).optional(),
+});
+
+export const TelegramTestSchema = z.object({
+  /** Chat al que enviar la prueba; por defecto el principal (TELEGRAM_CHAT_ID). */
+  chatId: z.string().trim().regex(/^-?\d{1,20}$/).nullable().optional(),
 });
 
 export const DemoSeedSchema = z.object({

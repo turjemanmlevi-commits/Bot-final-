@@ -33,11 +33,25 @@ export interface AppOptions {
   journalFlushMs?: number;
 }
 
+export interface CompileResult {
+  compiled: CompiledVault;
+  applied: boolean;
+  reason: string | null;
+}
+
 export interface App {
   runtime: Runtime;
   sim: SimulatedProvider;
   registry: ProviderRegistry;
-  compileAndApply(opts?: { force?: boolean }): Promise<{ compiled: CompiledVault; applied: boolean; reason: string | null }>;
+  /** Carpeta del vault (null si no hay). */
+  vaultDir: string | null;
+  timeZone: string;
+  /**
+   * Compila el vault y lo aplica. Si ya hay una compilación en marcha, espera a
+   * que termine y lanza otra (así siempre incluye los últimos cambios); las
+   * peticiones que llegan mientras tanto comparten esa segunda compilación.
+   */
+  compileAndApply(opts?: { force?: boolean }): Promise<CompileResult>;
   stop(): Promise<void>;
 }
 
@@ -69,18 +83,32 @@ export async function createApp(opts: AppOptions): Promise<App> {
   });
   runtime.hydrate(rows);
 
-  let compiling: Promise<{ compiled: CompiledVault; applied: boolean; reason: string | null }> | null = null;
-  const compileAndApply = async (o: { force?: boolean } = {}) => {
-    if (!opts.vaultDir) throw new Error('No hay vault configurado');
-    if (compiling) return compiling;
-    compiling = (async () => {
+  let running: Promise<CompileResult> | null = null;
+  let queued: Promise<CompileResult> | null = null;
+  const runCompile = (o: { force?: boolean }): Promise<CompileResult> => {
+    const p = (async () => {
       const compiled = await compileVault({ vaultDir: opts.vaultDir as string, timeZone: opts.timeZone, now: () => clock.now() });
       const { applied, reason } = runtime.applyVault(compiled, o);
       return { compiled, applied, reason };
     })().finally(() => {
-      compiling = null;
+      if (running === p) running = null;
     });
-    return compiling;
+    running = p;
+    return p;
+  };
+  const compileAndApply = (o: { force?: boolean } = {}): Promise<CompileResult> => {
+    if (!opts.vaultDir) return Promise.reject(new Error('No hay vault configurado'));
+    if (!running) return runCompile(o);
+    if (!queued) {
+      const current = running;
+      queued = current
+        .catch(() => undefined)
+        .then(() => {
+          queued = null;
+          return runCompile(o);
+        });
+    }
+    return queued;
   };
 
   let unwatch: (() => void) | null = null;
@@ -107,6 +135,8 @@ export async function createApp(opts: AppOptions): Promise<App> {
     runtime,
     sim,
     registry,
+    vaultDir: opts.vaultDir,
+    timeZone: opts.timeZone,
     compileAndApply,
     async stop() {
       unwatch?.();

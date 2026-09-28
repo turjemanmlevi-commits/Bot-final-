@@ -85,6 +85,8 @@ interface VenueDraft {
   warnings: string[];
   sectionAliasIndex: Record<string, string>;
   zoneAliasIndex: Record<string, string>;
+  /** Secciones sin aforo: se avisa una vez por recinto (el aforo solo lo usa el simulador). */
+  missingCapacity: number;
 }
 
 const toPosix = (p: string) => p.split(path.sep).join('/');
@@ -147,6 +149,19 @@ export async function readVaultNotes(vaultDir: string, issues: VaultIssue[]): Pr
 function noteType(note: VaultNote): string | null {
   const t = asString(note.data.type);
   return t ? t.toLowerCase() : null;
+}
+
+/** Solo enlaces http(s) completos: se muestran como enlace y nunca se visitan desde el servidor. */
+export function parseOfficialUrl(value: unknown): string | null {
+  const raw = asString(value);
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+    return u.toString();
+  } catch {
+    return null;
+  }
 }
 
 function clamp01(n: number): number {
@@ -235,6 +250,7 @@ class Compiler {
         warnings: [],
         sectionAliasIndex: {},
         zoneAliasIndex: {},
+        missingCapacity: 0,
       });
       for (const key of [id, name, note.basename, ...aliases]) this.venueLookup.set(normalizeLabel(key), id);
     }
@@ -312,7 +328,7 @@ class Compiler {
       const seatsPerRow = asNumber(note.data.seatsPerRow);
       let capacity = asNumber(note.data.capacity);
       if (capacity === null && rows !== null && seatsPerRow !== null) capacity = rows * seatsPerRow;
-      if (capacity === null) this.warn(note.file, 'Sección sin aforo (`capacity`)');
+      if (capacity === null) venue.missingCapacity += 1;
       let view = asNumber(note.data.view);
       if (view !== null && (view < 0 || view > 5)) {
         this.warn(note.file, '`view` va de 0 a 5; se ajusta al rango');
@@ -350,6 +366,13 @@ class Compiler {
     for (const venue of this.venues.values()) {
       if (venue.sections.length === 0) {
         this.warn(venue.note.file, `El recinto ${venue.name} no tiene secciones`);
+      }
+      if (venue.missingCapacity > 0) {
+        const n = venue.missingCapacity;
+        this.warn(
+          venue.note.file,
+          `${n} ${n === 1 ? 'sección' : 'secciones'} de ${venue.name} sin aforo (\`capacity\`): solo hace falta para simular el recinto, no para comprar en asistencia manual`,
+        );
       }
       venue.zones.sort((a, b) => a.id.localeCompare(b.id));
       venue.sections.sort((a, b) => a.id.localeCompare(b.id));
@@ -470,6 +493,18 @@ class Compiler {
         }
       }
       if (prohibited) continue;
+      const rawUrl = note.data.url;
+      const url = parseOfficialUrl(rawUrl);
+      if (asString(rawUrl) && !url) this.warn(note.file, '`url` debe ser un enlace completo que empiece por https://');
+      if (modeRaw === 'SIMULATED' && providerId !== 'sim') {
+        this.warn(note.file, 'Solo existe un proveedor simulado (id `sim`): este proveedor no tendrá adapter');
+      }
+      if (modeRaw === 'AUTHORIZED_API') {
+        this.warn(
+          note.file,
+          'AUTHORIZED_API necesita un adapter programado y un acuerdo por escrito con el proveedor; este proyecto no incluye ninguno, así que funcionará como asistencia manual',
+        );
+      }
       seen.add(providerId);
       for (const key of [providerId, name, note.basename]) this.providerLookup.set(normalizeLabel(key), providerId);
       out.push({
@@ -481,6 +516,7 @@ class Compiler {
         verifiedAt: this.date(note, 'verifiedAt'),
         notes: asString(note.data.notes) ?? '',
         sourceFile: note.file,
+        url,
       });
     }
     return out.sort((a, b) => a.providerId.localeCompare(b.providerId));
@@ -525,6 +561,9 @@ class Compiler {
         this.error(note.file, 'Evento sin `providerEventRef` (referencia del evento en el proveedor)');
         continue;
       }
+      const rawUrl = note.data.url;
+      const url = parseOfficialUrl(rawUrl);
+      if (asString(rawUrl) && !url) this.warn(note.file, '`url` debe ser un enlace completo que empiece por https://');
       const limits = this.limits(note);
       const closed = new Set<string>();
       for (const raw of note.data.closedSections === undefined ? [] : [note.data.closedSections].flat()) {
@@ -555,6 +594,7 @@ class Compiler {
         closedSectionIds: [...closed].sort(),
         sourceFile: note.file,
         tags: asStringList(note.data.tags),
+        url,
       });
     }
     return events.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.id.localeCompare(b.id));

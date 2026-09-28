@@ -29,6 +29,8 @@ export interface CreateTaskInput {
   deadlineMs?: number | null;
   /** false cuando ya existe otra alerta que explica el problema (reto, reconciliación). */
   alert?: boolean;
+  /** Enlace oficial para la persona; si no se indica, el del evento o el del proveedor. */
+  link?: string | null;
 }
 
 export class HumanTaskService {
@@ -50,6 +52,7 @@ export class HumanTaskService {
       createdAt: iso(now),
       respondedAt: null,
       response: null,
+      link: input.link === undefined ? this.officialLink(input.operationId, input.accountId) : input.link,
     };
     this.ctx.store.putHumanTask(task);
     this.ctx.journal.audit('human_task.created', { taskId: task.id, kind: task.kind, accountId: task.accountId, claimId: task.claimId }, { operationId: task.operationId });
@@ -67,6 +70,20 @@ export class HumanTaskService {
     });
     this.ctx.notifier?.notifyTask(task);
     return task;
+  }
+
+  /**
+   * Página oficial donde la persona hace la acción: la del evento de la
+   * operación si el vault la tiene; si no, la web del proveedor de la cuenta.
+   */
+  officialLink(operationId: Id | null, accountId: Id): string | null {
+    const { store, registry } = this.ctx;
+    const op = operationId ? store.operations.get(operationId) : undefined;
+    const event = op ? store.events.get(op.config.eventId) : undefined;
+    if (event?.url) return event.url;
+    const account = store.accounts.get(accountId);
+    const providerId = op?.config.providerId ?? account?.providerId;
+    return providerId ? (registry.authorization(providerId)?.url ?? null) : null;
   }
 
   openFor(accountId: Id, kind: HumanTaskKind, operationId?: Id | null): HumanTask | undefined {
@@ -90,7 +107,7 @@ export class HumanTaskService {
       title,
       instructions: challenge
         ? `Entra en ${provider} con la cuenta "${account.label}", resuelve el ${challenge.type} y pulsa "Sesión lista".`
-        : `Inicia sesión en ${provider} con la cuenta "${account.label}" en tu navegador y pulsa "Sesión lista".`,
+        : `Inicia sesión en ${provider} con la cuenta "${account.label}" en tu navegador (en la web oficial) y pulsa "Sesión lista".`,
     });
   }
 

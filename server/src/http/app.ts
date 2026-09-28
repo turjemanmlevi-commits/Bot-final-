@@ -12,17 +12,25 @@ import {
   CartMarkSchema,
   CommandRequestSchema,
   DemoSeedSchema,
+  EventNoteInputSchema,
   HumanTaskResponseInputSchema,
   KillSwitchInputSchema,
   OperationConfigSchema,
+  parseVenueLayout,
   SessionHumanSchema,
+  TelegramTestSchema,
+  VenueQuickInputSchema,
   type ApiErrorBody,
+  type EventNoteInput,
+  type EventNoteResult,
   type LabelResolutionResult,
   type OperationConfig,
   type StreamMessage,
+  type TelegramTestResult,
+  type VenueQuickResult,
 } from '@to/shared';
 import type { z } from 'zod';
-import type { App } from '../app';
+import type { App, CompileResult } from '../app';
 import { resolveLabel, venueIndex } from '../domain/venue';
 import { runGates } from '../gates/gates';
 import { AccountError } from '../runtime/accounts';
@@ -31,7 +39,8 @@ import { seedDemo } from '../runtime/demo';
 import { OperationError } from '../runtime/operations';
 import { TaskError } from '../runtime/tasks';
 import { log } from '../util/log';
-import { normalizeLabel } from '../util/normalize';
+import { normalizeLabel, slugify } from '../util/normalize';
+import { createEventNote, createVenueNotes, updateEventNote, VaultWriteError, type EventWriteContext } from '../vault/writer';
 
 export interface HttpOptions {
   dashboardDist: string | null;
@@ -104,6 +113,9 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     } else if (err instanceof OperationError || err instanceof AccountError || err instanceof TaskError || err instanceof CartError) {
       status = err.code === 'NOT_FOUND' ? 404 : 409;
       code = err.code;
+    } else if (err instanceof VaultWriteError) {
+      status = err.code === 'NOT_FOUND' ? 404 : err.code === 'CONFLICT' ? 409 : 400;
+      code = `VAULT_${err.code}`;
     } else {
       log.error('Error en la API', { path: c.req.path, error: err.message });
     }
@@ -175,6 +187,7 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
   http.get('/api/vault', (c) => c.json(runtime.store.vaultReport));
   http.post('/api/vault/compile', async (c) => {
     const force = c.req.query('force') === '1';
+    requireVault();
     const { compiled, applied, reason } = await app.compileAndApply({ force });
     return c.json({ report: compiled.report, applied, reason });
   });
@@ -205,6 +218,84 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     return c.json(result);
   });
   http.get('/api/events', (c) => c.json([...runtime.store.events.values()]));
+
+  // Alta y edición de eventos / recintos desde el dashboard (se escriben notas en el vault).
+  const requireVault = (): string => {
+    if (!app.vaultDir) throw new ApiError(409, 'NO_VAULT', 'No hay vault configurado (VAULT_DIR)');
+    return app.vaultDir;
+  };
+  const noteBase = (file: string) => path.posix.basename(file, '.md');
+  const eventCtx = (input: EventNoteInput, actor: string): EventWriteContext => {
+    const venue = runtime.store.vaultReport?.venues.find((v) => v.venueId === input.venueId);
+    if (!venue) throw new ApiError(400, 'BAD_REQUEST', `El recinto ${input.venueId} no está en el vault`);
+    const provider = runtime.store.providerAuthorizations.find((p) => p.providerId === input.providerId);
+    if (!provider) throw new ApiError(400, 'BAD_REQUEST', `El proveedor ${input.providerId} no está en el vault (30 Proveedores)`);
+    return { vaultDir: requireVault(), timeZone: app.timeZone, actor, venueNote: noteBase(venue.sourceFile), providerNote: noteBase(provider.sourceFile) };
+  };
+  const issuesFor = (result: CompileResult, match: (file: string) => boolean) =>
+    [...result.compiled.report.errors, ...result.compiled.report.warnings].filter((i) => match(i.file));
+  const eventResult = (file: string, created: boolean, result: CompileResult): EventNoteResult => ({
+    file,
+    created,
+    event: result.compiled.events.find((e) => e.sourceFile === file) ?? null,
+    issues: issuesFor(result, (f) => f === file),
+    report: result.compiled.report,
+  });
+
+  http.post('/api/vault/events', async (c) => {
+    const input = await body(c, EventNoteInputSchema);
+    const wctx = eventCtx(input, actorOf(c));
+    const base = `evt-${slugify(input.name)}`.slice(0, 90);
+    let id = base;
+    for (let n = 2; runtime.store.events.has(id); n++) id = `${base}-${n}`;
+    const file = await createEventNote(input, id, wctx);
+    ctx.journal.audit('vault.event_created', { file, eventId: id }, { actor: actorOf(c) });
+    return c.json(eventResult(file, true, await app.compileAndApply()), 201);
+  });
+
+  http.put('/api/vault/events/:id', async (c) => {
+    const input = await body(c, EventNoteInputSchema);
+    const event = runtime.store.events.get(c.req.param('id'));
+    if (!event) throw new ApiError(404, 'NOT_FOUND', 'El evento no existe (¿se ha borrado la nota?)');
+    const file = await updateEventNote(event.sourceFile, event.id, input, eventCtx(input, actorOf(c)));
+    ctx.journal.audit('vault.event_updated', { file, eventId: event.id }, { actor: actorOf(c) });
+    return c.json(eventResult(file, false, await app.compileAndApply()));
+  });
+
+  http.post('/api/vault/venues', async (c) => {
+    const input = await body(c, VenueQuickInputSchema);
+    const vaultDir = requireVault();
+    const layout = parseVenueLayout(input.layout);
+    if (layout.errors.length > 0) throw new ApiError(400, 'BAD_LAYOUT', layout.errors.join(' · '));
+    const venues = runtime.store.vaultReport?.venues ?? [];
+    if (venues.some((v) => normalizeLabel(v.name) === normalizeLabel(input.name))) {
+      throw new ApiError(409, 'VAULT_CONFLICT', `Ya existe un recinto llamado «${input.name}»`);
+    }
+    const base = slugify(input.name) || 'recinto';
+    let venueId = base;
+    for (let n = 2; venues.some((v) => v.venueId === venueId); n++) venueId = `${base}-${n}`;
+    const { folder, files } = await createVenueNotes(input, layout.zones, venueId, { vaultDir, timeZone: app.timeZone, actor: actorOf(c) });
+    ctx.journal.audit('vault.venue_created', { folder, venueId, files }, { actor: actorOf(c) });
+    const result = await app.compileAndApply();
+    const out: VenueQuickResult = {
+      folder,
+      files,
+      venueId: result.compiled.report.venues.some((v) => v.venueId === venueId) ? venueId : null,
+      issues: issuesFor(result, (f) => f.startsWith(`${folder}/`)),
+      report: result.compiled.report,
+    };
+    return c.json(out, 201);
+  });
+
+  // Telegram: mensaje de prueba al chat principal (o al indicado).
+  http.post('/api/telegram/test', async (c) => {
+    const b = await body(c, TelegramTestSchema);
+    const n = ctx.notifier;
+    const result: TelegramTestResult = n?.sendTest
+      ? await n.sendTest(b.chatId ?? null)
+      : { ok: false, message: 'Telegram está desactivado: pon TELEGRAM_BOT_TOKEN en el archivo .env y reinicia (ver la guía «Configurar Telegram»).' };
+    return c.json(result);
+  });
 
   // ---------------------------------------------------------------------------
   // Cuentas
