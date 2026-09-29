@@ -80,11 +80,23 @@ async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer
   }
   const r = schema.safeParse(json);
   if (!r.success) {
-    const message = r.error.issues.map((i) => `${i.path.join('.') || '(raíz)'}: ${i.message}`).join('; ');
+    const message = r.error.issues.map((i) => `${FIELD_LABEL[i.path.join('.')] ?? (i.path.join('.') || '(raíz)')}: ${i.message}`).join('; ');
     throw new ApiError(400, 'BAD_REQUEST', message, r.error.issues);
   }
   return r.data;
 }
+
+/** Nombres de campo legibles en los mensajes de error (los formularios los muestran tal cual). */
+const FIELD_LABEL: Record<string, string> = {
+  label: 'Nombre visible',
+  holderRef: 'Titular',
+  householdRef: 'Hogar',
+  paymentRef: 'Medio de pago',
+  telegramChatId: 'Chat de Telegram',
+  qty: 'Cantidad',
+  unitPrice: 'Precio por entrada',
+  minutes: 'Minutos',
+};
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',

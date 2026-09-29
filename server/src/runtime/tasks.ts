@@ -123,7 +123,9 @@ export class HumanTaskService {
   /** Crea (si no existe ya) la tarea de abrir sesión / resolver reto para una cuenta. */
   ensureSessionTask(account: Account, operationId: Id | null, title: string): HumanTask {
     const existing = this.openFor(account.id, 'OPEN_SESSION');
-    if (existing) return existing;
+    // Una tarea de sesión de otra operación llevaría otro plan: se sustituye.
+    if (existing && existing.operationId === operationId) return existing;
+    if (existing) this.finish(existing, 'CANCELLED', { result: 'FAILED', actor: 'system', note: 'Sustituida por la tarea de otra operación' });
     const provider = this.ctx.registry.descriptor(account.providerId)?.name ?? account.providerId;
     const challenge = account.session.challenge;
     const op = operationId ? this.ctx.store.operations.get(operationId) : undefined;
@@ -157,6 +159,7 @@ export class HumanTaskService {
     const next: HumanTask = { ...t, state, response, respondedAt: iso(now) };
     this.ctx.store.putHumanTask(next);
     this.ctx.alerts.resolveKey(`task:${t.id}`, response?.actor ?? 'system');
+    this.ctx.notifier?.taskClosed?.(next);
     if (t.operationId && response && response.actor !== 'system') {
       this.ctx.metrics.record(t.operationId, 'human_task', now - Date.parse(t.createdAt));
     }
@@ -167,6 +170,13 @@ export class HumanTaskService {
     const t = this.ctx.store.humanTasks.get(taskId);
     if (!t) throw new TaskError('La tarea no existe', 'NOT_FOUND');
     if (t.state !== 'OPEN' && t.state !== 'UNKNOWN') throw new TaskError('La tarea ya no está abierta', 'NOT_OPEN');
+    if (t.kind === 'ADD_TO_CART' && t.state === 'UNKNOWN') {
+      // Alguien ya dijo «no sé»: la respuesta vale para la verificación abierta.
+      const verify = [...this.ctx.store.humanTasks.values()].find((x) => x.kind === 'VERIFY_CART' && x.claimId === t.claimId && x.state === 'OPEN');
+      if (verify) return this.respond(verify.id, input, actor);
+      const claim = t.claimId ? this.ctx.store.claims.get(t.claimId) : undefined;
+      if (!claim || claim.state !== 'SENT') throw new TaskError('Esta tarea ya está resuelta o en verificación', 'NOT_OPEN');
+    }
     const allowed: Record<HumanTaskKind, HumanTaskResponse['result'][]> = {
       OPEN_SESSION: ['READY', 'FAILED'],
       ADD_TO_CART: ['IN_CART', 'FAILED', 'UNKNOWN'],
@@ -189,6 +199,8 @@ export class HumanTaskService {
     } else {
       this.ctx.claims.onVerifyResponse(done);
     }
+    // Siguiente paso al instante (p. ej. la siguiente zona tras «No pude»).
+    if (t.operationId) this.ctx.runners.nudge(t.operationId);
     return this.ctx.store.humanTasks.get(taskId) ?? done;
   }
 

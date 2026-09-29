@@ -31,7 +31,7 @@ export class SystemClock implements Clock {
     const t = setTimeout(() => {
       this.timers.delete(id);
       fn();
-    }, Math.max(0, ms));
+    }, Math.min(Math.max(0, ms), 2_147_483_647));
     this.timers.set(id, t);
     return id;
   }

@@ -48,7 +48,7 @@ export const env = {
   /** Solo para pruebas: servidor que imita la Bot API de Telegram. */
   telegramApiBase: str('TELEGRAM_API_BASE', 'https://api.telegram.org'),
   /** Minutos que tiene una persona para responder una tarea de compra manual. */
-  manualTaskMinutes: int('MANUAL_TASK_MINUTES', 10),
+  manualTaskMinutes: int('MANUAL_TASK_MINUTES', 30),
   simSeed: int('SIM_SEED', 1),
   dashboardDist: resolveFromRoot(str('DASHBOARD_DIST', 'dashboard/dist')),
   reportsDir: resolveFromRoot(str('REPORTS_DIR', 'reports')),

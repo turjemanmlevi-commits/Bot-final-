@@ -86,7 +86,7 @@ export class CartService {
     this.ctx.alerts.raise({
       kind: 'CART_CONFIRMED',
       severity: 'INFO',
-      title: `${label}: ${cart.qty} entradas en carrito`,
+      title: `${label}: ${cart.qty} entrada${cart.qty === 1 ? '' : 's'} en carrito`,
       message: `${cart.items.map((i) => `${i.qty}× ${i.sectionLabel}${i.row ? ` fila ${i.row}` : ''}`).join(' · ')} — ${formatMoney(cart.total, cart.currency)}`,
       actions: ['OPEN_CART'],
       operationId: cart.operationId,
@@ -114,14 +114,20 @@ export class CartService {
   mark(cartId: Id, state: 'PAID' | 'RELEASED', actor: string, note?: string): Cart {
     const cart = this.ctx.store.carts.get(cartId);
     if (!cart) throw new CartError('El carrito no existe', 'NOT_FOUND');
-    if (cart.state !== 'ACTIVE' && cart.state !== 'REVIEW_REQUIRED') throw new CartError('El carrito ya está cerrado', 'NOT_ACTIVE');
+    const paidAfterExpiry = cart.state === 'EXPIRED' && state === 'PAID';
+    if (cart.state !== 'ACTIVE' && cart.state !== 'REVIEW_REQUIRED' && !paidAfterExpiry) throw new CartError('El carrito ya está cerrado', 'NOT_ACTIVE');
     const next: Cart = { ...cart, state, updatedAt: iso(this.ctx.now()) };
     this.ctx.store.putCart(next);
+    if (paidAfterExpiry) this.ctx.claims.recommitPaidAfterExpiry(next);
     this.ctx.journal.audit(state === 'PAID' ? 'cart.paid_by_human' : 'cart.released', { cartId, qty: cart.qty, total: cart.total, note: note ?? null }, { operationId: cart.operationId, actor });
     this.ctx.alerts.resolveWhere((a) => a.cartId === cartId && a.kind !== 'CART_CONFIRMED', actor);
     if (state === 'RELEASED') this.ctx.claims.onCartReleased(next);
     this.checkAllSettled(cart.operationId);
     return next;
+  }
+
+  private clock(isoTime: string): string {
+    return new Intl.DateTimeFormat('es-ES', { timeZone: this.ctx.cfg.timeZone, hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(isoTime));
   }
 
   /** Una persona indica cuándo caduca el carrito en la web (p. ej. desde Telegram). */
@@ -132,6 +138,7 @@ export class CartService {
     const next: Cart = { ...cart, expiresAt, updatedAt: iso(this.ctx.now()) };
     for (const key of [...this.warned]) if (key.startsWith(`${cartId}:`)) this.warned.delete(key);
     this.ctx.alerts.resolveKey(`cart:${cartId}:expiring`, actor);
+    this.ctx.alerts.resolveKey(`cart:${cartId}:timeup`, actor);
     this.ctx.store.putCart(next);
     this.ctx.journal.audit('cart.expiry_set', { cartId, expiresAt }, { operationId: cart.operationId, actor });
     return next;
@@ -145,6 +152,27 @@ export class CartService {
       const left = Date.parse(cart.expiresAt) - now;
       const account = this.ctx.store.accounts.get(cart.accountId);
       const label = account?.label ?? cart.accountId;
+      if (left <= 0 && cart.confirmation === 'HUMAN') {
+        // La hora la indicó una persona (es una estimación): no se da por perdido
+        // ni se vuelve a repartir; se pregunta. «Ya lo he pagado» o «Liberar».
+        const key = `${cart.id}:timeup`;
+        if (!this.warned.has(key)) {
+          this.warned.add(key);
+          this.ctx.alerts.resolveKey(`cart:${cart.id}:expiring`);
+          this.ctx.alerts.raise({
+            kind: 'CART_EXPIRING',
+            severity: 'CRITICAL',
+            title: `${label}: se acabó el tiempo del carrito, ¿lo has pagado?`,
+            message: `${cart.qty} entrada${cart.qty === 1 ? '' : 's'} · ${formatMoney(cart.total, cart.currency)}. Si lo pagaste, pulsa «Ya lo he pagado». Si se perdió, pulsa «Liberar» y esas entradas se volverán a repartir.`,
+            actions: ['OPEN_CART'],
+            operationId: cart.operationId,
+            accountId: cart.accountId,
+            cartId: cart.id,
+            dedupeKey: `cart:${cart.id}:timeup`,
+          });
+        }
+        continue;
+      }
       if (left <= 0) {
         const next: Cart = { ...cart, state: 'EXPIRED', updatedAt: iso(now) };
         this.ctx.store.putCart(next);
@@ -172,8 +200,8 @@ export class CartService {
           this.ctx.alerts.raise({
             kind: 'CART_EXPIRING',
             severity: t <= 120 ? 'CRITICAL' : 'WARNING',
-            title: `${label}: el carrito caduca en ${formatDuration(left)}`,
-            message: `${cart.qty} entradas · ${formatMoney(cart.total, cart.currency)}. Ábrelo y paga antes de que caduque.`,
+            title: `${label}: el carrito caduca a las ${this.clock(cart.expiresAt)}`,
+            message: `${cart.qty} entrada${cart.qty === 1 ? '' : 's'} · ${formatMoney(cart.total, cart.currency)}. Quedaban ${formatDuration(left)} al avisar. Ábrelo y paga antes de que caduque.`,
             actions: ['OPEN_CART'],
             operationId: cart.operationId,
             accountId: cart.accountId,

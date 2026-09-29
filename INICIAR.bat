@@ -99,10 +99,14 @@ set "TO_URL=http://localhost:%TO_PORT%"
 rem Abre el navegador cuando el servidor responda (en una ventana oculta aparte).
 start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$u='%TO_URL%'; for($i=0;$i -lt 120;$i++){ $ok=$false; try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 ($u + '/api/health') | Out-Null; $ok=$true } catch { if ($_.Exception.Response) { $ok=$true } }; if($ok){ Start-Process $u; break }; Start-Sleep -Seconds 1 }"
 
+rem Sin "Edicion rapida": un clic en esta ventana no debe pausar el servidor.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\consola-sin-seleccion.ps1" >nul 2>nul
+
 echo.
 echo   Arrancando el servidor en %TO_URL%
 echo   El navegador se abrira solo en unos segundos.
 echo   NO cierres esta ventana mientras uses el sistema. Para pararlo, cierrala.
+echo   No hace falta hacer clic aqui: todo se maneja desde el navegador.
 echo.
 call npm start
 echo.

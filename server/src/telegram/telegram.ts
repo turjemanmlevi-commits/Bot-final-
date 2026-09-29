@@ -74,6 +74,8 @@ export class TelegramNotifier implements Notifier {
   private stopped = false;
   private poller: AbortController | null = null;
   private readonly seen = new Map<string, TelegramChatSeen>();
+  /** Mensajes con botones de cada tarea (para quitarlos en todos los chats al cerrarse). */
+  private readonly taskMessages = new Map<string, Array<{ chatId: string; messageId: number }>>();
   private readonly lastHint = new Map<string, number>();
   private readonly chatId: string | null;
   private readonly apiBase: string;
@@ -156,8 +158,8 @@ export class TelegramNotifier implements Notifier {
     }
   }
 
-  private async sendNow(chatId: string, text: string, keyboard?: Button[][]): Promise<void> {
-    await this.api('sendMessage', {
+  private async sendNow(chatId: string, text: string, keyboard?: Button[][]): Promise<{ message_id?: number } | undefined> {
+    return this.api<{ message_id?: number }>('sendMessage', {
       chat_id: chatId,
       text,
       parse_mode: 'HTML',
@@ -166,8 +168,10 @@ export class TelegramNotifier implements Notifier {
     });
   }
 
-  private send(chatId: string, text: string, keyboard?: Button[][]): void {
-    void this.sendNow(chatId, text, keyboard).catch((err: Error) => {
+  private send(chatId: string, text: string, keyboard?: Button[][], onSent?: (messageId: number) => void): void {
+    void this.sendNow(chatId, text, keyboard).then((r) => {
+      if (onSent && typeof r?.message_id === 'number') onSent(r.message_id);
+    }).catch((err: Error) => {
       this.detail = `Error enviando a ${chatId}: ${err.message}`;
       log.warn('Telegram: no se pudo enviar', { chatId, error: err.message });
     });
@@ -211,7 +215,16 @@ export class TelegramNotifier implements Notifier {
     if (alert.severity === 'INFO' && !ALWAYS_SEND.has(alert.kind)) return;
     if (alert.kind === 'HUMAN_TASK') return; // la tarea llega con sus propios botones
     const text = `${ICON[alert.severity]} <b>${esc(alert.title)}</b>\n${esc(alert.message)}`;
-    for (const chat of this.chatsFor(alert.accountId)) this.send(chat, text);
+    // Carrito a punto de caducar (o tiempo agotado): se responde con un toque.
+    const cart = alert.cartId ? this.runtime?.store.carts.get(alert.cartId) : undefined;
+    const keyboard: Button[][] | undefined =
+      alert.kind === 'CART_EXPIRING' && cart && (cart.state === 'ACTIVE' || cart.state === 'REVIEW_REQUIRED')
+        ? [
+            [{ text: '💳 Ya lo he pagado', callback_data: `p:${cart.id}` }],
+            [5, 10, 15].map((m) => ({ text: `⏱ Quedan ${m} min`, callback_data: `x:${cart.id}:${m}` })),
+          ]
+        : undefined;
+    for (const chat of this.chatsFor(alert.accountId)) this.send(chat, text, keyboard);
   }
 
   private clock(iso: string): string {
@@ -238,9 +251,11 @@ export class TelegramNotifier implements Notifier {
       ]);
     } else {
       // Un botón por cantidad: si solo entran algunas, el sistema sigue buscando las que faltan.
-      const max = Math.max(1, Math.min(6, task.target?.qty ?? 1));
+      const max = Math.max(1, Math.min(20, task.target?.qty ?? 1));
       const counts = Array.from({ length: max }, (_, i) => max - i);
-      keyboard.push(counts.map((n) => ({ text: `✅ ${n} en carrito`, callback_data: `t:${task.id}:IN_CART:${n}` })));
+      for (let i = 0; i < counts.length; i += 5) {
+        keyboard.push(counts.slice(i, i + 5).map((n) => ({ text: `✅ ${n} en carrito`, callback_data: `t:${task.id}:IN_CART:${n}` })));
+      }
       keyboard.push([
         { text: '❌ No pude', callback_data: `t:${task.id}:FAILED` },
         { text: '❓ No sé', callback_data: `t:${task.id}:UNKNOWN` },
@@ -262,7 +277,27 @@ export class TelegramNotifier implements Notifier {
 
   notifyTask(task: HumanTask): void {
     const { text, keyboard } = this.taskMessage(task);
-    for (const chat of this.chatsFor(task.accountId)) this.send(chat, text, keyboard);
+    for (const chat of this.chatsFor(task.accountId)) this.send(chat, text, keyboard, (messageId) => this.trackTaskMessage(task.id, chat, messageId));
+  }
+
+  private trackTaskMessage(taskId: string, chatId: string, messageId: number): void {
+    const list = this.taskMessages.get(taskId) ?? [];
+    list.push({ chatId, messageId });
+    this.taskMessages.set(taskId, list);
+    if (this.taskMessages.size > 500) {
+      const oldest = this.taskMessages.keys().next().value;
+      if (oldest !== undefined) this.taskMessages.delete(oldest);
+    }
+  }
+
+  /** La tarea se cerró (dashboard, Telegram o sistema): fuera los botones en todos los chats. */
+  taskClosed(task: HumanTask): void {
+    const list = this.taskMessages.get(task.id);
+    if (!list) return;
+    this.taskMessages.delete(task.id);
+    for (const m of list) {
+      void this.api('editMessageReplyMarkup', { chat_id: m.chatId, message_id: m.messageId, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -348,9 +383,31 @@ export class TelegramNotifier implements Notifier {
       }
       const [kind, ref, result, extra] = (q.data ?? '').split(':');
       const actor = `telegram:${q.from.username ?? q.from.id}`;
+      if (kind === 'p' && ref) {
+        // «Ya lo he pagado» (en la web oficial).
+        let text = 'Pagado ✅';
+        try {
+          const cart = rt.store.carts.get(ref);
+          if (!cart) throw new Error('El carrito ya no existe');
+          const account = rt.store.accounts.get(cart.accountId);
+          if (chat !== this.chatId && account?.telegramChatId !== chat) throw new Error('Este carrito es de otra cuenta');
+          rt.ctx.carts.mark(cart.id, 'PAID', actor, 'Pagado (confirmado por Telegram)');
+          text = `Pagado ✅ (${cart.qty} entrada${cart.qty === 1 ? '' : 's'})`;
+        } catch (err) {
+          text = (err as Error).message;
+        }
+        await this.api('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => undefined);
+        if (q.message) {
+          await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(
+            () => undefined,
+          );
+        }
+        return;
+      }
       if (kind === 'x' && ref && result) {
         // Minutos que le quedan al carrito (pregunta tras «en carrito»).
         let text = 'Anotado ✅';
+        let keep: Button[][] = [];
         try {
           const cart = rt.store.carts.get(ref);
           if (!cart) throw new Error('El carrito ya no existe');
@@ -360,12 +417,14 @@ export class TelegramNotifier implements Notifier {
           if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) throw new Error('Minutos no válidos');
           rt.ctx.carts.setExpiry(cart.id, new Date(rt.ctx.now() + minutes * 60_000).toISOString(), actor);
           text = `Te avisaremos antes de que caduque (${minutes} min).`;
+          keep = [[{ text: '💳 Ya lo he pagado', callback_data: `p:${cart.id}` }]];
         } catch (err) {
           text = (err as Error).message;
         }
         await this.api('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => undefined);
         if (q.message) {
-          await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(
+          // Queda solo «Ya lo he pagado».
+          await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: keep } }).catch(
             () => undefined,
           );
         }
@@ -397,8 +456,9 @@ export class TelegramNotifier implements Notifier {
           text = `Anotadas ${n} en carrito ✅`;
           const cartId = done.claimId ? rt.store.claims.get(done.claimId)?.cartId : null;
           if (cartId) {
-            this.send(chat, '⏱ ¿Cuántos minutos le quedan al carrito en la web? Te avisaremos antes de que caduque.', [
+            this.send(chat, '⏱ ¿Cuántos minutos le quedan al carrito en la web? Te avisaremos antes de que caduque. Cuando lo pagues, pulsa «Ya lo he pagado».', [
               [5, 8, 10, 15, 20].map((m) => ({ text: `${m} min`, callback_data: `x:${cartId}:${m}` })),
+              [{ text: '💳 Ya lo he pagado', callback_data: `p:${cartId}` }],
             ]);
           }
         } else if (result === 'READY' || result === 'FAILED' || result === 'UNKNOWN') {

@@ -24,6 +24,7 @@ export interface Runner {
   readonly kind: 'AUTOMATED' | 'MANUAL';
   start(): void;
   stop(): void;
+  tick(): void;
 }
 
 interface AccountRunState {
@@ -415,8 +416,13 @@ export class ManualRunner implements Runner {
       if (ctx.tasks.openFor(accountId, 'ADD_TO_CART', r.id) || ctx.tasks.openFor(accountId, 'VERIFY_CART', r.id)) continue;
       const lastId = this.lastTask.get(accountId);
       if (lastId) {
+        // Se pasa a la siguiente zona cuando la reserva de la última tarea acabó
+        // rechazada: «No pude» en la tarea o «no está» en su verificación.
         const last = ctx.store.humanTasks.get(lastId);
-        if (last && last.state === 'FAILED') this.targetIdx.set(accountId, (this.targetIdx.get(accountId) ?? 0) + 1);
+        const claim = last?.claimId ? ctx.store.claims.get(last.claimId) : undefined;
+        if ((claim && claim.state === 'REJECTED') || (!claim && last?.state === 'FAILED')) {
+          this.targetIdx.set(accountId, (this.targetIdx.get(accountId) ?? 0) + 1);
+        }
         this.lastTask.delete(accountId);
       }
       const idx = this.targetIdx.get(accountId) ?? 0;
@@ -424,7 +430,11 @@ export class ManualRunner implements Runner {
       if (!target) continue;
       const want = wantFor(alloc, accountId);
       const byBudget = Math.floor(alloc.budget.remaining / Math.max(1, alloc.maxUnitPrice));
-      const qty = Math.min(want, byBudget);
+      let qty = Math.min(want, byBudget);
+      // Reparto en paralelo: que lo que quede sin asignar sea 0 o al menos un
+      // grupo mínimo, para que otra cuenta lista pueda ir a por ello a la vez.
+      const rest = alloc.remainingQty - qty;
+      if (rest > 0 && rest < minGroup && qty - (minGroup - rest) >= minGroup) qty -= minGroup - rest;
       if (qty < minGroup) continue;
       const task = ctx.claims.createManualClaim(r, accountId, target, qty);
       if (task) this.lastTask.set(accountId, task.id);
@@ -460,6 +470,11 @@ export class RunnerManager {
 
   stopAll(): void {
     for (const id of [...this.runners.keys()]) this.stop(id);
+  }
+
+  /** Reacciona ya (sin esperar al siguiente tick) tras una respuesta humana. */
+  nudge(operationId: Id): void {
+    this.runners.get(operationId)?.tick();
   }
 
   kind(operationId: Id): Runner['kind'] | null {

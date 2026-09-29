@@ -185,7 +185,8 @@ export class AccountService {
     this.ctx.sim?.humanCompletedChallenge(accountId);
     this.ctx.journal.audit('session.human_ready', { accountId, note: note ?? null }, { operationId: this.activeOperation(accountId), actor });
     const manual = !this.ctx.registry.automated(a.providerId, 'queue.status');
-    return this.setSession(accountId, {
+    const opId = this.activeOperation(accountId);
+    const next = this.setSession(accountId, {
       state: 'READY',
       challenge: null,
       detail: note ?? 'Confirmada por una persona',
@@ -193,6 +194,8 @@ export class AccountService {
       // En asistencia manual la cola la gestiona la persona: se considera dentro.
       ...(manual ? { queue: { state: 'PASSED', position: null, etaMs: null, updatedAt: iso(this.ctx.now()) } } : {}),
     });
+    if (opId) this.ctx.runners.nudge(opId);
+    return next;
   }
 
   async pollSession(accountId: Id): Promise<void> {
@@ -251,6 +254,11 @@ export class AccountService {
       const a = this.get(id);
       this.ctx.store.putAccount({ ...a, leasedBy: operationId, updatedAt: iso(this.ctx.now()) });
       this.resetQueue(id);
+      // En asistencia manual «Sesión lista» lo dice una persona: cada compra
+      // exige confirmarlo de nuevo (una confirmación de un ensayo no vale).
+      if (!this.ctx.registry.automated(a.providerId, 'session.open') && a.session.state === 'READY') {
+        this.setSession(id, { state: 'LOGGED_OUT', challenge: null, detail: 'Confirma «Sesión lista» para esta compra' });
+      }
     }
   }
 

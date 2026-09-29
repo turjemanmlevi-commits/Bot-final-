@@ -93,7 +93,14 @@ const toPosix = (p: string) => p.split(path.sep).join('/');
 
 async function walk(root: string, rel = ''): Promise<string[]> {
   const out: string[] = [];
-  const entries = await readdir(path.join(root, rel), { withFileTypes: true });
+  let entries;
+  try {
+    entries = await readdir(path.join(root, rel), { withFileTypes: true });
+  } catch (err) {
+    // Carpeta borrada o renombrada mientras se recorría (Obsidian, OneDrive): se ignora.
+    if (rel !== '' && ['ENOENT', 'ENOTDIR', 'EPERM', 'EACCES', 'EBUSY'].includes((err as NodeJS.ErrnoException).code ?? '')) return out;
+    throw err;
+  }
   entries.sort((a, b) => a.name.localeCompare(b.name));
   for (const e of entries) {
     if (e.name.startsWith('.')) continue;

@@ -371,7 +371,7 @@ export class ClaimService {
       kind: 'RECONCILIATION_NEEDS_HUMAN',
       severity: 'CRITICAL',
       title: `${this.label(claim.accountId)}: comprueba el carrito a mano`,
-      message: `${why} ¿Hay ${claim.qty} entradas de ${claim.sectionLabel} (${money}/u) en el carrito?`,
+      message: `${why} ¿Hay ${claim.qty} entrada${claim.qty === 1 ? '' : 's'} de ${claim.sectionLabel} (${money}/u) en el carrito?`,
       actions: ['OPEN_CART'],
       operationId: claim.operationId,
       accountId: claim.accountId,
@@ -383,7 +383,7 @@ export class ClaimService {
       kind: 'VERIFY_CART',
       alert: false,
       claimId: claim.id,
-      title: `¿Están las ${claim.qty} entradas de ${claim.sectionLabel} en el carrito?`,
+      title: claim.qty === 1 ? `¿Está la entrada de ${claim.sectionLabel} en el carrito?` : `¿Están las ${claim.qty} entradas de ${claim.sectionLabel} en el carrito?`,
       instructions: `Abre el carrito de la cuenta "${this.label(claim.accountId)}" en el proveedor y responde qué hay. No pagues todavía si no estás seguro.`,
       target: { sectionLabel: claim.sectionLabel, row: claim.row, seats: [], qty: claim.qty, maxUnitPrice: claim.unitPrice, currency: op?.config.currency ?? 'EUR' },
     });
@@ -422,9 +422,9 @@ export class ClaimService {
       accountId,
       kind: 'ADD_TO_CART',
       claimId: claim.id,
-      title: `Añade ${qty} entradas · ${target.label}`,
+      title: `Añade ${qty} entrada${qty === 1 ? '' : 's'} · ${target.label}`,
       instructions:
-        `Con la cuenta "${this.label(accountId)}", en la web oficial, añade ${qty} entradas de ${target.label} al carrito` +
+        `Con la cuenta "${this.label(accountId)}", en la web oficial, añade ${qty} entrada${qty === 1 ? '' : 's'} de ${target.label} al carrito` +
         `${extras.length ? ` (${extras.join(', ')})` : ''}. Máximo ${money} por entrada con gastos incluidos. ` +
         'En cuanto estén en el carrito, responde aquí cuántas son, a qué precio y cuántos minutos le quedan al carrito; ' +
         'después paga en la web oficial y márcalo como pagado en Carritos. Si no hay entradas en esa zona por ese precio, pulsa «No pude» y te daremos la siguiente zona.',
@@ -488,10 +488,21 @@ export class ClaimService {
   // Carritos que se pierden y recuperación
   // -------------------------------------------------------------------------
 
+  /** El carrito se ha perdido: devuelve su cantidad para volver a repartirla. */
   private uncommitIfActive(cart: Cart): void {
     const op = this.ctx.store.operations.get(cart.operationId);
-    if (!op || !['RUNNING', 'PAUSED', 'RECOVERING'].includes(op.state)) return;
+    if (!op || !['RUNNING', 'PAUSED', 'RECOVERING', 'CART_SECURED'].includes(op.state)) return;
     this.applyAllocation(cart.operationId, { op: 'UNCOMMIT', ref: cart.id, accountId: cart.accountId, qty: cart.qty, amount: cart.total });
+    // Si ya estaba «asegurada», vuelve a la carga mientras dure la ventana.
+    if (op.state === 'CART_SECURED') this.ctx.ops.reopenAfterLoss(op.id, cart);
+  }
+
+  /** Se pagó un carrito que ya había caducado (en el último segundo): vuelve a contar. */
+  recommitPaidAfterExpiry(cart: Cart): void {
+    const op = this.ctx.store.operations.get(cart.operationId);
+    if (!op || !['RUNNING', 'PAUSED', 'RECOVERING', 'CART_SECURED'].includes(op.state)) return;
+    this.applyAllocation(cart.operationId, { op: 'COMMIT_EXTERNAL', ref: cart.id, accountId: cart.accountId, qty: cart.qty, unitPrice: Math.round(cart.total / Math.max(1, cart.qty)) });
+    this.ctx.ops.onProgress(cart.operationId);
   }
 
   onCartReleased(cart: Cart): void {

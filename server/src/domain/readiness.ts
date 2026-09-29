@@ -82,8 +82,12 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
   }
 
   // Kill switches
+  const ksText = (list: KillSwitch[]) => list.map((k) => `${k.scope}${k.targetId ? `:${k.targetId}` : ''}${k.reason ? ` — ${k.reason}` : ''}`).join(' · ');
+  const hardKill = input.killSwitchesEngaged.filter((k) => k.scope !== 'ACCOUNT');
   if (input.killSwitchesEngaged.length === 0) add('kill', 'Kill switches', 'PASS', 'Ninguno activo.');
-  else add('kill', 'Kill switches', 'FAIL', input.killSwitchesEngaged.map((k) => `${k.scope}${k.targetId ? `:${k.targetId}` : ''}${k.reason ? ` — ${k.reason}` : ''}`).join(' · '));
+  // Parar UNA cuenta no debe tumbar la operación del resto: solo avisa.
+  else if (hardKill.length === 0) add('kill', 'Kill switches', 'WARN', `Cuentas paradas (no participarán): ${ksText(input.killSwitchesEngaged)}`);
+  else add('kill', 'Kill switches', 'FAIL', ksText(hardKill));
 
   // Journal
   if (!input.journal.healthy) add('journal', 'Journal', 'FAIL', 'El journal no está persistiendo: sin auditoría no se automatiza.');

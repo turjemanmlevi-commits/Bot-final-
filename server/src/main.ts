@@ -26,6 +26,11 @@ function makeDriver(): JournalDriver {
   }
 }
 
+// Un error inesperado se registra, pero no apaga el servidor en mitad de una compra.
+process.on('unhandledRejection', (reason) => {
+  log.error('Error no controlado (el servidor sigue en marcha)', { error: reason instanceof Error ? reason.message : String(reason) });
+});
+
 async function main(): Promise<void> {
   const notifier = env.telegramToken
     ? new TelegramNotifier({ token: env.telegramToken, chatId: env.telegramChatId, apiBase: env.telegramApiBase, timeZone: env.timeZone })

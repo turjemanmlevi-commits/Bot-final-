@@ -316,6 +316,20 @@ export class OperationService {
     }
   }
 
+  /**
+   * Un carrito de una operación ya «asegurada» se ha perdido (liberado o
+   * caducado): si la ventana sigue abierta vuelve a EN MARCHA y el runner
+   * reparte de nuevo lo que falta.
+   */
+  reopenAfterLoss(id: Id, cart: { accountId: Id; qty: number }): void {
+    const r = this.ctx.store.operations.get(id);
+    if (!r || r.state !== 'CART_SECURED') return;
+    this.ctx.alerts.resolveKey(`op:${id}:secured`);
+    if (this.ctx.now() >= this.windowEnd(r)) return;
+    const label = this.ctx.store.accounts.get(cart.accountId)?.label ?? cart.accountId;
+    this.transition(r, 'RUNNING', { actor: 'system', reason: `Carrito perdido (${label}, ${cart.qty}): se vuelve a repartir` });
+  }
+
   // -------------------------------------------------------------------------
   // Validación, snapshot y readiness
   // -------------------------------------------------------------------------
@@ -508,6 +522,8 @@ export class OperationService {
       }
 
       case 'disarm': {
+        // Las tareas de inicio de sesión llevaban el plan de esta versión: fuera.
+        this.ctx.tasks.cancelOpenFor(id, 'Operación desarmada');
         this.ctx.store.allocations.delete(id);
         this.ctx.journal.remove('allocation', id);
         this.ctx.hub.remove('allocation', id);
@@ -610,7 +626,9 @@ export class OperationService {
   private wakeAt(id: Id, atMs: number): void {
     const key = `${id}@${atMs}`;
     if (this.wakeTimers.has(key)) return;
-    const delay = Math.max(0, atMs - this.ctx.now());
+    // Como mucho una hora: setTimeout no admite esperas de más de ~24,8 días y el
+    // scheduler vuelve a programar el despertador al disparar.
+    const delay = Math.min(Math.max(0, atMs - this.ctx.now()), 3_600_000);
     const handle = this.ctx.clock.setTimeout(() => {
       this.wakeTimers.delete(key);
       this.scheduleTick();

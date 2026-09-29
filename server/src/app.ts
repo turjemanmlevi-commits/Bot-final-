@@ -119,12 +119,15 @@ export async function createApp(opts: AppOptions): Promise<App> {
     for (const e of r.errors) log.warn(`Vault: ${e.file}: ${e.message}`);
     if (opts.watchVault) {
       unwatch = watchVault(opts.vaultDir, () => {
-        void compileAndApply().then(({ compiled, applied }) => {
-          log.info(applied ? 'Vault recompilado' : 'Vault con errores: se mantiene la versión anterior', {
-            errors: compiled.report.errors.length,
-            warnings: compiled.report.warnings.length,
-          });
-        });
+        void compileAndApply()
+          .then(({ compiled, applied }) => {
+            log.info(applied ? 'Vault recompilado' : 'Vault con errores: se mantiene la versión anterior', {
+              errors: compiled.report.errors.length,
+              warnings: compiled.report.warnings.length,
+            });
+          })
+          // Una carpeta renombrada a medias no puede tumbar el servidor: se reintenta en el siguiente cambio.
+          .catch((err: Error) => log.warn('No se pudo recompilar el vault', { error: err.message }));
       });
     }
   }

@@ -26,6 +26,8 @@ export interface Notifier {
   status?(): import('@to/shared').TelegramStatus;
   /** Envía un mensaje de prueba y espera la respuesta de Telegram. */
   sendTest?(chatId?: string | null): Promise<{ ok: boolean; message: string }>;
+  /** Una tarea se ha cerrado (por cualquier vía): quitar sus botones donde se enviaron. */
+  taskClosed?(task: import('@to/shared').HumanTask): void;
   /** Aviso a todo el grupo (chat principal + chats de esas cuentas), con enlace opcional. */
   announce?(text: string, accountIds: import('@to/shared').Id[], link?: string | null): void;
 }
