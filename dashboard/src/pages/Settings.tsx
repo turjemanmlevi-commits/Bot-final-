@@ -19,7 +19,7 @@ const MODE_PILL: Record<ProviderMode, { label: string; tone: Tone; icon: IconNam
 
 const JOURNAL_DRIVER: Record<string, string> = {
   postgres: 'PostgreSQL',
-  pglite: 'PGlite (carpeta data/)',
+  pglite: 'PGlite (en este ordenador)',
   memory: 'En memoria',
 };
 
@@ -636,7 +636,8 @@ function SystemCard() {
           <Callout icon="info">Todo se guarda en la base de datos PostgreSQL configurada en el <code>.env</code> (cuentas, operaciones, carritos y auditoría).</Callout>
         ) : (
           <Callout icon="info">
-            Todo se guarda en la carpeta <code>data/</code> del proyecto (cuentas, operaciones, carritos y auditoría). No la borres entre la preparación y la compra.
+            Todo se guarda en este ordenador (cuentas, operaciones, carritos y auditoría). La carpeta exacta sale al arrancar en la ventana negra, en la línea «Journal»: no la
+            borres entre la preparación y la compra.
           </Callout>
         )}
       </div>

@@ -56,6 +56,25 @@ if not exist ".env" (
   )
 )
 
+set "TO_PORT=8787"
+if exist ".env" (
+  for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
+    if /i "%%a"=="PORT" if not "%%b"=="" set "TO_PORT=%%b"
+  )
+)
+set "TO_URL=http://localhost:%TO_PORT%"
+
+rem Si la sala de control ya esta abierta en otra ventana, no se abre otra: se abre el navegador.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 'http://127.0.0.1:%TO_PORT%/api/health'; if ($r.Content -match 'journal') { exit 3 } } catch { if ($_.Exception.Response) { exit 3 } }; exit 0" >nul 2>nul
+if errorlevel 3 (
+  echo   [OK] La sala de control ya estaba abierta en otra ventana: se abre el navegador.
+  echo        Para reiniciarla, cierra esa otra ventana negra y vuelve a abrir Sala de control.
+  start "" "%TO_URL%"
+  echo.
+  pause
+  exit /b 0
+)
+
 echo.
 echo   Instalando o comprobando dependencias ^(la primera vez tarda unos minutos^)...
 call npm install --no-audit --no-fund --loglevel=error
@@ -88,13 +107,6 @@ if errorlevel 1 (
 )
 echo   [OK] Dashboard compilado
 
-set "TO_PORT=8787"
-if exist ".env" (
-  for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
-    if /i "%%a"=="PORT" if not "%%b"=="" set "TO_PORT=%%b"
-  )
-)
-set "TO_URL=http://localhost:%TO_PORT%"
 
 rem Abre el navegador cuando el servidor responda (en una ventana oculta aparte).
 start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$u='%TO_URL%'; for($i=0;$i -lt 120;$i++){ $ok=$false; try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 ($u + '/api/health') | Out-Null; $ok=$true } catch { if ($_.Exception.Response) { $ok=$true } }; if($ok){ Start-Process $u; break }; Start-Sleep -Seconds 1 }"

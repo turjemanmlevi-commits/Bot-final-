@@ -10,7 +10,8 @@
 #     conserva .env (tu configuracion) y data\ (cuentas, operaciones...).
 #  3) Crea el acceso directo "Sala de control" en el Escritorio.
 #  4) Opcional: instala Obsidian.
-#  5) Arranca el sistema (INICIAR.bat) y abre http://localhost:8787
+#  5) Cierra la sala de control si estaba abierta y la arranca en esta misma
+#     ventana (INICIAR.bat); se abre http://localhost:8787
 # ==========================================================================
 $ErrorActionPreference = 'Stop'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
@@ -47,6 +48,17 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   throw 'Node.js no aparece todavia. Cierra esta ventana, abre otra de PowerShell y vuelve a ejecutar el comando.'
 }
 Ok ("Node.js " + (& node -v))
+
+# Si la sala de control esta abierta, se cierra para poder actualizarla (los datos se conservan).
+try {
+  $health = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri 'http://127.0.0.1:8787/api/health'
+  if ($health.Content -match '"journal"') {
+    $owners = @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique)
+    foreach ($p in $owners) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
+    Ok 'Sala de control anterior cerrada para actualizarla'
+  }
+} catch { }
 
 # 2) Descargar y copiar el proyecto -----------------------------------------------
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ('to-' + [Guid]::NewGuid().ToString('N'))
@@ -96,7 +108,9 @@ if (-not $HasObsidian -and (Get-Command winget -ErrorAction SilentlyContinue)) {
 
 # 5) Arrancar -------------------------------------------------------------------------
 Write-Host ''
-Ok 'Listo. Arrancando el sistema (la primera vez tarda unos minutos)...'
-Say 'Se abrira http://localhost:8787 en el navegador. No cierres la ventana negra.'
+Ok 'Listo. Arrancando el sistema en ESTA ventana (la primera vez tarda unos minutos)...'
+Say 'Se abrira http://localhost:8787 en el navegador. NO cierres esta ventana: es el servidor.'
+Say 'Las proximas veces: doble clic en "Sala de control" del Escritorio.'
 Say 'Para abrir el vault en Obsidian: "Abrir carpeta como vault" -> bot final\vault'
-Start-Process -FilePath (Join-Path $Dest 'INICIAR.bat') -WorkingDirectory $Dest
+Write-Host ''
+& (Join-Path $Dest 'INICIAR.bat')

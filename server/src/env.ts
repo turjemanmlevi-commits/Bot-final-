@@ -36,13 +36,26 @@ function int(name: string, fallback: number): number {
 
 const resolveFromRoot = (p: string) => (path.isAbsolute(p) ? p : path.join(REPO_ROOT, p));
 
+/**
+ * Carpeta de datos (base de datos PGlite). Si el proyecto está dentro de OneDrive
+ * en Windows, va a %LOCALAPPDATA%: la sincronización de OneDrive bloquea los
+ * archivos de la base de datos y puede impedir que arranque.
+ */
+function dataDir(): string {
+  const configured = process.env.DATA_DIR?.trim();
+  if (configured && configured !== 'data') return resolveFromRoot(configured);
+  const local = process.env.LOCALAPPDATA?.trim();
+  if (process.platform === 'win32' && local && /onedrive/i.test(REPO_ROOT)) return path.join(local, 'TicketOrchestrator', 'data');
+  return resolveFromRoot('data');
+}
+
 const port = int('PORT', 8787);
 
 export const env = {
   port,
   host: str('HOST', '127.0.0.1'),
   vaultDir: resolveFromRoot(str('VAULT_DIR', 'vault')),
-  dataDir: resolveFromRoot(str('DATA_DIR', 'data')),
+  dataDir: dataDir(),
   journalDriver: str('JOURNAL_DRIVER', 'pglite') as 'pglite' | 'memory' | 'postgres',
   databaseUrl: optional('DATABASE_URL'),
   timeZone: str('VAULT_TZ', 'Europe/Madrid'),
