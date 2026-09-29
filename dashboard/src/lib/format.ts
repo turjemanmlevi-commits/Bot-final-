@@ -42,7 +42,48 @@ export function euros(minor: number): string {
   return (minor / 100).toFixed(2);
 }
 
+/** Importe en unidades menores como texto para un campo en castellano: 12000 → "120,00". */
+export function eurosEs(minor: number): string {
+  return (minor / 100).toFixed(2).replace('.', ',');
+}
+
+/**
+ * Lee un importe escrito a mano y lo devuelve en céntimos, o null si no es un
+ * número claro. Acepta coma o punto decimal ('119,50', '119.50'), separador de
+ * miles ('1.234,50', '1,234.50'), el símbolo del euro y espacios ('€ 95').
+ * El último separador seguido de 1 o 2 cifras es el decimal; con 3 cifras detrás
+ * es de miles ('1.234' = 1234). Vacío, negativos o texto → null.
+ */
 export function parseEuros(value: string): number | null {
-  const n = Number(value.replace(',', '.'));
-  return Number.isFinite(n) ? Math.round(n * 100) : null;
+  let s = value
+    .replace(/€|eur(?:os?)?/gi, '')
+    .replace(/[\s\u00a0\u202f']/g, '');
+  if (s.endsWith(',') || s.endsWith('.')) s = s.slice(0, -1);
+  if (!/^[\d.,]+$/.test(s) || !/\d/.test(s)) return null;
+  const dec = /[.,](\d{1,2})$/.exec(s);
+  let int = dec ? s.slice(0, dec.index) : s;
+  const decimals = dec?.[1] ?? '';
+  if (int === '') int = '0';
+  if (!/^\d+$/.test(int)) {
+    // Parte entera con separador de miles: grupos de 3 cifras y un único tipo de separador,
+    // distinto del decimal ('1.234.50' o '1,234,56' son ambiguos).
+    if (!/^\d{1,3}(?:[.,]\d{3})+$/.test(int)) return null;
+    const seps = new Set(int.replace(/\d/g, ''));
+    if (seps.size !== 1) return null;
+    if (dec && seps.has(s.charAt(dec.index))) return null;
+    int = int.replace(/[.,]/g, '');
+  }
+  const cents = Number(int) * 100 + Number(decimals.padEnd(2, '0') || '0');
+  return Number.isSafeInteger(cents) ? cents : null;
+}
+
+/** Cuenta atrás en segundos enteros: "3 min 12 s", "45 s", "1 h 05 min". */
+export function fmtCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = total % 60;
+  if (h > 0) return `${h} h ${String(m).padStart(2, '0')} min`;
+  if (m > 0) return `${m} min ${String(sec).padStart(2, '0')} s`;
+  return `${sec} s`;
 }

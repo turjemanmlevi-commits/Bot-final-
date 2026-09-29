@@ -113,7 +113,11 @@ export const Api = {
   ackAlert: (id: string) => post<Alert>(`/api/alerts/${id}/ack`),
   resolveAlert: (id: string) => post<Alert>(`/api/alerts/${id}/resolve`),
   respondTask: (id: string, input: HumanTaskResponseInput) => post<HumanTask>(`/api/human-tasks/${id}/respond`, input),
+  carts: () => api<Cart[]>('/api/carts'),
+  /** Marca el carrito como pagado (también si ya había caducado) o liberado. */
   markCart: (id: string, state: 'PAID' | 'RELEASED', note?: string) => post<Cart>(`/api/carts/${id}/mark`, { state, ...(note ? { note } : {}) }),
+  /** Minutos que le quedan al carrito según la web oficial (1..60): caduca en ahora + minutos. */
+  setCartExpiry: (id: string, minutes: number) => post<Cart>(`/api/carts/${id}/expiry`, { minutes }),
   setKillSwitch: (input: KillSwitchInput) => post<KillSwitch>('/api/kill-switches', input),
   resetCircuit: (key: string) => post<CircuitState>(`/api/circuits/${encodeURIComponent(key)}/reset`),
   audit: (params: { operationId?: string; type?: string; limit?: number; before?: number }) => {

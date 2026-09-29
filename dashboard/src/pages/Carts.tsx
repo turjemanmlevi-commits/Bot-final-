@@ -1,19 +1,94 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import type { Cart } from '@to/shared';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { Callout, Card, CartPill, Empty, Pill } from '../components/ui';
 import { Api } from '../lib/api';
-import { formatDuration, formatMoney, fmtDateTime } from '../lib/format';
+import { fmtCountdown, fmtDateTime, formatMoney } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
-import { useLive } from '../lib/store';
+import { useLive, type LiveState } from '../lib/store';
 
 const LEVEL: Record<Cart['confirmation'], string> = {
   ACK: 'Confirmado por el proveedor',
   READBACK: 'Verificado leyendo el carrito',
   HUMAN: 'Confirmado por una persona',
 };
+
+/** Pendiente de pagar o de revisar. */
+export const isOpenCart = (c: Cart): boolean => c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED';
+
+/** Carrito de una operación contra el simulador: es un ensayo, no se paga nada. */
+export function isSimCart(cart: Cart, s: Pick<LiveState, 'operations' | 'system'>): boolean {
+  const pid = s.operations[cart.operationId]?.providerId;
+  if (!pid) return false;
+  return pid === 'sim' || s.system?.providers.find((p) => p.id === pid)?.mode === 'SIMULATED';
+}
+
+/**
+ * Carrito confirmado por una persona cuyo tiempo ya pasó. No caduca solo:
+ * sigue abierto hasta que alguien diga si lo pagó o lo libera.
+ */
+export function isTimeUp(cart: Cart, now: number): boolean {
+  return isOpenCart(cart) && cart.confirmation === 'HUMAN' && cart.expiresAt !== null && Date.parse(cart.expiresAt) <= now;
+}
+
+const SIM_LABEL = 'Simulación (no se paga)';
+const errStyle = { color: 'var(--critical-ink)' } as const;
+
+/** «Minutos que quedan»: +5 min o un número de 1 a 60 según lo que marque la web oficial. */
+function ExpiryControl({ cart, left }: { cart: Cart; left: number | null }) {
+  const { run, busy } = useAction();
+  const [value, setValue] = useState('');
+  const trimmed = value.trim();
+  const minutes = /^\d{1,3}$/.test(trimmed) ? Number(trimmed) : null;
+  const invalid = trimmed !== '' && (minutes === null || minutes < 1 || minutes > 60);
+  const plus5 = Math.min(60, Math.max(1, Math.floor((Math.max(0, left ?? 0) + 5 * 60_000) / 60_000)));
+  const save = async () => {
+    if (minutes === null || invalid) return;
+    const r = await run(() => Api.setCartExpiry(cart.id, minutes), `Cuenta atrás puesta a ${minutes} min`);
+    if (r) setValue('');
+  };
+  return (
+    <div className="row" style={{ gap: 8 }}>
+      <span className="small ink2" id={`exp-l-${cart.id}`}>
+        Minutos que quedan
+      </span>
+      <button
+        type="button"
+        className="btn sm"
+        disabled={busy}
+        onClick={() => void run(() => Api.setCartExpiry(cart.id, plus5), `Cuenta atrás puesta a ${plus5} min`)}
+        title={`Suma 5 minutos a la cuenta atrás (quedará en ${plus5} min)`}
+      >
+        +5 min
+      </button>
+      <input
+        className="input"
+        style={{ width: 70, height: 28 }}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="1–60"
+        aria-labelledby={`exp-l-${cart.id}`}
+        aria-invalid={invalid ? true : undefined}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void save();
+        }}
+      />
+      <button type="button" className="btn sm" disabled={busy || minutes === null || invalid} onClick={() => void save()}>
+        Guardar
+      </button>
+      {invalid ? (
+        <span className="small" style={errStyle}>
+          Entre 1 y 60 minutos
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 export function CartCard({ cart }: { cart: Cart }) {
   const s = useLive();
@@ -22,21 +97,27 @@ export function CartCard({ cart }: { cart: Cart }) {
   const { run, busy } = useAction();
   const account = s.accounts[cart.accountId];
   const op = s.operations[cart.operationId];
+  const who = account?.label ?? cart.accountId;
+  const sim = isSimCart(cart, s);
+  const open = isOpenCart(cart);
   const left = cart.expiresAt ? Date.parse(cart.expiresAt) - now : null;
-  const open = cart.state === 'ACTIVE' || cart.state === 'REVIEW_REQUIRED';
+  const timeUp = isTimeUp(cart, now);
+  const hot = open && (timeUp || (left !== null && left < 120_000));
 
-  const markPaid = async () => {
+  const markPaid = async (late: boolean) => {
     const ok = await ask({
-      title: '¿Lo has pagado tú?',
-      body: `Márcalo solo después de pagar en la web del proveedor con la cuenta «${account?.label ?? cart.accountId}». El sistema nunca paga.`,
+      title: late ? 'Lo pagué a tiempo' : '¿Lo has pagado tú?',
+      body: sim
+        ? 'Es una simulación: no hay nada que pagar. Márcalo solo para completar el ensayo.'
+        : `Márcalo solo después de pagar en la web oficial con la cuenta «${who}»: ${cart.qty} entradas · ${formatMoney(cart.total, cart.currency)}. El sistema nunca paga.`,
       confirmText: 'Sí, está pagado',
     });
-    if (ok) await run(() => Api.markCart(cart.id, 'PAID'), 'Carrito marcado como pagado');
+    if (ok) await run(() => Api.markCart(cart.id, 'PAID', late ? 'Pagado a tiempo (marcado después de caducar)' : undefined), 'Carrito marcado como pagado');
   };
   const release = async () => {
     const ok = await ask({
       title: '¿Liberar estas entradas?',
-      body: 'Quítalas del carrito en el proveedor. Si la operación sigue en marcha, ese cupo vuelve a estar disponible.',
+      body: 'Úsalo si se han perdido o no las vas a pagar. Si la venta sigue abierta, esas entradas se vuelven a asignar. Si ya lo has pagado, cancela y pulsa «Ya lo he pagado».',
       confirmText: 'Liberar',
       danger: true,
     });
@@ -44,19 +125,37 @@ export function CartCard({ cart }: { cart: Cart }) {
   };
 
   return (
-    <div className={`task-card ${open && left !== null && left < 120_000 ? 'urgent' : ''}`}>
+    <div className={`task-card ${hot ? 'urgent' : ''}`}>
       <div className="row">
         <CartPill state={cart.state} />
-        <b style={{ fontSize: 15 }}>{account?.label ?? cart.accountId}</b>
+        <b style={{ fontSize: 15 }}>{who}</b>
         <span className="small muted">{op?.name}</span>
+        {sim ? <span className="tag">{SIM_LABEL}</span> : null}
         <span style={{ marginLeft: 'auto' }} />
         {open && left !== null ? (
-          <span className={`countdown ${left < 120_000 ? 'hot' : ''}`} aria-label="Tiempo hasta que caduque">
-            <Icon name="clock" size={14} /> {left > 0 ? formatDuration(left) : 'caducado'}
+          <span className={`countdown ${hot ? 'hot' : ''}`} aria-label="Tiempo hasta que caduque">
+            <Icon name="clock" size={14} /> {left > 0 ? fmtCountdown(left) : cart.confirmation === 'HUMAN' ? 'tiempo agotado' : 'caducando…'}
           </span>
         ) : null}
       </div>
-      {cart.reviewReason ? <Callout tone="critical">{cart.reviewReason}</Callout> : null}
+      {timeUp ? (
+        <Callout tone="critical" icon="clock">
+          <div style={{ fontSize: 16, fontWeight: 700 }}>Tiempo agotado: ¿lo has pagado?</div>
+          <div>
+            Si lo pagaste en la web oficial, pulsa «Ya lo he pagado». Si se perdió o no lo vas a pagar, pulsa «Liberar» y esas entradas se vuelven a repartir mientras
+            la venta siga abierta.
+          </div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <button type="button" className="btn primary lg" disabled={busy} onClick={() => void markPaid(false)}>
+              <Icon name="check" size={15} /> Ya lo he pagado
+            </button>
+            <button type="button" className="btn danger lg" disabled={busy} onClick={() => void release()}>
+              Liberar
+            </button>
+          </div>
+        </Callout>
+      ) : null}
+      {cart.reviewReason && cart.state !== 'RELEASED' ? <Callout tone={open ? 'critical' : 'neutral'}>{cart.reviewReason}</Callout> : null}
       <div className="task-target">
         <div>
           <div className="sign">Entradas</div>
@@ -85,17 +184,31 @@ export function CartCard({ cart }: { cart: Cart }) {
         <span className="muted">confirmado {fmtDateTime(cart.confirmedAt)}</span>
       </div>
       {open ? (
+        <>
+          <div className="row">
+            {cart.openUrl ? (
+              <a className={`btn ${timeUp ? '' : 'primary'}`} href={cart.openUrl} target="_blank" rel="noreferrer">
+                <Icon name="external" size={14} /> {sim ? 'Abrir carrito (simulador)' : cart.confirmation === 'HUMAN' ? 'Abrir la web oficial para pagar' : 'Abrir carrito'}
+              </a>
+            ) : null}
+            {!timeUp ? (
+              <>
+                <button type="button" className="btn" disabled={busy} onClick={() => void markPaid(false)}>
+                  <Icon name="check" size={14} /> Ya lo he pagado
+                </button>
+                <button type="button" className="btn danger" disabled={busy} onClick={() => void release()}>
+                  Liberar
+                </button>
+              </>
+            ) : null}
+          </div>
+          <ExpiryControl cart={cart} left={left} />
+        </>
+      ) : cart.state === 'EXPIRED' ? (
         <div className="row">
-          {cart.openUrl ? (
-            <a className="btn primary" href={cart.openUrl} target="_blank" rel="noreferrer">
-              <Icon name="external" size={14} /> {cart.confirmation === 'HUMAN' ? 'Abrir la web oficial para pagar' : 'Abrir carrito'}
-            </a>
-          ) : null}
-          <button type="button" className="btn" disabled={busy} onClick={() => void markPaid()}>
-            <Icon name="check" size={14} /> Ya lo he pagado
-          </button>
-          <button type="button" className="btn danger" disabled={busy} onClick={() => void release()}>
-            Liberar
+          <span className="small ink2">¿Lo pagaste antes de que caducara?</span>
+          <button type="button" className="btn sm" disabled={busy} onClick={() => void markPaid(true)} title="Lo pagué a tiempo">
+            <Icon name="check" size={13} /> Ya lo he pagado
           </button>
         </div>
       ) : null}
@@ -103,19 +216,29 @@ export function CartCard({ cart }: { cart: Cart }) {
   );
 }
 
+const STATE_RANK: Record<Cart['state'], number> = { ACTIVE: 0, REVIEW_REQUIRED: 0, PAID: 1, EXPIRED: 2, RELEASED: 2 };
+
 export function CartsTable({ operationId }: { operationId?: string }) {
   const s = useLive();
   const carts = useMemo(
     () =>
       Object.values(s.carts)
         .filter((c) => !operationId || c.operationId === operationId)
-        .sort((a, b) => Number(!['ACTIVE', 'REVIEW_REQUIRED'].includes(a.state)) - Number(!['ACTIVE', 'REVIEW_REQUIRED'].includes(b.state)) || (a.expiresAt ?? '').localeCompare(b.expiresAt ?? '')),
-    [s.carts, operationId],
+        .map((c) => ({ c, sim: isSimCart(c, s) }))
+        .sort(
+          (a, b) =>
+            STATE_RANK[a.c.state] - STATE_RANK[b.c.state] ||
+            Number(a.sim) - Number(b.sim) ||
+            (isOpenCart(a.c) ? (a.c.expiresAt ?? '9').localeCompare(b.c.expiresAt ?? '9') : b.c.updatedAt.localeCompare(a.c.updatedAt)),
+        )
+        .map((x) => x.c),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [s.carts, s.operations, s.system, operationId],
   );
   if (carts.length === 0) {
     return (
       <Card>
-        <Empty title="Sin carritos">Cuando una operación asegure entradas, cada carrito aparecerá aquí con su cuenta atrás. El pago lo haces tú en el proveedor.</Empty>
+        <Empty title="Sin carritos">Cuando alguien consiga entradas, cada carrito aparecerá aquí con su cuenta atrás. El pago se hace siempre en la web oficial.</Empty>
       </Card>
     );
   }
@@ -130,24 +253,40 @@ export function CartsTable({ operationId }: { operationId?: string }) {
 
 export function CartsPage() {
   const s = useLive();
-  const pending = Object.values(s.carts).filter((c) => c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED');
-  const total = pending.reduce((n, c) => n + c.total, 0);
+  const now = useNow(1000);
+  const pending = Object.values(s.carts).filter(isOpenCart);
+  const real = pending.filter((c) => !isSimCart(c, s));
+  const simCount = pending.length - real.length;
+  const total = real.reduce((n, c) => n + c.total, 0);
+  const timeUp = real.filter((c) => isTimeUp(c, now));
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <div>
           <h1>Carritos</h1>
-          <div className="sub">
-            Alcance automático terminal: carrito asegurado. <b>El pago es siempre humano</b>: abre cada carrito, paga en el proveedor y márcalo aquí.
-          </div>
+          <div className="sub">Cada persona pone las entradas en el carrito y paga en la web oficial; aquí se ve la cuenta atrás y se marca como pagado.</div>
         </div>
       </div>
-      {pending.length > 0 ? (
+      {timeUp.length > 0 ? (
+        <Callout tone="critical" icon="clock">
+          <b>
+            {timeUp.length === 1 ? 'Un carrito con el tiempo agotado' : `${timeUp.length} carritos con el tiempo agotado`}:{' '}
+            {timeUp.map((c) => s.accounts[c.accountId]?.label ?? c.accountId).join(', ')}.
+          </b>{' '}
+          Di si se pagó («Ya lo he pagado») o libéralo para que esas entradas se vuelvan a repartir.
+        </Callout>
+      ) : null}
+      {real.length > 0 ? (
         <Callout tone="warning" icon="cart">
           <b>
-            {pending.length} carrito{pending.length === 1 ? '' : 's'} por pagar
+            {real.length} carrito{real.length === 1 ? '' : 's'} por pagar
           </b>{' '}
-          · {pending.reduce((n, c) => n + c.qty, 0)} entradas · {formatMoney(total, pending[0]?.currency ?? 'EUR')}. Ordenados por caducidad. <Link to="/alertas">Ver alertas</Link>
+          · {real.reduce((n, c) => n + c.qty, 0)} entradas · {formatMoney(total, real[0]?.currency ?? 'EUR')}. Ordenados por caducidad.
+          {simCount > 0 ? ` Además, ${simCount} de simulación (no se pagan).` : ''} <Link to="/alertas">Ver alertas</Link>
+        </Callout>
+      ) : simCount > 0 ? (
+        <Callout icon="info">
+          Nada por pagar. Hay {simCount} carrito{simCount === 1 ? '' : 's'} de simulación: son ensayos, no se pagan.
         </Callout>
       ) : null}
       <CartsTable />
