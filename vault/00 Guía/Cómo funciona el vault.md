@@ -54,6 +54,8 @@ El dashboard dibuja el plano de cada recinto con estas mismas notas (ver [[Dashb
 
 Si una nota queda a medias (YAML roto), el servidor **mantiene la última compilación válida** y muestra el error en el dashboard. En cuanto la nota vuelve a ser válida, se aplica.
 
+Renombrar o mover carpetas en Obsidian con el servidor en marcha tampoco lo tumba: si la recompilación falla a mitad del cambio (por ejemplo, porque una carpeta desaparece mientras se lee), se anota un aviso en la ventana del servidor y se vuelve a intentar con el siguiente cambio del vault.
+
 ## Operaciones armadas
 
 Al **armar** una operación se congela el hash del recinto. Editar el vault después **no** cambia esa operación: así cada decisión es reproducible (ver [[Replay y auditoría]]).

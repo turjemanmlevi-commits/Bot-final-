@@ -22,6 +22,7 @@ stateDiagram-v2
   RUNNING --> RECOVERING: reinicio del servidor
   RECOVERING --> RUNNING: claims reconciliados
   RUNNING --> CART_SECURED: cantidad completa
+  CART_SECURED --> RUNNING: carrito liberado o caducado con la ventana abierta
   RUNNING --> ENDED: ventana agotada o parar
   PAUSED --> ENDED: ventana agotada o parar
   CART_SECURED --> CLOSED: cerrar
@@ -42,7 +43,7 @@ stateDiagram-v2
 | `RUNNING` | En marcha | Pausar, parar, reducir cantidad, bajar precio, cancelar |
 | `PAUSED` | Pausada | Reanudar, parar, reducir cantidad, bajar precio, cancelar |
 | `RECOVERING` | Recuperando | Pausar, parar, cancelar |
-| `CART_SECURED` | Asegurada | Cerrar (tras pagar) |
+| `CART_SECURED` | Carrito asegurado | Cerrar (tras pagar). Si se libera (o caduca, en el simulador) un carrito y la ventana sigue abierta, vuelve sola a `RUNNING` para repartir lo que falta |
 | `ENDED` | Finalizada | Cerrar |
 | `CANCELLED`, `CLOSED` | — | Nada: estados finales |
 

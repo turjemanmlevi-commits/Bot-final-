@@ -31,8 +31,8 @@ Servidor en `http://localhost:8787`. Si `OPERATOR_TOKEN` está definido, hay que
 | GET | `/api/alerts` · POST `/api/alerts/:id/ack`, `/resolve` | Alertas |
 | GET | `/api/human-tasks` · POST `/api/human-tasks/:id/respond` | Tareas humanas (cuerpo abajo) |
 | GET | `/api/carts` | Carritos |
-| POST | `/api/carts/:id/mark` | `{ state: 'PAID' \| 'RELEASED', note? }`: una persona dice que pagó o que lo quitó del carrito. El sistema nunca paga |
-| POST | `/api/carts/:id/expiry` | `{ minutes }` (1–60): minutos que le quedan al carrito en la web; fija `expiresAt` = ahora + minutos y reinicia los avisos de caducidad. Es lo que hacen los botones de minutos de Telegram. 409 si el carrito ya está cerrado |
+| POST | `/api/carts/:id/mark` | `{ state: 'PAID' \| 'RELEASED', note? }`: una persona dice que pagó o que lo quitó del carrito (o que se perdió). El sistema nunca paga. Solo con el carrito abierto, salvo `PAID` sobre un carrito caducado («lo pagué a tiempo»: vuelve a contar). `RELEASED` devuelve su cantidad al reparto y, si la operación estaba en `CART_SECURED` con la ventana abierta, la vuelve a `RUNNING`. 409 si ya está cerrado |
+| POST | `/api/carts/:id/expiry` | `{ minutes }` (1–60): minutos que le quedan al carrito en la web; fija `expiresAt` = ahora + minutos, reinicia los avisos de caducidad y resuelve la alerta «¿lo has pagado?». Es lo que hacen los botones de minutos de Telegram y *Minutos que quedan* en *Carritos*. 409 si el carrito ya está cerrado |
 | POST | `/api/kill-switches`, `/api/circuits/:key/reset` | Seguridad |
 | GET | `/api/audit?operationId&type&limit&before` | Journal |
 | GET/POST | `/api/gates`, `/api/gates/run` | Gates |
@@ -74,7 +74,7 @@ Responden `EventNoteResult { file, created, event | null, issues, report }`; en 
 | «Añade N entradas · <zona>» (`ADD_TO_CART`) | `IN_CART`, `FAILED` (siguiente zona), `UNKNOWN` (pasa a verificación) |
 | «¿Están las N entradas…?» (`VERIFY_CART`) | `IN_CART`, `FAILED`, `UNKNOWN` |
 
-Una tarea cerrada (hecha, fallida, caducada o cancelada) da 409 (`NOT_OPEN`); una respondida con `UNKNOWN` aún admite respuesta. Desde Telegram, «✅ N en carrito» envía `IN_CART` con `qty: N` y `unitPrice` = precio máximo.
+Una tarea cerrada (hecha, fallida, caducada o cancelada) da 409 (`NOT_OPEN`); una respondida con `UNKNOWN` aún admite respuesta. En una tarea «Añade N entradas» respondida con `UNKNOWN`, la nueva respuesta se aplica a su verificación abierta («¿Están las N entradas…?») y la respuesta HTTP devuelve esa tarea de verificación. Desde Telegram, «✅ N en carrito» envía `IN_CART` con `qty: N` y `unitPrice` = precio máximo.
 
 ## SSE
 

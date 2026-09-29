@@ -25,10 +25,16 @@ stateDiagram-v2
 ## Carritos
 
 - Uno por cuenta y operación; acumula las entradas confirmadas.
-- Avisos de caducidad configurables (por defecto 300, 120 y 60 s).
-- Si caduca con la operación aún en marcha, ese cupo vuelve a la asignación.
+- Avisos de caducidad configurables (por defecto 300, 120 y 60 s), si el carrito tiene hora de caducidad.
+- **Confirmado por una persona** (`HUMAN`, asistencia manual): la hora la da la persona y es una estimación, así que el carrito **no caduca solo** ni se vuelve a repartir por su cuenta. Al llegar la hora queda abierto, sigue contando y salta una alerta crítica «…: se acabó el tiempo del carrito, ¿lo has pagado?». Se responde con **Ya lo he pagado** (`PAID`), con más minutos (la hora se fija de nuevo y los avisos se reinician) o con **Liberar** (`RELEASED`: se perdió).
+- **Confirmado por el proveedor** (`ACK`/`READBACK`, el simulador): al llegar la hora pasa a `EXPIRED` («Carrito caducado»). Un carrito caducado aún se puede marcar como pagado («Lo pagué a tiempo»): su cantidad vuelve a contar (`COMMIT_EXTERNAL`).
+- **Liberado o caducado** con la operación aún viva (en marcha, pausada, recuperando o con carrito asegurado): esa cantidad vuelve a la asignación (`UNCOMMIT`) y se reparte de nuevo mientras la operación esté en ejecución. Si estaba en *Carrito asegurado* y su ventana sigue abierta, vuelve a *En ejecución*; con la ventana ya cerrada, se queda en *Carrito asegurado*.
 - **Pagado** y **Liberado** solo los marca una persona. Ver [[Pago y cierre]].
 
 ## Asistencia manual
 
-En vez de `cart.add`, el runner crea una tarea **Añadir al carrito** para una cuenta con la mejor sección pendiente (en orden de preferencia), la cantidad que le toca y el precio máximo, reservando esa capacidad. La persona responde *en carrito* (cantidad y precio reales), *no pude* (se prueba la siguiente zona) o *no sé* (se pide verificación). Si no responde a tiempo (3 min), se trata como ambiguo.
+En vez de `cart.add`, el runner crea una tarea **Añadir al carrito** para una cuenta con la mejor sección pendiente (en orden de preferencia), la cantidad que le toca y el precio máximo, reservando esa capacidad. Reparte **en paralelo**: la cantidad de cada tarea deja lo que queda sin asignar en 0 o en al menos un grupo mínimo, para que otra cuenta lista vaya a por ello a la vez (4 entradas, límite 3 por persona, grupo mínimo 2 → 2 + 2).
+
+La persona responde *en carrito* (cantidad y precio reales), *no pude* (se prueba la siguiente zona) o *no sé* (se pide verificación). El runner reacciona a cada respuesta, sin esperar a su revisión periódica de 250 ms: tras *no pude*, o tras «no está» en la verificación, la siguiente zona sale al momento. Si alguien dijo *no sé* y otra persona responde después *en carrito* a esa misma tarea, la respuesta se aplica a la verificación abierta. Si nadie responde a tiempo (**30 min** por defecto, `MANUAL_TASK_MINUTES`), se trata como ambiguo: la reserva se mantiene y se pide verificación.
+
+Cada compra exige «Sesión lista» de nuevo: al armar, las cuentas de asistencia manual que estaban listas vuelven a *Sin sesión* y reciben una tarea «Inicia sesión» nueva con el plan. Desarmar cancela esas tareas.

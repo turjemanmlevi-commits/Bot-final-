@@ -137,8 +137,7 @@ export class CartService {
     if (cart.state !== 'ACTIVE' && cart.state !== 'REVIEW_REQUIRED') throw new CartError('El carrito ya está cerrado', 'NOT_ACTIVE');
     const next: Cart = { ...cart, expiresAt, updatedAt: iso(this.ctx.now()) };
     for (const key of [...this.warned]) if (key.startsWith(`${cartId}:`)) this.warned.delete(key);
-    this.ctx.alerts.resolveKey(`cart:${cartId}:expiring`, actor);
-    this.ctx.alerts.resolveKey(`cart:${cartId}:timeup`, actor);
+    this.ctx.alerts.resolveWhere((a) => a.cartId === cartId && a.kind === 'CART_EXPIRING', actor);
     this.ctx.store.putCart(next);
     this.ctx.journal.audit('cart.expiry_set', { cartId, expiresAt }, { operationId: cart.operationId, actor });
     return next;
@@ -158,7 +157,7 @@ export class CartService {
         const key = `${cart.id}:timeup`;
         if (!this.warned.has(key)) {
           this.warned.add(key);
-          this.ctx.alerts.resolveKey(`cart:${cart.id}:expiring`);
+          this.ctx.alerts.resolveWhere((a) => a.cartId === cart.id && a.kind === 'CART_EXPIRING');
           this.ctx.alerts.raise({
             kind: 'CART_EXPIRING',
             severity: 'CRITICAL',
@@ -177,7 +176,7 @@ export class CartService {
         const next: Cart = { ...cart, state: 'EXPIRED', updatedAt: iso(now) };
         this.ctx.store.putCart(next);
         this.ctx.journal.audit('cart.expired', { cartId: cart.id, qty: cart.qty }, { operationId: cart.operationId });
-        this.ctx.alerts.resolveKey(`cart:${cart.id}:expiring`);
+        this.ctx.alerts.resolveWhere((a) => a.cartId === cart.id && a.kind === 'CART_EXPIRING');
         this.ctx.alerts.raise({
           kind: 'CART_EXPIRED',
           severity: 'CRITICAL',
@@ -193,22 +192,24 @@ export class CartService {
       }
       const op = this.ctx.store.operations.get(cart.operationId);
       const thresholds = [...(op?.config.cartExpiryAlertsSeconds ?? [300, 120, 60])].sort((a, b) => b - a);
-      for (const t of thresholds) {
-        const key = `${cart.id}:${t}`;
-        if (left <= t * 1000 && !this.warned.has(key)) {
-          this.warned.add(key);
-          this.ctx.alerts.raise({
-            kind: 'CART_EXPIRING',
-            severity: t <= 120 ? 'CRITICAL' : 'WARNING',
-            title: `${label}: el carrito caduca a las ${this.clock(cart.expiresAt)}`,
-            message: `${cart.qty} entrada${cart.qty === 1 ? '' : 's'} · ${formatMoney(cart.total, cart.currency)}. Quedaban ${formatDuration(left)} al avisar. Ábrelo y paga antes de que caduque.`,
-            actions: ['OPEN_CART'],
-            operationId: cart.operationId,
-            accountId: cart.accountId,
-            cartId: cart.id,
-            dedupeKey: `cart:${cart.id}:expiring`,
-          });
-        }
+      // Cada umbral (5, 2, 1 min…) es un aviso nuevo (y llega a Telegram); si al
+      // anotar el carrito ya se habían pasado varios, solo se avisa del más cercano.
+      const due = thresholds.filter((t) => left <= t * 1000 && !this.warned.has(`${cart.id}:${t}`));
+      const t = due.at(-1);
+      if (t !== undefined) {
+        for (const d of due) this.warned.add(`${cart.id}:${d}`);
+        this.ctx.alerts.resolveWhere((a) => a.cartId === cart.id && a.kind === 'CART_EXPIRING');
+        this.ctx.alerts.raise({
+          kind: 'CART_EXPIRING',
+          severity: t <= 120 ? 'CRITICAL' : 'WARNING',
+          title: `${label}: el carrito caduca a las ${this.clock(cart.expiresAt)}`,
+          message: `${cart.qty} entrada${cart.qty === 1 ? '' : 's'} · ${formatMoney(cart.total, cart.currency)}. Quedaban ${formatDuration(left)} al avisar. Ábrelo y paga antes de que caduque.`,
+          actions: ['OPEN_CART'],
+          operationId: cart.operationId,
+          accountId: cart.accountId,
+          cartId: cart.id,
+          dedupeKey: `cart:${cart.id}:expiring:${t}`,
+        });
       }
     }
   }

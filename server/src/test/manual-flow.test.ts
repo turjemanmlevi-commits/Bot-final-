@@ -169,6 +169,29 @@ describe('asistencia manual en una compra real', () => {
     }
   });
 
+  it('cada aviso de caducidad del carrito (2 min, 1 min, tiempo agotado) se notifica', async () => {
+    const { rt, op } = await armed(1, { requestedQty: 2 });
+    try {
+      const sent: string[] = [];
+      rt.ctx.notifier = { enabled: true, connected: true, detail: '', notifyTask: () => undefined, notifyAlert: (a) => { if (a.kind === 'CART_EXPIRING') sent.push(a.title); } };
+      rt.ctx.tasks.respond(tasksOf(op.id, 'OPEN_SESSION')[0]?.id ?? '', { result: 'READY' }, 't');
+      await h.clock.advance(61_000);
+      const add = tasksOf(op.id, 'ADD_TO_CART')[0];
+      rt.ctx.tasks.respond(add?.id ?? '', { result: 'IN_CART', qty: 2, unitPrice: 9000, expiresAt: iso(h.clock.now() + 150_000) }, 't');
+      await h.clock.advance(35_000);
+      assert.equal(sent.length, 1, 'aviso de 2 min');
+      await h.clock.advance(60_000);
+      assert.equal(sent.length, 2, 'aviso de 1 min también llega');
+      await h.clock.advance(60_000);
+      assert.equal(sent.length, 3, 'tiempo agotado: ¿lo has pagado?');
+      assert.match(sent[2] ?? '', /¿lo has pagado\?/);
+      const open = [...rt.store.alerts.values()].filter((a) => a.kind === 'CART_EXPIRING' && a.state !== 'RESOLVED');
+      assert.equal(open.length, 1, 'solo queda abierto el aviso vigente');
+    } finally {
+      await h.stop();
+    }
+  });
+
   it('cada compra exige «Sesión lista» de nuevo y manda el plan', async () => {
     h = await createHarness(dir);
     const rt = h.app.runtime;

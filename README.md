@@ -24,14 +24,16 @@ Qué hace el comando (`instalar.ps1`):
 | Paso | Qué hace |
 |---|---|
 | 1. Node.js | Si no lo tienes, instala **Node.js LTS** con `winget` (el instalador de Windows). Si tu Windows no tiene `winget`, abre nodejs.org y se para: instálalo y repite el comando |
-| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`). **No borra nada**: nunca toca tu `.env` (configuración de Telegram) ni la carpeta `data` (cuentas, operaciones, carritos) |
+| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada**: nunca toca tu `.env` (configuración de Telegram) ni la carpeta `data` (cuentas, operaciones, carritos); no pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), y si ya existe `vault\.obsidian` (tu configuración de Obsidian) no la toca |
 | 3. Acceso directo | Crea **Sala de control** en el Escritorio (abre `INICIAR.bat`) |
 | 4. Obsidian | Opcional: lo instala con `winget` si respondes `s` |
 | 5. Arranque | Abre `INICIAR.bat`, que instala dependencias, compila y abre el navegador |
 
 **Las siguientes veces:** doble clic en **Sala de control** del Escritorio (o en `INICIAR.bat` dentro de `bot final`).
 
-**Para actualizar:** cierra la ventana negra y vuelve a pegar el mismo comando. Conserva `.env` y `data`; sustituye los ficheros del proyecto por la versión nueva. Las notas que tú creaste en el vault se quedan, pero si **editaste** una nota que venía con el proyecto (por ejemplo, un recinto), la versión nueva la sustituye: cópiala antes.
+**Para actualizar:** cierra la ventana negra y vuelve a pegar el mismo comando. Conserva `.env`, `data` y tu configuración de Obsidian (`vault\.obsidian`), y copia la versión nueva de los ficheros del proyecto. Las notas que tú creaste en el vault se quedan, y una nota que venía con el proyecto y **editaste** también, siempre que tu copia sea más reciente que la de la versión descargada (el instalador no pisa archivos más recientes). Si no estás seguro, cópiala antes.
+
+> Si tu `.env` se creó con una versión anterior, puede tener `MANUAL_TASK_MINUTES=10`. Actualizar no toca el `.env`: ábrelo con el Bloc de notas, pon `MANUAL_TASK_MINUTES=30` (o borra la línea: 30 es el valor por defecto), guarda y reinicia. Ver [Configuración](#configuración).
 
 > Si al final sale «Node.js no aparece todavía», cierra PowerShell, abre otro y vuelve a pegar el comando (pasa cuando Node.js se acaba de instalar).
 
@@ -40,7 +42,10 @@ Qué hace `INICIAR.bat` cada vez que lo abres:
 - Si no encuentra Node.js, lo instala con `winget`; si no puede, abre nodejs.org. Exige Node.js 20.19 o superior.
 - Crea `.env` a partir de `.env.example` si no existe.
 - Ejecuta `npm install` (reintenta una vez; si falla por `EPERM`/`EBUSY`, te aconseja pausar la sincronización de OneDrive) y `npm run build`.
+- Desactiva la **«Edición rápida»** de la ventana negra: hacer clic dentro ya no pausa el servidor (antes, un clic la dejaba en modo «Seleccionar» y paraba tareas, T0 y Telegram hasta pulsar una tecla). Si aun así el título de la ventana empieza por «Seleccionar», pulsa `Esc`.
 - Arranca el servidor y abre el navegador en el puerto de `.env` (`PORT`, 8787 por defecto). Para pararlo, cierra la ventana negra (o `Ctrl+C`).
+
+Con el servidor en marcha, un error inesperado en segundo plano (en el scheduler o en una promesa sin controlar) se anota en la ventana negra y el servidor sigue funcionando.
 
 > La carpeta está en el Escritorio sincronizado con OneDrive. Si la instalación va lenta o da `EPERM`, pausa OneDrive mientras se instala (`node_modules` tiene miles de ficheros).
 
@@ -71,7 +76,7 @@ Para actualizar: `git pull` y vuelve a abrir `INICIAR.bat` (reinstala y recompil
 
 Pulsa **Nueva demo** en el dashboard: crea cuentas ficticias y una operación contra el simulador que arranca en 60 segundos.
 
-En Obsidian: **Abrir carpeta como vault** → `bot final\vault`. Empieza por la nota **Inicio**. Con el servidor en marcha, al guardar una nota de recinto o evento el dashboard se actualiza solo.
+En Obsidian: **Abrir carpeta como vault** → `bot final\vault`. Empieza por la nota **Inicio**. Con el servidor en marcha, al guardar una nota de recinto o evento el dashboard se actualiza solo. Renombrar o mover carpetas del vault con el servidor en marcha ya no lo tumba: si la recompilación falla a mitad, se anota un aviso y se reintenta con el siguiente cambio.
 
 ## Comprar entradas reales (Ticketmaster, entradas.com, Real Madrid)
 
@@ -81,7 +86,8 @@ Con estas ticketeras el sistema trabaja en **asistencia manual**. En el dashboar
 2. **Eventos → Nuevo evento**: enlace oficial, fecha del evento, hora de apertura de la venta (T0) y límites de compra verificados en las condiciones oficiales.
 3. **Recintos · vault**: el Estadio Santiago Bernabéu ya viene incluido, con su plano. Para otro recinto, **Nuevo recinto**.
 4. **Operaciones → Nueva operación**: toca en el plano las zonas en orden de preferencia (salen numeradas 1, 2, 3…), cantidad, precio máximo y cuentas → **Crear y validar → Armar**. Cada persona recibe su **plan** (zonas en orden, cuántas, precio máximo).
-5. **El día de la venta**: cada persona inicia sesión en la web oficial y pulsa **Sesión lista** antes de T0. A T0 le llega **«🚦 ¡Abre la venta!»** y su tarea («Añade 2 entradas · Lateral Este · Primer anfiteatro, máx. 120 €») con el plano y su zona resaltada. Compra en la web oficial y responde **✅ 2 en carrito** (o **No pude** para pasar a la siguiente zona), **paga en la web oficial** y marca **Ya lo he pagado** en *Carritos*.
+5. **El día de la venta**: cada persona inicia sesión en la web oficial y pulsa **Sesión lista** antes de T0. Hay que pulsarlo en cada compra: al armar, las cuentas vuelven a *Sin sesión* aunque lo pulsaran en un ensayo. A T0 le llega **«🚦 ¡Abre la venta!»** y su tarea («Añade 2 entradas · Lateral Este · Primer anfiteatro, máx. 120 €») con el plano y su zona resaltada. Compra en la web oficial y responde con las que tenga (**✅ 2 en carrito**, **✅ 1 en carrito**) o **No pude** (le llega al momento la siguiente zona); indica los minutos que le quedan al carrito, **paga en la web oficial** y marca **Ya lo he pagado** (en *Carritos* o en Telegram).
+6. **Si se acaba el tiempo del carrito**: los minutos indicados son una estimación, así que el carrito no se da por perdido. Llega la alerta **«…: se acabó el tiempo del carrito, ¿lo has pagado?»**: **Ya lo he pagado** si se pagó, o **Liberar** (en *Carritos*) si se perdió; esas entradas se vuelven a repartir mientras la venta siga abierta.
 
 Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
@@ -104,7 +110,7 @@ Es orientativo: los sectores exactos están en el plano oficial de cada venta.
 4. Pégalo detrás de `TELEGRAM_CHAT_ID=`, guarda y reinicia.
 5. En **Ajustes · Telegram** pulsa **Enviar mensaje de prueba**. Esa página también lista los chats que han escrito al bot.
 
-Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad** (`✅ 2 en carrito`, `✅ 1 en carrito`), **❌ No pude** y **❓ No sé**. Tras «en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (5, 8, 10, 15 o 20) para avisar antes de que caduque. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard.
+Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad**, de la cantidad pedida a 1 (`✅ 2 en carrito`, `✅ 1 en carrito`; en filas de 5, hasta 20), **❌ No pude** y **❓ No sé**. Tras «N en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (`5`, `8`, `10`, `15` o `20 min`) junto a **💳 Ya lo he pagado**. Los avisos de carrito a punto de caducar y el de «se acabó el tiempo del carrito, ¿lo has pagado?» llegan con **💳 Ya lo he pagado** y **⏱ Quedan 5 / 10 / 15 min**. Cuando una tarea se responde (en Telegram o en el dashboard), sus botones desaparecen en todos los chats. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard.
 
 Cada cuenta puede tener su propio chat (**Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos: `/estado`, `/tareas`, `/id`, `/ayuda`; y solo en el chat principal, `/pausa` y `/parar_todo`.
 
@@ -117,7 +123,7 @@ Guía: `vault/00 Guía/Configurar Telegram.md`.
 | De la hora de apertura (T0) a la tarea en Telegram | 10 ms |
 | De T0 a la tarea en el dashboard | 26 ms |
 | De T0 a «🚦 ¡Abre la venta!» | 12 ms |
-| De «No pude» a la tarea con la siguiente zona | ~54 ms; como mucho unos 250 ms (el reparto se revisa cada 250 ms) |
+| De «No pude» a la tarea con la siguiente zona | ~50 ms: el reparto reacciona a cada respuesta (y además se revisa cada 250 ms) |
 | Simulador sin cola: primera entrada en carrito | 33–62 ms |
 | Simulador sin cola: 8 de 8 entradas en carrito | 41–135 ms |
 | Decisión del motor | ~0,04 ms |
@@ -154,7 +160,9 @@ En Telegram hay que sumar lo que tarde la red de Telegram. Los tiempos del simul
 
 ## Configuración
 
-`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram, los minutos para responder una tarea de compra (`MANUAL_TASK_MINUTES`, 10 por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar. Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
+`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram, los minutos para responder una tarea de compra antes de que el sistema pida verificarla (`MANUAL_TASK_MINUTES`, **30** por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar. Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
+
+Un `.env` creado con una versión anterior puede tener `MANUAL_TASK_MINUTES=10`, y ese valor manda sobre el nuevo defecto: cámbialo a `30` (o borra la línea) y reinicia.
 
 ## Modos de proveedor
 
