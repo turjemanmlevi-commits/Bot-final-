@@ -194,5 +194,5 @@ Más detalle: [[Qué hacer con cada alerta]].
 > Mañana a las 18:05 abre la venta de «<evento>».
 > 1. Entre 30 y 15 minutos antes, inicia sesión con **tu** cuenta en la web oficial y pulsa «Sesión lista» (en Telegram o en el dashboard).
 > 2. A la hora te llega tu tarea: pulsa «Abrir la web oficial», espera la cola si la hay y compra la zona, la cantidad y el precio máximo que te diga.
-> 3. En cuanto estén en el carrito, pulsa «✅ N en carrito» y **paga ya**. Si no hay a ese precio, «No pude» y te llega la siguiente zona.
+> 3. En cuanto estén en el carrito, pulsa «✅ N en carrito» (o «Están en el carrito» en el dashboard) y **paga ya**. Si no hay a ese precio, «No pude» y te llega la siguiente zona.
 > 4. Nunca pagues más del máximo y no compartas tu contraseña con nadie.

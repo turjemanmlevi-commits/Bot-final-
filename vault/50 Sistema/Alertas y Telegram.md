@@ -54,4 +54,4 @@ Configuración paso a paso: [[Configurar Telegram]]. Todo se configura en el `.e
 
 - *Ajustes · Telegram* muestra «Token configurado», «Conectado» y «Chat principal configurado», y el detalle del último problema: «Token no válido», «Otro programa está leyendo este bot (¿hay dos servidores abiertos?)», «Sin conexión…».
 - El [[Readiness]] avisa (ámbar) si Telegram está configurado pero sin conexión: las alertas seguirán en el dashboard.
-- Si Telegram no responde, el servidor reintenta solo cada pocos segundos.
+- Si se pierde la conexión, el servidor vuelve a conectar solo (cada 5 s). Un mensaje que no se pudo enviar no se reintenta: el dashboard sigue siendo la referencia.
