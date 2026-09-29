@@ -391,6 +391,16 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     const q = await body(c, AiDetailsQuerySchema);
     return c.json(await aiControl().eventDetails(q));
   });
+  // ⭐ Grandes partidos: la lista guardada y buscarla otra vez (Claude, en segundo plano).
+  const topControl = () => {
+    if (!ctx.topMatches) throw new ApiError(409, 'TOP_UNAVAILABLE', 'Este servidor no tiene «Grandes partidos» activado.');
+    return ctx.topMatches;
+  };
+  http.get('/api/top', (c) => c.json(topControl().state()));
+  http.post('/api/top/refresh', async (c) => {
+    sameSite(c);
+    return c.json(topControl().refresh(actorOf(c)), 202);
+  });
   http.post('/api/ai/seatmap', async (c) => {
     sameSite(c);
     const q = await body(c, AiSeatMapQuerySchema);

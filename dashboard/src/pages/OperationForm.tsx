@@ -196,6 +196,13 @@ export function OperationFormPage() {
 
   const events = useMemo(() => Object.values(s.events).sort((a, b) => a.startsAt.localeCompare(b.startsAt)), [s.events]);
   const event = s.events[f.eventId];
+  /** Entradas por cuenta que pide el evento (1 en los grandes partidos), o null = hasta el límite oficial. */
+  const perAccountQty = event?.perAccountQty ?? null;
+  const allAccountsOf = (providerId: string) =>
+    Object.values(s.accounts)
+      .filter((a) => a.providerId === providerId && a.enabled)
+      .map((a) => a.id)
+      .slice(0, 10);
 
   // Evento por defecto: el de la URL o el primero verificado.
   useEffect(() => {
@@ -210,6 +217,8 @@ export function OperationFormPage() {
         name: x.name || ev.name,
         // Dónde queréis las entradas, elegido al crear el evento (1ª, 2ª y 3ª preferencia).
         targets: x.targets.length > 0 ? x.targets : (ev.preferredTargets ?? []),
+        // Gran partido (1 por cuenta): van todas las cuentas de esa web.
+        accountIds: ev.perAccountQty && x.accountIds.length === 0 ? allAccountsOf(ev.providerId) : x.accountIds,
         t0: ev.onSaleAt && Date.parse(ev.onSaleAt) > Date.now() ? toLocalInput(ev.onSaleAt) : x.t0,
         requestedQty: String(Math.min(Number(x.requestedQty), ev.limits.perOperation || Number(x.requestedQty))),
         // Las colas de las webs reales son largas: la ventana por defecto se amplía.
@@ -247,7 +256,11 @@ export function OperationFormPage() {
         ...x,
         eventId,
         targets: next?.preferredTargets ?? [],
-        accountIds: next ? x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId) : [],
+        accountIds: next
+          ? next.perAccountQty
+            ? allAccountsOf(next.providerId)
+            : x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId)
+          : [],
         name: nameFollowsEvent ? (next?.name ?? '') : x.name,
         t0: next?.onSaleAt && Date.parse(next.onSaleAt) > Date.now() ? toLocalInput(next.onSaleAt) : x.t0,
         requestedQty: next && Number.isFinite(qty) && qty > 0 && next.limits.perOperation > 0 ? String(Math.min(qty, next.limits.perOperation)) : x.requestedQty,
@@ -303,19 +316,20 @@ export function OperationFormPage() {
       t0: t0Iso,
       runWindowMinutes: Math.trunc(Number(f.runWindowMinutes)),
       freezeLeadSeconds: Math.trunc(Number(f.freezeLeadSeconds)),
-      requestedQty: Math.trunc(Number(f.requestedQty)),
+      requestedQty: perAccountQty ? Math.max(1, f.accountIds.length * perAccountQty) : Math.trunc(Number(f.requestedQty)),
       currency: event.currency,
       maxUnitPrice,
       budget,
       preferences: {
         targets: f.targets,
         excludeSections: f.excludeSections,
-        requireContiguous: f.requireContiguous,
-        minGroupSize: Math.trunc(Number(f.minGroupSize)),
+        requireContiguous: perAccountQty === 1 ? false : f.requireContiguous,
+        minGroupSize: perAccountQty ? Math.min(Math.trunc(Number(f.minGroupSize)) || 1, perAccountQty) : Math.trunc(Number(f.minGroupSize)),
         allowStanding: f.allowStanding,
         allowObstructed: f.allowObstructed,
         allowAccessible: f.allowAccessible,
         maxAmbiguity: Number(f.maxAmbiguity),
+        maxPerAccount: perAccountQty,
       },
       accountIds: f.accountIds,
       cartExpiryAlertsSeconds: f.cartExpiryAlertsSeconds
@@ -336,8 +350,9 @@ export function OperationFormPage() {
     navigate(`/operaciones/${opId}`);
   };
 
-  const qty = Number(f.requestedQty);
-  const minGroup = Number(f.minGroupSize);
+  const qty = perAccountQty ? f.accountIds.length * perAccountQty : Number(f.requestedQty);
+  // Con «N por cuenta», el grupo mínimo no pasa de N (1 por cuenta: entradas sueltas, una cada cuenta).
+  const minGroup = perAccountQty ? Math.min(Number(f.minGroupSize) || 1, perAccountQty) : Number(f.minGroupSize);
   const maxPrice = maxCents ?? 0;
   const blocking = [
     !event ? 'elige un evento' : null,
@@ -348,7 +363,14 @@ export function OperationFormPage() {
   ].filter((x): x is string => x !== null);
   const ready = blocking.length === 0;
   const selectedAccounts = f.accountIds.map((aid) => s.accounts[aid]).filter((a): a is Account => a !== undefined);
-  const qtyWarn = event ? qtyWarning(Math.trunc(qty), Math.trunc(minGroup), event.limits, selectedAccounts) : null;
+  const qtyWarn = event
+    ? qtyWarning(
+        Math.trunc(qty),
+        Math.trunc(minGroup),
+        perAccountQty ? { ...event.limits, perAccount: Math.min(event.limits.perAccount, perAccountQty) } : event.limits,
+        selectedAccounts,
+      )
+    : null;
   const budgetShort = Number.isFinite(qty) && qty > 0 && maxCents !== null && budgetCents !== null && budgetCents < Math.trunc(qty) * maxCents;
   const t0Past = t0Iso !== null && Date.parse(t0Iso) < Date.now();
 
@@ -448,7 +470,16 @@ export function OperationFormPage() {
           <div className="form-grid">
             <div className="field">
               <label htmlFor="op-qty">Entradas</label>
-              <input id="op-qty" className="input" type="number" min={1} value={f.requestedQty} onChange={(e) => set('requestedQty', e.target.value)} />
+              {perAccountQty ? (
+                <>
+                  <input id="op-qty" className="input" type="number" value={f.accountIds.length * perAccountQty} readOnly disabled />
+                  <span className="hint">
+                    {perAccountQty} por cuenta × {f.accountIds.length} cuenta{f.accountIds.length === 1 ? '' : 's'}: todas van a la vez, cada una a por la suya.
+                  </span>
+                </>
+              ) : (
+                <input id="op-qty" className="input" type="number" min={1} value={f.requestedQty} onChange={(e) => set('requestedQty', e.target.value)} />
+              )}
             </div>
             <div className="field">
               <label htmlFor="op-max">Máximo por entrada ({currency}, con gastos)</label>
@@ -463,11 +494,13 @@ export function OperationFormPage() {
                   : '—'}
               </span>
             </div>
-            <div className="field">
-              <label htmlFor="op-min">Grupo mínimo por carrito</label>
-              <input id="op-min" className="input" type="number" min={1} value={f.minGroupSize} onChange={(e) => set('minGroupSize', e.target.value)} />
-              <span className="hint">Evita entradas sueltas.</span>
-            </div>
+            {perAccountQty === 1 ? null : (
+              <div className="field">
+                <label htmlFor="op-min">Grupo mínimo por carrito</label>
+                <input id="op-min" className="input" type="number" min={1} value={f.minGroupSize} onChange={(e) => set('minGroupSize', e.target.value)} />
+                <span className="hint">Evita entradas sueltas.</span>
+              </div>
+            )}
           </div>
           {qtyWarn ? (
             <div style={{ marginTop: 12 }}>

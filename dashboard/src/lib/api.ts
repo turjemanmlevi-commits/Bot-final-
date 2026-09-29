@@ -8,6 +8,7 @@ import type {
   AiKeyResult,
   AiSeatMap,
   AiSeatMapQuery,
+  TopMatchesState,
   AccountPatch,
   Alert,
   ApiErrorBody,
@@ -198,6 +199,10 @@ export const Api = {
   aiEvent: (q: AiDetailsQuery) => post<AiEventDetails>('/api/ai/event', q),
   /** Claude sitúa cada zona sobre la imagen del plano oficial. */
   aiSeatMap: (q: AiSeatMapQuery) => post<AiSeatMap>('/api/ai/seatmap', q),
+  /** ⭐ Grandes partidos: la lista guardada. */
+  top: () => api<TopMatchesState>('/api/top'),
+  /** Pedir a Claude la lista otra vez (en segundo plano: 2–4 min). */
+  topRefresh: () => post<TopMatchesState>('/api/top/refresh'),
   /** Dónde queréis las entradas (zonas en orden de preferencia). */
   setEventTargets: (eventId: string, targets: string[]) =>
     api<EventNoteResult>(`/api/vault/events/${encodeURIComponent(eventId)}/targets`, { method: 'PUT', body: { targets } }),

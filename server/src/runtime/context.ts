@@ -91,6 +91,8 @@ export class Ctx {
   aiStatus: (() => import('@to/shared').AiStatus) | null = null;
   /** Crear eventos con Claude desde el bot de Telegram (lo pone el servidor al arrancar). */
   eventAssistant: import('../ai/assistant').EventAssistant | null = null;
+  /** ⭐ Grandes partidos (lista de Claude guardada en disco). */
+  topMatches: import('../ai/top').TopMatches | null = null;
   readonly startedAt: number;
 
   constructor(

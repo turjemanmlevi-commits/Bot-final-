@@ -83,6 +83,11 @@ export interface OperationPreferences {
   allowAccessible: boolean;
   /** Ambigüedad máxima tolerada de un candidato (0 = ninguna, 1 = total). */
   maxAmbiguity: number;
+  /**
+   * Tope de entradas por cuenta en ESTA operación (más estricto que el límite
+   * oficial; 1 = una cada cuenta, todas a la vez). null/ausente = el límite oficial.
+   */
+  maxPerAccount?: number | null;
 }
 
 /** Configuración editable de una operación. Cada edición en DRAFT crea una versión inmutable nueva. */

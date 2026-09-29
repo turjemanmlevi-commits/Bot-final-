@@ -37,11 +37,14 @@ export function initAllocation(params: {
   budget: Minor;
   limits: EventLimits;
   accounts: Array<{ id: Id; groupKey: string }>;
+  /** Tope por cuenta de esta operación (más estricto que el oficial), o null. */
+  perAccountCap?: number | null;
 }): AllocationState {
   const perAccount: AllocationState['perAccount'] = {};
   const perGroup: AllocationState['perGroup'] = {};
   for (const a of params.accounts) {
-    perAccount[a.id] = { cap: params.limits.perAccount, used: 0, groupKey: a.groupKey };
+    const cap = params.perAccountCap && params.perAccountCap > 0 ? Math.min(params.limits.perAccount, params.perAccountCap) : params.limits.perAccount;
+    perAccount[a.id] = { cap, used: 0, groupKey: a.groupKey };
     perGroup[a.groupKey] ??= { cap: params.limits.perGroup, used: 0 };
   }
   const requestedQty = Math.min(params.requestedQty, params.limits.perOperation);

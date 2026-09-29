@@ -10,7 +10,10 @@ import {
   LIMIT_SEMANTICS,
   LIMIT_SEMANTICS_LABEL,
   LOCAL_DATETIME_RE,
+  TOP_PER_ACCOUNT,
+  TOP_WATCH_DAYS,
   type AiEventDetails,
+  type AiEventSummary,
   type CatalogEvent,
   type EventNoteInput,
   type FeedEvent,
@@ -21,6 +24,7 @@ import {
   type PageImport,
   type ProviderAuthorization,
   type ProviderMode,
+  type TopMatch,
   type VaultIssue,
 } from '@to/shared';
 import { Api, ApiError } from '../lib/api';
@@ -113,6 +117,8 @@ interface FormState {
   seats: string[];
   /** Plano oficial (imagen tal cual se ve al comprar) y dónde está cada zona en él. */
   plan: PlanState | null;
+  /** Entradas por cuenta en la compra ('' = hasta el límite oficial; '1' en los grandes partidos). */
+  perAccountQty: string;
 }
 
 /** Valor del selector de recinto para «recinto nuevo, se crea al guardar». */
@@ -152,6 +158,7 @@ const FIELDS: readonly Field[] = [
   'preferredTargets',
   'planImage',
   'planPoints',
+  'perAccountQty',
 ];
 
 const MODE_LABEL: Record<ProviderMode, string> = {
@@ -240,6 +247,7 @@ function blank(providerId: string): FormState {
     newVenue: null,
     seats: [],
     plan: null,
+    perAccountQty: '',
   };
 }
 
@@ -268,6 +276,7 @@ function fromEvent(e: CatalogEvent): FormState {
     newVenue: null,
     seats: e.preferredTargets ?? [],
     plan: e.seatMap ?? null,
+    perAccountQty: e.perAccountQty ? String(e.perAccountQty) : '',
   };
 }
 
@@ -493,14 +502,49 @@ function AiSummary({
 
 // ---------------------------------------------------------------------------
 
-export function EventForm({ initial, imported, onDone }: { initial?: CatalogEvent; imported?: PageImport | null; onDone: (eventId: string | null) => void }) {
+export function EventForm({
+  initial,
+  imported,
+  top,
+  onDone,
+}: {
+  initial?: CatalogEvent;
+  imported?: PageImport | null;
+  /** ⭐ Gran partido que se prepara: vigilancia de 2 semanas y 1 entrada por cuenta. */
+  top?: TopMatch | null;
+  onDone: (eventId: string | null) => void;
+}) {
   const s = useLive();
   const now = useNow(30_000);
   const { run, busy } = useAction();
   const providers = useMemo(() => sortProviders(s.providerAuthorizations), [s.providerAuthorizations]);
   const venues = s.vault?.venues ?? [];
   // Un evento nuevo empieza por «Dónde se vende» (sin nada elegido).
-  const [f, setF] = useState<FormState>(() => (initial ? fromEvent(initial) : blank('')));
+  const [f, setF] = useState<FormState>(() =>
+    initial
+      ? fromEvent(initial)
+      : top
+        ? { ...blank(top.providerId ?? ''), watchDaysBefore: String(TOP_WATCH_DAYS), perAccountQty: String(TOP_PER_ACCOUNT) }
+        : blank(''),
+  );
+  /** El gran partido, como evento para que Claude lo lea directamente. */
+  const topSummary = useMemo<AiEventSummary | null>(
+    () =>
+      top
+        ? {
+            name: top.name,
+            startsAtLocal: top.startsAtLocal,
+            timeTBA: top.timeTBA,
+            venue: top.venue,
+            city: top.city,
+            url: top.ticketUrl,
+            saleOpensLocal: top.saleOpensLocal,
+            sourceUrl: null,
+            vaultVenueId: top.vaultVenueId,
+          }
+        : null,
+    [top],
+  );
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -836,6 +880,7 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
       officialSale: f.officialFeed ? f.officialSale : null,
       watchDaysBefore: Number(f.watchDaysBefore) || 0,
       preferredTargets: f.seats,
+      perAccountQty: f.perAccountQty === '' ? null : Number(f.perAccountQty),
       planImage: f.plan?.image ?? null,
       planPoints: f.plan?.points ?? [],
     };
@@ -950,6 +995,12 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
       <div className="form-section">
         <h3 className="sign">1 · Dónde se vende</h3>
         <div className="stack">
+          {top ? (
+            <Callout tone="good" icon="check">
+              <b>⭐ Gran partido: {top.name}</b> ({top.competition}). Se vigila desde <b>{TOP_WATCH_DAYS / 7} semanas antes de la venta</b> y va{' '}
+              <b>{TOP_PER_ACCOUNT} entrada por cuenta</b>: al abrir la venta, todas las cuentas van a la vez, cada una a por la suya.
+            </Callout>
+          ) : null}
           <div className="field" style={{ maxWidth: 520 }}>
             <label htmlFor="evf-provider">Web de venta</label>
             <select
@@ -989,7 +1040,13 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
           {provider && provider.mode !== 'SIMULATED' ? (
             aiReady ? (
               showAi ? (
-                <ClaudeEventPicker key={f.providerId} provider={provider} picked={aiPicked?.details.name ?? null} onPicked={applyAi} />
+                <ClaudeEventPicker
+                  key={f.providerId}
+                  provider={provider}
+                  picked={aiPicked?.details.name ?? null}
+                  onPicked={applyAi}
+                  autoPick={top && f.providerId === top.providerId ? topSummary : null}
+                />
               ) : (
                 <div>
                   <button type="button" className="btn sm" onClick={() => setShowAi(true)}>
@@ -1193,7 +1250,14 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
             </div>
             <div className="field">
               <label htmlFor="evf-watch">Vigilar desde</label>
-              <select id="evf-watch" className="input" value={f.watchDaysBefore} onChange={(e) => set('watchDaysBefore', e.target.value)}>
+              <select
+                id="evf-watch"
+                className="input"
+                value={f.watchDaysBefore}
+                disabled={Boolean(top)}
+                title={top ? 'Grandes partidos: siempre 2 semanas antes' : undefined}
+                onChange={(e) => set('watchDaysBefore', e.target.value)}
+              >
                 {WATCH_OPTIONS.map(([v, label]) => (
                   <option key={v} value={v}>
                     {label}
@@ -1399,6 +1463,21 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
 
       <div className="form-section">
         <h3 className="sign">5 · Dónde queréis las entradas</h3>
+        <div className="field" style={{ maxWidth: 520, marginBottom: 14 }}>
+          <label htmlFor="evf-per-account">Entradas por cuenta</label>
+          <select id="evf-per-account" className="input" value={f.perAccountQty} onChange={(e) => set('perAccountQty', e.target.value)}>
+            <option value="">Hasta el límite oficial de cada cuenta</option>
+            <option value="1">1 por cuenta (todas las cuentas a la vez: lo más seguro en los grandes partidos)</option>
+            <option value="2">2 por cuenta</option>
+            <option value="3">3 por cuenta</option>
+            <option value="4">4 por cuenta</option>
+          </select>
+          <span className="hint">
+            {f.perAccountQty === '1'
+              ? 'Al abrir la venta, cada cuenta va a por 1 entrada en tu 1ª zona; si no hay, a la 2ª y a la 3ª. Así, aunque alguna falle, las demás la consiguen.'
+              : 'La compra empieza con esto; se puede cambiar al prepararla.'}
+          </span>
+        </div>
         {f.venueId === NEW_VENUE && f.newVenue ? (
           <div className="row small" style={{ gap: 8 }}>
             <span className="muted">El recinto «{f.newVenue.name}» aún no está en la sala.</span>

@@ -63,6 +63,7 @@ export const HELP =
   '5. Paga en la web oficial y pulsa <b>💳 Ya lo he pagado</b>.\n\n' +
   '<b>Comandos</b>\n' +
   '/evento — crear un evento con Claude: web de venta → evento → dónde sentaros (chat principal)\n' +
+  '/top — los grandes partidos del año (Clásico, Champions, finales…), listos para preparar (chat principal)\n' +
   '/tareas — tus tareas abiertas, con botones\n' +
   '/estado — cómo va cada operación\n' +
   '/pausa — pausar lo que está en marcha (chat principal)\n' +
@@ -72,6 +73,7 @@ export const HELP =
 /** Menú de comandos que se pone en el bot al conectar (setMyCommands). */
 export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: 'evento', description: 'Crear un evento con Claude (chat principal)' },
+  { command: 'top', description: 'Grandes partidos del año (chat principal)' },
   { command: 'tareas', description: 'Tus tareas abiertas, con botones' },
   { command: 'estado', description: 'Cómo va cada operación' },
   { command: 'ayuda', description: 'Cómo responder rápido' },
@@ -238,6 +240,7 @@ export class TelegramNotifier implements Notifier {
         },
       },
       () => this.runtime?.ctx.eventAssistant ?? null,
+      () => this.runtime?.ctx.topMatches ?? null,
     );
   }
 
@@ -698,12 +701,13 @@ export class TelegramNotifier implements Notifier {
       return;
     }
     const main = chat === this.chatId;
-    if (cmd === '/evento' || cmd === '/nuevo') {
+    if (cmd === '/evento' || cmd === '/nuevo' || cmd === '/top') {
       if (!main) {
         this.send(chat, 'Solo el chat principal puede crear eventos.');
         return;
       }
-      await this.flow.start(chat);
+      if (cmd === '/top') await this.flow.startTop(chat);
+      else await this.flow.start(chat);
     } else if (cmd === '/estado') {
       const ops = rt.ctx.ops.summaries().filter((o) => !['CLOSED', 'CANCELLED'].includes(o.state));
       const lines = ops.map((o) => `• <b>${esc(o.name)}</b>: ${OPERATION_STATE_LABEL[o.state]} · ${o.cartedQty}/${o.requestedQty} en carrito`);

@@ -28,6 +28,7 @@ export const OperationPreferencesSchema = z.object({
   allowObstructed: z.boolean(),
   allowAccessible: z.boolean(),
   maxAmbiguity: z.number(),
+  maxPerAccount: z.number().int().min(1).max(100).nullable().optional(),
 });
 
 export const OperationConfigSchema = z.object({

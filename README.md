@@ -99,6 +99,10 @@ Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
 > La directiva europea Ómnibus prohíbe revender entradas compradas con medios automatizados que eludan los límites o controles del vendedor. Aquí todo lo hace una persona. Cada cuenta debe ser de una persona real que va a asistir; las entradas de socio del Real Madrid son personales e intransferibles.
 
+## ⭐ Grandes partidos
+
+Menú **⭐ Grandes partidos**: Claude busca a la vez (LaLiga, Champions, Copa y Supercopa, selecciones y finales) los **50 partidos más importantes** de los próximos 12 meses y los guarda en `data/top-partidos.json` (no se vuelve a pagar hasta **Actualizar**). **🎟 Preparar** abre el evento relleno: Claude lee el partido, **vigilancia desde 2 semanas antes de la venta** (fija), **1 entrada por cuenta** y el plano para tocar hasta 3 zonas. **Preparar la compra** marca todas las cuentas de esa web: al abrir, **todas van a la vez**, cada una a por su entrada (tope por cuenta de la operación, `preferences.maxPerAccount`, nunca por encima del límite oficial). **30, 10 y 2 minutos antes** de T0 el bot avisa a quien no tiene «Sesión lista» para que entre en la web oficial y en la sala de espera. En Telegram: **/top**. En **Recintos** están también los estadios de los clubes habituales de la Champions. Guía: `vault/00 Guía/Grandes partidos.md`.
+
 ## Plano visual de asientos
 
 - **Recintos · vault → (recinto)**: plano generado desde el vault. En un estadio, el campo en el centro, el **norte arriba** y cada grada en su lado (Fondo Norte arriba, Fondo Sur abajo, Lateral Oeste a la izquierda, Lateral Este a la derecha) con sus niveles como **anillos**: del más cercano al campo (dentro) al más alto (fuera). En pabellones y teatros, el **escenario arriba** y las gradas en «U» alrededor de la pista. Toca una zona para ver su nombre y cómo la llama la web.

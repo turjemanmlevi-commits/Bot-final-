@@ -70,10 +70,15 @@ El menú del bot se pone solo al conectarlo (botón **Menú** junto a la caja de
 | `/tareas` | Vuelve a enviar tus tareas abiertas con sus botones (en el chat principal, todas) | Chats configurados |
 | `/estado` | Operaciones activas y cuántas entradas hay en carrito | Chats configurados |
 | `/ayuda` | Cómo responder rápido y la lista de comandos | Chats configurados |
+| `/evento` | Crear un evento con Claude: web de venta → evento → datos → **✅ Crear** → plano oficial y hasta 3 zonas (🟢 1ª, 🟠 2ª, 🔵 3ª) | **Solo el chat principal** |
+| `/top` | ⭐ Los grandes partidos del año: tocar uno lo prepara (vigilancia desde 2 semanas antes y 1 entrada por cuenta) | **Solo el chat principal** |
 | `/pausa` | Pausa todas las operaciones en marcha | **Solo el chat principal** |
 | `/parar_todo` | Kill switch global: se para todo. Se suelta en el dashboard (*Seguridad*) | **Solo el chat principal** |
 
 A cualquier otro chat que escriba al bot solo se le contesta con su número: no recibe nada ni puede mandar nada.
+
+> [!tip] «Entrad ya en la web»
+> Con una compra armada, **30, 10 y 2 minutos antes** de que abra la venta el bot avisa a las personas cuya cuenta aún no tiene **✅ Sesión lista**, con el botón a la web oficial: que entren, inicien sesión y se pongan en la sala de espera. A la hora exacta llega a cada una su zona y cuántas.
 
 ## Problemas frecuentes
 

@@ -2,7 +2,7 @@
 # Genera las notas del vault (recinto, zonas y secciones) de datos.py.
 import os, re, shutil, sys, unicodedata
 sys.path.insert(0, os.path.dirname(__file__))
-from datos import STADIUMS, CONCERT_STADIUMS, ARENAS, BULLRINGS, FESTIVALS, SRC_LALIGA, SRC_ARENAS
+from datos import STADIUMS, CONCERT_STADIUMS, ARENAS, BULLRINGS, FESTIVALS, CHAMPIONS_STADIUMS, SRC_LALIGA, SRC_ARENAS, SRC_CHAMPIONS
 
 VAULT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), "..", "..", "vault")
 BASE = os.path.join(VAULT, "10 Recintos")
@@ -275,4 +275,12 @@ for d in BULLRINGS:
     v, intro, howto = bullring(d); total_files += v.write(intro, howto); made.append(v.name)
 for d in FESTIVALS:
     v, intro, howto = festival(d); total_files += v.write(intro, howto); made.append(v.name)
+for d in CHAMPIONS_STADIUMS:
+    v, _, howto = stadium(d, False)
+    v.source = SRC_CHAMPIONS + ". Gradas y niveles: estructura orientativa con los nombres habituales del estadio; " + ORIENT + "."
+    v.tags.append("champions")
+    v.clubs = d["clubs"]
+    intro = (f"Estadio del **{d['clubs'][0]}** ({d['country']}). Champions League: las entradas del equipo local las vende su club en su web oficial; "
+             "si vais con el equipo visitante (p. ej. el Real Madrid o el Atlético), la afición visitante compra a través de su propio club.")
+    total_files += v.write(intro, howto); made.append(v.name)
 print(f"{len(made)} recintos, {total_files} notas")

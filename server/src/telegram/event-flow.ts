@@ -14,8 +14,19 @@
  * Los botones llevan `ev:<sesión>:<acción>[:<n>]` (Telegram admite 64 bytes).
  */
 
-import { AI_STATUS_LABEL, MAX_PREFERENCES, PREFERENCE_EMOJI, type AiEventDetails, type AiEventSummary, type AiEventsResult } from '@to/shared';
+import {
+  AI_STATUS_LABEL,
+  MAX_PREFERENCES,
+  PREFERENCE_EMOJI,
+  TOP_PER_ACCOUNT,
+  TOP_WATCH_DAYS,
+  type AiEventDetails,
+  type AiEventSummary,
+  type AiEventsResult,
+  type TopMatch,
+} from '@to/shared';
 import type { CreatedFromAi, EventAssistant } from '../ai/assistant';
+import type { TopMatches } from '../ai/top';
 import { log } from '../util/log';
 
 export type FlowButton = { text: string; callback_data: string } | { text: string; url: string };
@@ -42,6 +53,10 @@ interface Session {
   seats: string[];
   busy: boolean;
   at: number;
+  /** ⭐ Grandes partidos: vigilancia de 2 semanas y 1 entrada por cuenta. */
+  top: boolean;
+  /** Web de venta de cada evento de la lista (en los grandes partidos cambia de uno a otro). */
+  providerIds: Array<string | null>;
 }
 
 const PAGE = 8;
@@ -74,7 +89,53 @@ export class TelegramEventFlow {
   constructor(
     private readonly io: FlowIO,
     private readonly assistant: () => EventAssistant | null,
+    private readonly topList: () => TopMatches | null = () => null,
   ) {}
+
+  /** «/top»: los grandes partidos del año; tocar uno lo prepara (vigilancia de 2 semanas, 1 entrada por cuenta). */
+  async startTop(chatId: string): Promise<void> {
+    const a = this.assistant();
+    const top = this.topList();
+    if (!a || !top) {
+      await this.io.send(chatId, 'Esta sala no tiene «Grandes partidos».');
+      return;
+    }
+    if (!a.configured()) {
+      await this.io.send(chatId, '🤖 <b>Claude no está conectado.</b>\nEn el dashboard: <b>Ajustes → Claude (IA)</b>, pega tu clave. Después vuelve a escribir /top.');
+      return;
+    }
+    const s = this.open(chatId);
+    s.top = true;
+    s.providerName = '⭐ Grandes partidos';
+    const state = top.state();
+    if (state.refreshing) {
+      await this.io.send(chatId, '🔎 Claude está buscando los grandes partidos… Te escribo al terminar (2–4 minutos).');
+      this.background(s, () => top.settled(), () => this.showTop(s));
+      return;
+    }
+    if (state.matches.length === 0) {
+      await this.io.send(chatId, '⭐ <b>Grandes partidos</b>\nAún no hay lista. Claude busca los 50 partidos más importantes de los próximos 12 meses (Clásico, Champions, finales, Copa, selección…). Tarda 2–4 minutos.', [
+        [{ text: '🔎 Buscar ahora con Claude', callback_data: `ev:${s.id}:t` }],
+        [{ text: 'Cancelar', callback_data: `ev:${s.id}:x` }],
+      ]);
+      return;
+    }
+    await this.showTop(s);
+  }
+
+  private async showTop(s: Session): Promise<void> {
+    const matches = this.topList()?.state().matches ?? [];
+    const upcoming = matches.filter((m) => m.eventId === null);
+    s.events = upcoming.map((m) => topToSummary(m));
+    s.providerIds = upcoming.map((m) => m.providerId);
+    s.page = 0;
+    const prepared = matches.length - upcoming.length;
+    const text = [
+      `⭐ <b>Grandes partidos</b> (${upcoming.length} por preparar${prepared > 0 ? `, ${prepared} ya preparados` : ''}).`,
+      `Toca uno: Claude lee sus datos y se prepara con vigilancia desde ${TOP_WATCH_DAYS / 7} semanas antes de la venta y ${TOP_PER_ACCOUNT} entrada por cuenta (todas las cuentas a la vez).`,
+    ].join('\n');
+    await this.io.send(s.chatId, text, this.eventsKeyboard(s));
+  }
 
   /** «/evento»: empieza eligiendo dónde se vende. */
   async start(chatId: string): Promise<void> {
@@ -130,7 +191,26 @@ export class TelegramEventFlow {
         this.background(s, () => a.find(seller.providerId), (r) => this.showEvents(s, r));
         return;
       }
+      case 't': {
+        const top = this.topList();
+        if (!top) return this.io.answer(callbackId, 'No disponible.');
+        if (s.busy) return this.io.answer(callbackId, 'Claude sigue buscando…');
+        await this.io.answer(callbackId, 'Buscando…');
+        if (messageId !== null) await this.io.edit(chatId, messageId, '🔎 Claude está buscando los grandes partidos de los próximos 12 meses… Te escribo al terminar (2–4 minutos).');
+        try {
+          top.refresh(actor);
+        } catch (err) {
+          await this.io.send(chatId, `❌ ${esc((err as Error).message)}`);
+          return;
+        }
+        this.background(s, () => top.settled(), () => this.showTop(s));
+        return;
+      }
       case 'r': {
+        if (s.top) {
+          // En los grandes partidos, «buscar otra vez» vuelve a pedir la lista a Claude.
+          return this.callback(chatId, messageId, callbackId, `ev:${s.id}:t`, actor, main);
+        }
         if (!s.providerId) return this.io.answer(callbackId, 'Elige antes la web de venta.');
         if (s.busy) return this.io.answer(callbackId, 'Claude sigue buscando…');
         const providerId = s.providerId;
@@ -147,9 +227,11 @@ export class TelegramEventFlow {
       }
       case 'e': {
         const ev = n === null ? undefined : s.events[n];
-        if (!ev || !s.providerId) return this.io.answer(callbackId, 'Ese evento ya no está en la lista.');
+        const eventProvider = (n === null ? null : (s.providerIds[n] ?? null)) ?? s.providerId;
+        if (!ev || !eventProvider) return this.io.answer(callbackId, 'Ese evento ya no está en la lista.');
         if (s.busy) return this.io.answer(callbackId, 'Claude sigue buscando…');
-        const providerId = s.providerId;
+        const providerId = eventProvider;
+        s.providerId = eventProvider;
         s.event = ev;
         s.details = null;
         await this.io.answer(callbackId, 'Leyendo el evento…');
@@ -172,7 +254,7 @@ export class TelegramEventFlow {
         s.busy = true;
         await this.io.answer(callbackId, 'Creando…');
         try {
-          const created = await a.create(s.providerId, d, saleName, actor);
+          const created = await a.create(s.providerId, d, saleName, actor, s.top ? { watchDays: TOP_WATCH_DAYS, perAccountQty: TOP_PER_ACCOUNT } : {});
           s.created = created;
           if (messageId !== null) await this.io.edit(chatId, messageId, this.detailsText(s, d), []);
           await this.showCreated(s, created);
@@ -235,7 +317,22 @@ export class TelegramEventFlow {
       this.sessions.delete(oldest);
     }
     const id = `${(++this.seq).toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
-    const s: Session = { id, chatId, providerId: null, providerName: '', events: [], page: 0, event: null, details: null, created: null, seats: [], busy: false, at: now };
+    const s: Session = {
+      id,
+      chatId,
+      providerId: null,
+      providerName: '',
+      events: [],
+      page: 0,
+      event: null,
+      details: null,
+      created: null,
+      seats: [],
+      busy: false,
+      at: now,
+      top: false,
+      providerIds: [],
+    };
     this.sessions.set(id, s);
     return s;
   }
@@ -346,9 +443,10 @@ export class TelegramEventFlow {
       `✅ <b>Evento creado:</b> ${esc(e.name)}`,
       `🏟 ${esc(c.venue.name)}${c.venue.created ? ' (recinto nuevo en la sala)' : ''}`,
       e.onSaleAt
-        ? `👀 Vigilancia desde 2 días antes de la venta: te aviso aquí el día antes, 1 hora antes y al abrir.`
+        ? `👀 Vigilancia desde ${s.top ? `${TOP_WATCH_DAYS / 7} semanas` : '2 días'} antes de la venta: te aviso aquí el día antes, 1 hora antes y al abrir.`
         : '👀 Vigilancia puesta: te aviso aquí (y pon la apertura en el dashboard cuando se anuncie).',
     ];
+    if (s.top) lines.push(`🎟 ${TOP_PER_ACCOUNT} entrada por cuenta: al abrir, todas las cuentas van a la vez (cada una a por la suya).`);
     if (!c.limitsVerified) lines.push('⚠️ <b>Límite sin verificar</b>: confírmalo en el dashboard (Eventos → editar) antes de preparar la compra.');
     if (c.warnings.length > 0) lines.push(`ℹ️ ${esc(cut(c.warnings.join(' · '), 300))}`);
     await this.io.send(s.chatId, lines.join('\n'));
@@ -380,4 +478,19 @@ export class TelegramEventFlow {
     rows.push([{ text: s.seats.length > 0 ? '✅ Listo' : 'Saltar (cualquier zona)', callback_data: `ev:${s.id}:k` }]);
     return rows;
   }
+}
+
+/** Un gran partido como evento de la lista (para leerlo con Claude). */
+function topToSummary(m: TopMatch): AiEventSummary {
+  return {
+    name: m.name,
+    startsAtLocal: m.startsAtLocal,
+    timeTBA: m.timeTBA,
+    venue: m.venue,
+    city: m.city,
+    url: m.ticketUrl,
+    saleOpensLocal: m.saleOpensLocal,
+    sourceUrl: null,
+    vaultVenueId: m.vaultVenueId,
+  };
 }

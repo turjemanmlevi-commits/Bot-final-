@@ -86,7 +86,13 @@ export class EventAssistant {
    * Crea el evento con los datos de Claude. `saleName` = la fase de venta cuya
    * hora es la apertura (undefined: la venta general próxima).
    */
-  async create(providerId: string, d: AiEventDetails, saleName: string | null | undefined, actor: string): Promise<CreatedFromAi> {
+  async create(
+    providerId: string,
+    d: AiEventDetails,
+    saleName: string | null | undefined,
+    actor: string,
+    opts: { watchDays?: number; perAccountQty?: number | null } = {},
+  ): Promise<CreatedFromAi> {
     const nowLocal = this.nowLocal();
     const draft = aiEventDraft(d, { saleName, today: nowLocal.slice(0, 10), nowLocal });
     if (!draft.startsAt) throw new AiError('INCOMPLETE', 'Claude no ha encontrado la fecha del evento: créalo desde el dashboard (Eventos → Nuevo evento).');
@@ -112,7 +118,8 @@ export class EventAssistant {
       officialFeed: null,
       officialId: null,
       officialSale: null,
-      watchDaysBefore: WATCH_DAYS,
+      watchDaysBefore: opts.watchDays ?? WATCH_DAYS,
+      perAccountQty: opts.perAccountQty ?? null,
       preferredTargets: [],
       planImage: d.planImageUrl,
       planPoints: [],

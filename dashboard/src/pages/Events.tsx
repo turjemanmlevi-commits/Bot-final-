@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
-import { decodeCapture, FEED_LABEL, LIMIT_SEMANTICS_LABEL, parsePageCapture, type CatalogEvent, type EventWatch, type PageImport, type ProviderMode } from '@to/shared';
+import { decodeCapture, FEED_LABEL, LIMIT_SEMANTICS_LABEL, parsePageCapture, type CatalogEvent, type EventWatch, type PageImport, type ProviderMode, type TopMatch } from '@to/shared';
 import { EventForm } from '../components/EventForm';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Pill } from '../components/ui';
+import { Api } from '../lib/api';
 import { fmtDateTime, fmtRel, fmtTime } from '../lib/format';
 import { useNow, useToast } from '../lib/hooks';
 import { useLive } from '../lib/store';
@@ -102,6 +103,7 @@ export function EventsPage() {
   const open = (target: CatalogEvent | 'new') => {
     setFlash(null);
     setImporting(null);
+    setTopMatch(null);
     setEditing(target);
   };
 
@@ -136,14 +138,37 @@ export function EventsPage() {
     setImporting({ page, seq: importSeq.current });
   }, [location.hash, location.pathname, location.search, navigate, s.vault, s.events, s.providerAuthorizations, toast]);
 
-  // /eventos?nuevo=1 abre el formulario de alta.
+  /** ⭐ Gran partido que se está preparando (de «Grandes partidos»). */
+  const [topMatch, setTopMatch] = useState<{ match: TopMatch; seq: number } | null>(null);
+  const topSeq = useRef(0);
+
+  // /eventos?nuevo=1 abre el formulario de alta (con &top=<id>, preparando ese gran partido).
   useEffect(() => {
     if (params.get('nuevo') !== '1') return;
-    setEditing('new');
+    const topId = params.get('top');
     const next = new URLSearchParams(params);
     next.delete('nuevo');
+    next.delete('top');
     setParams(next, { replace: true });
-  }, [params, setParams]);
+    setImporting(null);
+    if (!topId) {
+      setTopMatch(null);
+      setEditing('new');
+      return;
+    }
+    void Api.top()
+      .then((st) => {
+        const match = st.matches.find((m) => m.id === topId);
+        if (!match) {
+          toast('Ese partido ya no está en «Grandes partidos»: actualiza la lista.', 'error');
+          return;
+        }
+        topSeq.current += 1;
+        setTopMatch({ match, seq: topSeq.current });
+        setEditing('new');
+      })
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e), 'error'));
+  }, [params, setParams, toast]);
 
   // /eventos#<id> resalta ese evento.
   useEffect(() => {
@@ -192,9 +217,10 @@ export function EventsPage() {
       {editing ? (
         <div ref={formRef} style={{ scrollMarginTop: 16 }}>
           <EventForm
-            key={`${editing === 'new' ? 'new' : editing.id}-${importing?.seq ?? 0}`}
+            key={`${editing === 'new' ? 'new' : editing.id}-${importing?.seq ?? 0}-${topMatch?.seq ?? 0}`}
             initial={editing === 'new' ? undefined : editing}
             imported={importing?.page ?? null}
+            top={editing === 'new' ? (topMatch?.match ?? null) : null}
             onDone={done}
           />
         </div>

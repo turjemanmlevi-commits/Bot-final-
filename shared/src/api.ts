@@ -66,6 +66,11 @@ export interface CatalogEvent extends TicketEvent {
   watchDaysBefore: number | null;
   /** Dónde queréis sentaros, en orden (zonas o secciones): la operación empieza con estos objetivos. */
   preferredTargets: string[];
+  /**
+   * Entradas por cuenta en la compra (1 en los grandes partidos: todas las
+   * cuentas a la vez, una cada una), o null = hasta el límite oficial.
+   */
+  perAccountQty: number | null;
   /** Plano oficial (imagen tal cual se ve al comprar) y dónde está cada zona en él, o null. */
   seatMap: { image: string; points: Array<{ zone: string; x: number; y: number }> } | null;
 }

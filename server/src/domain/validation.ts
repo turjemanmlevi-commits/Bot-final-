@@ -121,6 +121,19 @@ export function validateConfig(config: OperationConfig, ctx: ValidationContext):
   if (event && event.limits.perAccount >= 1 && prefs.minGroupSize > event.limits.perAccount) {
     err('MIN_GROUP_ABOVE_ACCOUNT_LIMIT', 'preferences.minGroupSize', `Ninguna cuenta puede comprar grupos de ${prefs.minGroupSize}: el límite por cuenta es ${event.limits.perAccount}.`);
   }
+  if (prefs.maxPerAccount !== undefined && prefs.maxPerAccount !== null) {
+    if (!Number.isInteger(prefs.maxPerAccount) || prefs.maxPerAccount < 1) {
+      err('MAX_PER_ACCOUNT_INVALID', 'preferences.maxPerAccount', 'Las entradas por cuenta deben ser un número entero desde 1.');
+    } else if (prefs.minGroupSize > prefs.maxPerAccount) {
+      err('MIN_GROUP_ABOVE_PER_ACCOUNT', 'preferences.minGroupSize', `Con ${prefs.maxPerAccount} entrada${prefs.maxPerAccount === 1 ? '' : 's'} por cuenta, el grupo mínimo no puede ser ${prefs.minGroupSize}.`);
+    } else if (config.accountIds.length > 0 && config.requestedQty > config.accountIds.length * prefs.maxPerAccount) {
+      warn(
+        'PER_ACCOUNT_BELOW_REQUESTED',
+        'requestedQty',
+        `Con ${prefs.maxPerAccount} por cuenta y ${config.accountIds.length} cuenta${config.accountIds.length === 1 ? '' : 's'} no se llega a ${config.requestedQty} entradas.`,
+      );
+    }
+  }
   if (prefs.maxAmbiguity < 0 || prefs.maxAmbiguity > 1) {
     err('MAX_AMBIGUITY_INVALID', 'preferences.maxAmbiguity', 'La ambigüedad máxima va de 0 a 1.');
   } else if (prefs.maxAmbiguity > 0.5) {

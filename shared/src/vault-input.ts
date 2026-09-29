@@ -62,6 +62,8 @@ export const EventNoteInputSchema = z
     watchDaysBefore: z.number().int().min(0).max(60).nullable().optional(),
     /** Dónde queréis sentaros (zonas o secciones del recinto, en orden de preferencia). */
     preferredTargets: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+    /** Entradas por cuenta en la compra (1 en los grandes partidos; null = hasta el límite oficial). */
+    perAccountQty: z.number().int().min(1).max(20).nullable().optional(),
     /** Imagen del plano oficial (tal cual se ve al comprar) y dónde está cada zona en ella. */
     planImage: z.string().trim().max(1000).regex(/^https:\/\/\S+$/i, 'La imagen del plano tiene que ser un enlace https://').nullable().optional(),
     planPoints: z

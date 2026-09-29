@@ -12,6 +12,7 @@ import { ENV_FILE, ENV_TEMPLATE, env } from './env';
 import { APP_VERSION, createApp } from './app';
 import { EventAssistant } from './ai/assistant';
 import { ClaudeControl } from './ai/claude';
+import { TopMatches } from './ai/top';
 import { createHttpApp } from './http/app';
 import { FeedControl } from './feeds/control';
 import { EventWatcher } from './feeds/watcher';
@@ -154,6 +155,10 @@ async function main(): Promise<void> {
   );
   const authoring = new VaultAuthoring(app);
   app.runtime.ctx.eventAssistant = new EventAssistant(app, ai, authoring);
+  // ⭐ Grandes partidos: la lista se guarda junto a los datos (no se paga otra vez al reiniciar).
+  const top = new TopMatches({ app, ai, file: path.join(env.dataDir, 'top-partidos.json'), timeZone: env.timeZone });
+  await top.load();
+  app.runtime.ctx.topMatches = top;
 
   const dist = existsSync(path.join(env.dashboardDist, 'index.html')) ? env.dashboardDist : null;
   const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram, feeds, ai, authoring });

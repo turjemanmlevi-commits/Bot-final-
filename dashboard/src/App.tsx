@@ -11,6 +11,7 @@ import { AlertsPage } from './pages/Alerts';
 import { AuditPage } from './pages/Audit';
 import { CartsPage } from './pages/Carts';
 import { EventsPage } from './pages/Events';
+import { TopMatchesPage } from './pages/TopMatches';
 import { GuidePage } from './pages/Guide';
 import { OperationDetailPage } from './pages/OperationDetail';
 import { OperationFormPage } from './pages/OperationForm';
@@ -174,6 +175,7 @@ function Shell() {
             <span className="sign">Preparar</span>
             <NavItem to="/guia" icon="book" label="Cómo se compra" />
             <NavItem to="/cuentas" icon="users" label="Cuentas" />
+            <NavItem to="/grandes-partidos" icon="ticket" label="⭐ Grandes partidos" />
             <NavItem to="/eventos" icon="calendar" label="Eventos" />
             <NavItem to="/recintos" icon="map" label="Recintos · vault" />
           </div>
@@ -277,6 +279,7 @@ function Shell() {
               <Route path="/carritos" element={<CartsPage />} />
               <Route path="/alertas" element={<AlertsPage />} />
               <Route path="/cuentas" element={<AccountsPage />} />
+              <Route path="/grandes-partidos" element={<TopMatchesPage />} />
               <Route path="/eventos" element={<EventsPage />} />
               <Route path="/recintos" element={<VenuesPage />} />
               <Route path="/recintos/:hash" element={<VenueDetailPage />} />

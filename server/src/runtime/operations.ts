@@ -62,6 +62,13 @@ const STALE_AFTER_AUTOMATION = new Set<AlertKind>([
   'HUMAN_TASK',
 ]);
 
+/**
+ * «Entrad ya en la web»: minutos antes de T0 en que se avisa por Telegram a las
+ * personas cuya cuenta aún no tiene «Sesión lista» (asistencia manual), para
+ * que estén dentro de la web oficial y en la sala de espera cuando abra la venta.
+ */
+const ENTRY_REMINDERS_MIN = [30, 10, 2];
+
 const READINESS_PHASES: Array<{ phase: ReadinessPhase; beforeMs: number }> = [
   { phase: 'T-12h', beforeMs: 12 * 3600_000 },
   { phase: 'T-1h', beforeMs: 3600_000 },
@@ -492,6 +499,7 @@ export class OperationService {
           budget: r.config.budget,
           limits,
           accounts: accounts.map((a) => ({ id: a.id, groupKey: groupKeyFor(a, limits.semantics) ?? `cuenta:${a.id}` })),
+          perAccountCap: r.config.preferences.maxPerAccount ?? null,
         });
         this.ctx.store.putAllocation(alloc);
         this.ctx.journal.audit('allocation.init', { state: alloc, hash: hashOf(alloc) }, { operationId: r.id });
@@ -638,6 +646,8 @@ export class OperationService {
 
   private lastClockSync = new Map<string, number>();
   private lastNoProgressCheck = new Map<Id, number>();
+  /** Avisos «entrad ya» ya enviados («operación:minutos»). */
+  private readonly entryReminded = new Set<string>();
 
   scheduleTick(): void {
     const now = this.ctx.now();
@@ -657,6 +667,7 @@ export class OperationService {
             this.lastClockSync.set(r.config.providerId, now);
             void this.syncClock(r.config.providerId);
           }
+          this.entryReminders(r, now, t0);
           // Si se arma tarde y vencen varias fases a la vez, solo se evalúa la más reciente.
           const due = READINESS_PHASES.filter((p) => now >= t0 - p.beforeMs && now < t0 && !r.readinessPhasesDone.includes(p.phase));
           const latest = due.at(-1);
@@ -690,6 +701,36 @@ export class OperationService {
         this.ctx.journal.audit('scheduler.error', { error: (err as Error).message }, { operationId: r.id });
       }
     }
+  }
+
+  /** «Entrad ya en la web oficial» a las cuentas sin «Sesión lista», 30, 10 y 2 minutos antes de T0. */
+  private entryReminders(r: OperationRecord, now: number, t0: number): void {
+    const ctx = this.ctx;
+    if (ctx.registry.descriptor(r.config.providerId)?.mode !== 'MANUAL_ASSIST' || now >= t0) return;
+    const due = ENTRY_REMINDERS_MIN.filter((m) => now >= t0 - m * 60_000 && !this.entryReminded.has(`${r.id}:${m}`));
+    const latest = due.at(-1);
+    if (latest === undefined) return;
+    // Si vencen varios a la vez (se armó tarde), solo se manda el más cercano.
+    for (const m of due) this.entryReminded.add(`${r.id}:${m}`);
+    const notReady = r.config.accountIds
+      .map((id) => ctx.store.accounts.get(id))
+      .filter((a): a is NonNullable<typeof a> => a !== undefined && a.session.state !== 'READY');
+    if (notReady.length === 0) return;
+    const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const event = ctx.store.events.get(r.config.eventId);
+    const clock = new Intl.DateTimeFormat('es-ES', { timeZone: ctx.cfg.timeZone, hour: '2-digit', minute: '2-digit' }).format(new Date(t0));
+    const minutes = Math.max(1, Math.round((t0 - now) / 60_000));
+    const head = latest <= 2 ? `🚨 <b>¡Últimos ${minutes} min!</b>` : `⏰ <b>Faltan ${minutes} min</b>`;
+    ctx.notifier?.announce?.(
+      `${head} para la venta de <b>${esc(r.config.name)}</b> (${clock}).
+` +
+        `Entrad YA en la web oficial, iniciad sesión y poneos en la sala de espera: ${notReady.map((a) => `«${esc(a.label)}»`).join(', ')}.
+` +
+        'Cuando estéis dentro, pulsad «✅ Sesión lista» en vuestra tarea: a la hora exacta os llega la zona y la cantidad.',
+      notReady.map((a) => a.id),
+      event?.url ?? ctx.registry.authorization(r.config.providerId)?.url ?? null,
+    );
+    ctx.journal.audit('operation.entry_reminder', { minutesBefore: latest, accounts: notReady.map((a) => a.id) }, { operationId: r.id });
   }
 
   private checkNoProgress(r: OperationRecord, now: number): void {

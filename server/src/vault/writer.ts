@@ -101,6 +101,7 @@ function eventProps(input: EventNoteInput, ctx: EventWriteContext): Record<strin
     watchDaysBefore: input.watchDaysBefore ?? null,
     // Sin el campo (p. ej. al editar desde otra pantalla) se conservan los que hubiera.
     ...(input.preferredTargets !== undefined ? { preferredTargets: input.preferredTargets } : {}),
+    ...(input.perAccountQty !== undefined ? { perAccountQty: input.perAccountQty } : {}),
     ...(input.planImage !== undefined ? { planImage: input.planImage } : {}),
     ...(input.planPoints !== undefined ? { planPoints: input.planPoints.map(formatPlanPoint) } : {}),
   };
@@ -116,6 +117,7 @@ function eventBody(input: EventNoteInput, providerNote: string): string {
   if (input.url) lines.push(`- Página oficial: ${input.url}`);
   if (input.officialFeed && input.officialId) lines.push(`- Elegido de la fuente oficial (${OFFICIAL_LABEL[input.officialFeed]}): \`${input.officialId}\``);
   if (input.preferredTargets && input.preferredTargets.length > 0) lines.push(`- Dónde queremos sentarnos (en orden): ${input.preferredTargets.join(' → ')}`);
+  if (input.perAccountQty) lines.push(`- Entradas por cuenta: ${input.perAccountQty} (todas las cuentas a la vez)`);
   if (input.planImage) lines.push(`- Plano oficial: ${input.planImage}`);
   if (input.limitsSource) lines.push(`- Condiciones / límites: ${input.limitsSource}`);
   if (input.watchDaysBefore) {
@@ -163,6 +165,7 @@ export async function createEventNote(input: EventNoteInput, eventId: string, ct
     id: eventId,
     ...eventProps(input, ctx),
     preferredTargets: input.preferredTargets ?? [],
+    perAccountQty: input.perAccountQty ?? null,
     planImage: input.planImage ?? null,
     planPoints: (input.planPoints ?? []).map(formatPlanPoint),
     closedSections: [],

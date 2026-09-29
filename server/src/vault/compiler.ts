@@ -608,7 +608,7 @@ class Compiler {
   }
 
   /** Evento elegido de una fuente oficial y vigilancia (propiedades opcionales). */
-  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap'> {
+  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap' | 'perAccountQty'> {
     const feedRaw = asString(note.data.officialFeed);
     const idRaw = asString(note.data.officialId) ?? (typeof note.data.officialId === 'number' ? String(note.data.officialId) : null);
     let officialFeed: FeedId | null = null;
@@ -629,7 +629,19 @@ class Compiler {
       watchDaysBefore: watch,
       preferredTargets: asStringList(note.data.preferredTargets).slice(0, 30),
       seatMap: this.seatMap(note),
+      perAccountQty: this.perAccountQty(note),
     };
+  }
+
+  /** Entradas por cuenta en la compra (perAccountQty: entero de 1 a 20). */
+  private perAccountQty(note: VaultNote): number | null {
+    const n = asNumber(note.data.perAccountQty);
+    if (n === null) return null;
+    if (!Number.isInteger(n) || n < 1 || n > 20) {
+      this.warn(note.file, '`perAccountQty` debe ser un número entero de entradas por cuenta entre 1 y 20');
+      return null;
+    }
+    return n;
   }
 
   /** Plano oficial (planImage) y dónde está cada zona en él (planPoints: «Zona @ x,y»). */

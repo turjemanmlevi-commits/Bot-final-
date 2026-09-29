@@ -277,10 +277,15 @@ describe('compra real coordinada (API + asistencia manual)', () => {
     await clock.advance(t0 - clock.now() + 1000);
     const running = await call<OperationDetail>('GET', `/api/operations/${opId}`);
     assert.equal(running.json.summary.state, 'RUNNING');
-    assert.equal(announced.length, 1, 'aviso de apertura a todo el grupo');
-    assert.match(announced[0]?.text ?? '', /Abre la venta/);
-    assert.match(announced[0]?.text ?? '', /2 cuentas sin «Sesión lista»/);
-    assert.equal(announced[0]?.link, rmEvent.url);
+    const opening = announced.filter((a) => /Abre la venta/.test(a.text));
+    assert.equal(opening.length, 1, 'aviso de apertura a todo el grupo');
+    assert.match(opening[0]?.text ?? '', /2 cuentas sin «Sesión lista»/);
+    assert.equal(opening[0]?.link, rmEvent.url);
+    // Antes de abrir: «entrad ya en la web» a quien no tenía la sesión lista (al armar, a T−5, y a T−2).
+    const entry = announced.filter((a) => /Entrad YA en la web oficial/.test(a.text));
+    assert.equal(entry.length, 2);
+    assert.equal(entry[0]?.link, rmEvent.url);
+    assert.match(entry[1]?.text ?? '', /Últimos/);
 
     // Ana inicia sesión en la web oficial y lo confirma.
     const anaSession = sessionTasks.find((t) => t.accountId === ana.json.id);

@@ -28,8 +28,11 @@ import {
   type AiSeatMap,
   type AiSeatMapQuery,
   type AiStatus,
+  type AiTopMatch,
   type LimitSemantics,
   type PlanPoint,
+  type TopCategory,
+  TOP_CATEGORIES,
 } from '@to/shared';
 import type { Runtime } from '../runtime/runtime';
 import { updateEnvFile } from '../util/envfile';
@@ -188,6 +191,44 @@ const DETAILS_TOOL: Anthropic.Beta.BetaTool = {
       },
       notes: { type: 'string', description: 'Avisos breves en español (o cadena vacía)' },
       sources: { type: 'array', items: { type: 'string' }, description: 'Enlaces consultados que respaldan los datos' },
+    },
+  },
+};
+
+const TOP_TOOL: Anthropic.Beta.BetaTool = {
+  name: 'entregar_partidos',
+  description: 'Entrega la lista final de grandes partidos. Llámala una sola vez, al terminar.',
+  strict: true,
+  input_schema: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['matches', 'notes'],
+    properties: {
+      matches: {
+        type: 'array',
+        description: 'Partidos encontrados (como mucho 15)',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['home', 'away', 'competition', 'category', 'importance', 'why', 'date', 'time', 'venue', 'city', 'country', 'ticketUrl', 'saleOpens'],
+          properties: {
+            home: nullable('Equipo local (null si aún no se sabe, p. ej. una final)'),
+            away: nullable('Equipo visitante (null si aún no se sabe)'),
+            competition: { type: 'string', description: 'Competición y ronda: «LaLiga · Jornada 10», «Champions League · Final»' },
+            category: { type: 'string', enum: ['CLASICO', 'CHAMPIONS', 'FINAL', 'COPA', 'SUPERCOPA', 'SELECCION', 'LALIGA', 'OTRO'] },
+            importance: { type: 'integer', description: 'De 1 a 100: lo importante y lo difícil que es conseguir entrada (Clásico o final: 90-100)' },
+            why: { type: 'string', description: 'Por qué es de los grandes, en una frase corta' },
+            date: nullable('Fecha AAAA-MM-DD (null si aún no hay fecha)'),
+            time: nullable('Hora de España HH:MM (null si no está fijada)'),
+            venue: nullable('Estadio'),
+            city: nullable('Ciudad'),
+            country: nullable('País'),
+            ticketUrl: nullable('Página oficial de venta de entradas (club local, UEFA, RFEF…)'),
+            saleOpens: nullable('Apertura de la venta en España: AAAA-MM-DDTHH:MM (null si no se sabe)'),
+          },
+        },
+      },
+      notes: { type: 'string', description: 'Avisos breves en español (o cadena vacía)' },
     },
   },
 };
@@ -389,6 +430,10 @@ export class ClaudeControl {
         `Empieza leyendo ${site} con web_fetch. Si no se puede leer o sale vacía, busca con web_search (por ejemplo «site:${domain} entradas») y en las webs oficiales de los clubes, recintos o promotores.`,
         'Para cada evento: nombre tal y como lo publica la web, fecha, hora, recinto, ciudad, enlace a su página de venta (mejor en el dominio de la web de venta) y, si ya está anunciada, la apertura de la venta.',
         'Solo eventos reales que vende esta web. Ordénalos por fecha. Si la lista es muy larga, prioriza los grandes (estadios, pabellones, festivales).',
+        `Recintos que ya tenemos (prioriza sus eventos): ${this.vaultVenues()
+          .map((v) => v.name)
+          .slice(0, 120)
+          .join(', ')}.`,
         `Cuando acabes, llama a ${EVENTS_TOOL.name}.`,
       ].join('\n');
       const { input, cost } = await this.research(prompt, EVENTS_TOOL, { effort: 'medium', searches: 8, fetches: 6 });
@@ -504,6 +549,54 @@ export class ClaudeControl {
     };
     if (q.fresh) return load();
     return this.cached(this.detailsCache, key, load);
+  }
+
+  /**
+   * Grandes partidos de un tipo (Clásico y derbis, Champions, Copa…) entre dos
+   * fechas. Los junta y ordena el servicio de grandes partidos.
+   */
+  async topMatches(q: { focus: string; from: string; to: string; max: number }): Promise<{ matches: AiTopMatch[]; notes: string; cost: AiCost }> {
+    const prompt = [
+      `Hoy es ${q.from} (hora de Madrid). Busca los partidos de fútbol más importantes entre ${q.from} y ${q.to} de este tipo:`,
+      q.focus,
+      'Son para un grupo de aficionados en España que quiere conseguir entradas: prioriza los que se juegan en España o con equipos españoles, y los más difíciles de conseguir.',
+      'Usa fuentes oficiales (LaLiga, UEFA, RFEF, FIFA, webs de los clubes) y prensa fiable para el calendario. Si la fecha o la hora aún no están fijadas, pon null (no la inventes).',
+      `Como mucho ${q.max} partidos. Para cada uno: equipos, competición y ronda, categoría, importancia (1-100) y por qué, fecha y hora, estadio, ciudad, país, la página oficial de venta de entradas y, si ya se sabe, cuándo abre la venta.`,
+      'Cuando acabes, llama a entregar_partidos.',
+    ].join('\n');
+    const { input, cost } = await this.research(prompt, TOP_TOOL, { effort: 'medium', searches: 6, fetches: 3 });
+    const raw = input as { matches?: unknown[]; notes?: unknown };
+    const matches: AiTopMatch[] = [];
+    for (const item of Array.isArray(raw.matches) ? raw.matches : []) {
+      const m = item as Record<string, unknown>;
+      const home = str(m.home, 80);
+      const away = str(m.away, 80);
+      const competition = str(m.competition, 120) ?? '';
+      const name = home && away ? `${home} - ${away}` : (str(m.competition, 120) ?? '');
+      if (name.length < 3) continue;
+      const when = localFrom(m.date, m.time);
+      if (when.local && (when.local.slice(0, 10) < q.from || when.local.slice(0, 10) > q.to)) continue;
+      const category = typeof m.category === 'string' && (TOP_CATEGORIES as readonly string[]).includes(m.category) ? (m.category as TopCategory) : 'OTRO';
+      const importance = typeof m.importance === 'number' && Number.isFinite(m.importance) ? Math.max(1, Math.min(100, Math.round(m.importance))) : 50;
+      const sale = str(m.saleOpens, 20);
+      matches.push({
+        name,
+        home,
+        away,
+        competition,
+        category,
+        importance,
+        why: str(m.why, 200) ?? '',
+        startsAtLocal: when.local,
+        timeTBA: when.timeTBA,
+        venue: str(m.venue, 160),
+        city: str(m.city, 80),
+        country: str(m.country, 60),
+        ticketUrl: httpUrl(m.ticketUrl),
+        saleOpensLocal: sale && LOCAL_RE.test(sale) ? sale : null,
+      });
+    }
+    return { matches: matches.slice(0, q.max), notes: str(raw.notes, 400) ?? '', cost };
   }
 
   /**

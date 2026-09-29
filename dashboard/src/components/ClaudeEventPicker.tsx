@@ -39,11 +39,14 @@ export function ClaudeEventPicker({
   provider,
   picked,
   onPicked,
+  autoPick,
 }: {
   provider: ProviderAuthorization;
   /** Nombre del evento ya elegido (para marcarlo en la lista). */
   picked: string | null;
   onPicked: (details: AiEventDetails) => void;
+  /** Evento ya elegido fuera (un gran partido): Claude lee sus datos directamente, sin lista. */
+  autoPick?: AiEventSummary | null;
 }) {
   const s = useLive();
   const now = useNow(1000);
@@ -69,8 +72,14 @@ export function ClaudeEventPicker({
     }
   };
 
-  // Al elegir la web de venta, Claude se pone a buscar solo.
+  // Al elegir la web de venta, Claude se pone a buscar solo (o lee directamente el gran partido elegido).
   useEffect(() => {
+    if (autoPick && picked === null) {
+      void choose(autoPick);
+      return () => {
+        run.current++;
+      };
+    }
     if (picked === null) void search(false);
     return () => {
       run.current++;

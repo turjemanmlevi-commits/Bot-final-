@@ -32,7 +32,7 @@ const STEPS: Step[] = [
     who: 'Tú',
     title: 'Evento: enlace oficial, hora de la venta y límites',
     icon: 'calendar',
-    text: 'Eventos → Nuevo evento. Primero «Dónde se vende»: con Claude conectado (Ajustes → Claude), Claude busca sus próximos eventos; eliges uno y lee su fecha, la apertura, cuántas entradas se pueden comprar por persona (con la frase de las condiciones), el recinto y su plano oficial. En «5 · Dónde queréis las entradas» toca hasta 3 sitios del plano (🟢 1ª, 🟠 2ª, 🔵 3ª preferencia). Sin Claude: marcador «📥 Enviar a la sala» o la lista oficial. «Vigilar desde: 2 días antes» avisa por Telegram. En Telegram también: /evento. Si el límite no sale de la web oficial, compruébalo y marca «He comprobado estos límites».',
+    text: 'Eventos → Nuevo evento. Primero «Dónde se vende»: con Claude conectado (Ajustes → Claude), Claude busca sus próximos eventos; eliges uno y lee su fecha, la apertura, cuántas entradas se pueden comprar por persona (con la frase de las condiciones), el recinto y su plano oficial. En «5 · Dónde queréis las entradas» toca hasta 3 sitios del plano (🟢 1ª, 🟠 2ª, 🔵 3ª preferencia). Sin Claude: marcador «📥 Enviar a la sala» o la lista oficial. «Vigilar desde: 2 días antes» avisa por Telegram. En Telegram también: /evento. Los grandes partidos del año (Clásico, Champions, finales…) están en «⭐ Grandes partidos»: «Preparar» los deja vigilados desde 2 semanas antes y con 1 entrada por cuenta (todas las cuentas a la vez). Si el límite no sale de la web oficial, compruébalo y marca «He comprobado estos límites».',
     link: { to: '/eventos', label: 'Ir a Eventos' },
   },
   {
