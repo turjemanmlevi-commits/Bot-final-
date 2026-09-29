@@ -34,6 +34,7 @@ import { COMPILER_VERSION } from '../vault/compiler';
 import { hashOf } from '../util/hash';
 import { seedFrom } from '../util/rng';
 import { iso } from '../util/time';
+import type { TimerHandle } from '../util/clock';
 import type { Ctx } from './context';
 import type { OperationRecord } from './store';
 
@@ -214,6 +215,14 @@ export class OperationService {
       );
     }
     switch (r.state) {
+      case 'ARMED':
+        // Despertador exacto para congelar y para T0 (el tick de 250 ms queda de respaldo).
+        this.wakeAt(r.id, this.effectiveT0(r) - r.config.freezeLeadSeconds * 1000);
+        this.wakeAt(r.id, this.effectiveT0(r));
+        break;
+      case 'FROZEN':
+        this.wakeAt(r.id, this.effectiveT0(r));
+        break;
       case 'RUNNING':
         ctx.metrics.start(r.id);
         ctx.runners.start(r.id);
@@ -588,6 +597,25 @@ export class OperationService {
     const after = this.ctx.now();
     const skew = r.value - (before + after) / 2;
     this.ctx.store.clockSkew.set(providerId, Math.round(skew));
+    // Reprograma al momento los despertadores de T0 con el nuevo desfase.
+    this.scheduleTick();
+  }
+
+  private readonly wakeTimers = new Map<string, TimerHandle>();
+
+  /**
+   * Ejecuta el scheduler justo en `atMs` (congelado y T0 al milisegundo, sin
+   * esperar al siguiente tick). Un despertador por operación e instante.
+   */
+  private wakeAt(id: Id, atMs: number): void {
+    const key = `${id}@${atMs}`;
+    if (this.wakeTimers.has(key)) return;
+    const delay = Math.max(0, atMs - this.ctx.now());
+    const handle = this.ctx.clock.setTimeout(() => {
+      this.wakeTimers.delete(key);
+      this.scheduleTick();
+    }, delay);
+    this.wakeTimers.set(key, handle);
   }
 
   private lastClockSync = new Map<string, number>();
@@ -602,6 +630,10 @@ export class OperationService {
       const end = this.windowEnd(r);
       try {
         if (r.state === 'ARMED' || r.state === 'FROZEN') {
+          // El desfase con el reloj del proveedor puede cambiar tras cada sincronización:
+          // el despertador sigue siempre al T0 efectivo vigente (no crea timers repetidos).
+          if (r.state === 'ARMED') this.wakeAt(r.id, t0 - r.config.freezeLeadSeconds * 1000);
+          if (now < t0) this.wakeAt(r.id, t0);
           const last = this.lastClockSync.get(r.config.providerId) ?? 0;
           if (now - last > this.ctx.cfg.clockSyncMs) {
             this.lastClockSync.set(r.config.providerId, now);

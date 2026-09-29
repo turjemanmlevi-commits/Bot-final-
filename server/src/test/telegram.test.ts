@@ -34,7 +34,10 @@ class FakeTelegram {
       req.on('data', (c: Buffer) => (raw += c.toString()));
       req.on('end', () => {
         const m = /^\/bot([^/]+)\/(\w+)$/.exec(req.url ?? '');
+        let replied = false;
         const reply = (json: unknown) => {
+          if (replied) return;
+          replied = true;
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify(json));
         };

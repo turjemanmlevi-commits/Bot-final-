@@ -95,6 +95,20 @@ export const SCENARIOS: Record<string, ScenarioParams> = {
     failures: { ambiguousRate: 0, priceChangeRate: 0, rateLimitRate: 0, readFailRate: 0, driftAfterMs: null },
     serverSkewMs: 20,
   },
+  'sin-cola': {
+    ...BASE,
+    id: 'sin-cola',
+    name: 'Sin cola (velocidad pura)',
+    description:
+      'Sin cola virtual, sin retos ni fallos y con la web respondiendo como una API rápida: mide la velocidad propia del sistema de T0 al carrito.',
+    challengeRate: 0,
+    queue: { minPassMs: 0, maxPassMs: 0, maxPosition: 1, expireRate: 0 },
+    inventory: { ...BASE.inventory, unknownLabelRate: 0, zoneOnlyRate: 0, duplicateRate: 0 },
+    competitionPerSec: 0,
+    latency: { add: { median: 25, p95: 60 }, read: { median: 10, p95: 25 } },
+    failures: { ambiguousRate: 0, priceChangeRate: 0, rateLimitRate: 0, readFailRate: 0, driftAfterMs: null },
+    serverSkewMs: 0,
+  },
 };
 
 export const DEFAULT_SCENARIO = 'demo';

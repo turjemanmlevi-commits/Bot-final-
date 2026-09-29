@@ -139,8 +139,13 @@ export class AutomatedRunner implements Runner {
             .catch(() => null)
             .then((info) => {
               st.queuePolling = false;
-              st.nextQueuePollAt = ctx.now() + ctx.cfg.queuePollMs;
+              // Si el proveedor da una estimación, se vuelve a mirar justo cuando toca
+              // (mínimo 20 ms, máximo queuePollMs): se detecta la salida de la cola al momento.
+              const eta = info && (info.state === 'WAITING' || info.state === 'NOT_OPEN') ? info.etaMs : null;
+              const delay = eta !== null && eta !== undefined ? Math.min(ctx.cfg.queuePollMs, Math.max(20, eta)) : ctx.cfg.queuePollMs;
+              st.nextQueuePollAt = ctx.now() + delay;
               if (info?.state === 'PASSED') this.tick();
+              else if (!this.stopped) ctx.clock.setTimeout(() => this.tick(), delay);
             });
         }
         continue;
