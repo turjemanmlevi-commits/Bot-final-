@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { Link } from 'react-router';
-import type { ProviderAuthorization, ProviderDescriptor, ProviderMode } from '@to/shared';
+import { useEffect, useState, type ReactNode } from 'react';
+import { Link, useLocation } from 'react-router';
+import type { FeedId, FeedStatus, ProviderAuthorization, ProviderDescriptor, ProviderMode } from '@to/shared';
 import { Icon, type IconName } from '../components/Icon';
 import { Callout, Card, Pill, type Tone } from '../components/ui';
 import { Api } from '../lib/api';
@@ -646,17 +646,220 @@ function SystemCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Fuentes oficiales de eventos
+// ---------------------------------------------------------------------------
+
+/** La clave dentro de lo pegado (sin espacios, comillas ni «Consumer Key:» delante). */
+function extractKey(raw: string): string | null {
+  const words = raw.match(/[A-Za-z0-9_-]{20,100}/g) ?? [];
+  return words.sort((a, b) => b.length - a.length)[0] ?? null;
+}
+
+const FEED_STEPS: Record<FeedId, { title: string; what: string; steps: ReactNode; label: string; placeholder: string; signup: string; signupLabel: string }> = {
+  ticketmaster: {
+    title: 'Ticketmaster',
+    what: 'Próximos eventos de cada recinto en Ticketmaster, con la hora de la venta (y las preventas) y el límite de compra oficiales. Y la vigilancia antes de la venta.',
+    steps: (
+      <ol style={{ margin: 0, paddingLeft: 20 }}>
+        <li>
+          Entra en <b>developer.ticketmaster.com</b> y pulsa <b>Get your API key</b> (crear cuenta: nombre, email y contraseña; es gratis).
+        </li>
+        <li>
+          Confirma el email. Arriba a la derecha, tu nombre → <b>My Apps</b>: ya hay una app creada.
+        </li>
+        <li>
+          Copia la <b>Consumer Key</b> (la primera clave larga; la «Consumer Secret» no hace falta) y pégala aquí.
+        </li>
+      </ol>
+    ),
+    label: 'Consumer Key de Ticketmaster',
+    placeholder: 'p. ej. 7elxdku9GGG5k8j0Xm8KWdANDgecHMV0',
+    signup: 'https://developer-acct.ticketmaster.com/user/register',
+    signupLabel: 'Crear la clave gratis',
+  },
+  football: {
+    title: 'Partidos de LaLiga y Champions',
+    what: 'Próximos partidos en casa de cada estadio de LaLiga (Real Madrid en el Bernabéu, Atlético en el Metropolitano…), con la fecha y la hora oficiales, y aviso cuando LaLiga fija o cambia la hora.',
+    steps: (
+      <ol style={{ margin: 0, paddingLeft: 20 }}>
+        <li>
+          Entra en <b>football-data.org</b> → <b>Register</b> (nombre y email; plan <b>Free</b>).
+        </li>
+        <li>Te llega un email con tu «API token» (una clave larga).</li>
+        <li>Cópialo y pégalo aquí.</li>
+      </ol>
+    ),
+    label: 'Token de football-data.org',
+    placeholder: 'p. ej. 0a1b2c3d4e5f60718293a4b5c6d7e8f9',
+    signup: 'https://www.football-data.org/client/register',
+    signupLabel: 'Pedir el token gratis',
+  },
+};
+
+function FeedBlock({ feed, status, configurable }: { feed: FeedId; status: FeedStatus; configurable: boolean }) {
+  const toast = useToast();
+  const info = FEED_STEPS[feed];
+  const [input, setInput] = useState('');
+  const [changing, setChanging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState<Outcome | null>(null);
+
+  const report = (ok: boolean, message: string) => {
+    setLast({ ok, message, at: new Date().toISOString() });
+    toast(message, ok ? 'info' : 'error');
+  };
+
+  const save = async (key: string | null) => {
+    setBusy(true);
+    try {
+      const r = await Api.feedSetKey(feed, key);
+      report(r.ok, r.message);
+      if (r.ok) {
+        setInput('');
+        setChanging(false);
+      }
+    } catch (e) {
+      report(false, e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connect = () => {
+    const key = extractKey(input);
+    if (!key) {
+      report(false, 'Eso no parece una clave: copia la clave larga entera (solo letras y números).');
+      return;
+    }
+    void save(key);
+  };
+
+  const pill = !status.configured ? (
+    <Pill tone="warning">Sin clave</Pill>
+  ) : status.ok === false ? (
+    <Pill tone="critical">No funciona</Pill>
+  ) : status.ok ? (
+    <Pill tone="good">Conectado</Pill>
+  ) : (
+    <Pill tone="good">Clave puesta</Pill>
+  );
+
+  const form = (
+    <div className="stack" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+        <div className="field" style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <label htmlFor={`feed-${feed}`}>{info.label}</label>
+          <input
+            id={`feed-${feed}`}
+            className="input mono"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy && input.trim()) connect();
+            }}
+            placeholder={info.placeholder}
+          />
+        </div>
+        <button type="button" className="btn primary" disabled={busy || !input.trim()} onClick={connect}>
+          <Icon name="link" size={15} /> {busy ? 'Comprobando…' : 'Conectar'}
+        </button>
+        {changing ? (
+          <button type="button" className="btn" disabled={busy} onClick={() => setChanging(false)}>
+            Cancelar
+          </button>
+        ) : null}
+      </div>
+      <div className="small muted">Se comprueba al momento y se guarda solo en este ordenador (archivo .env, que no se sube a ningún sitio). No hace falta reiniciar.</div>
+    </div>
+  );
+
+  return (
+    <div className="stack" style={{ gap: 10 }}>
+      <div className="row" style={{ gap: 10 }}>
+        <b style={{ fontSize: 16 }}>{info.title}</b>
+        {pill}
+      </div>
+      <div className="small ink2">{info.what}</div>
+      {status.configured ? <div className="small">{status.detail}</div> : null}
+      {last ? (
+        <Callout tone={last.ok ? 'good' : 'critical'}>
+          {fmtTime(last.at)} — {last.message}
+        </Callout>
+      ) : null}
+      {!configurable ? (
+        <Callout tone="warning">
+          Este servidor no permite ponerla desde aquí: escribe <code>{feed === 'ticketmaster' ? 'TICKETMASTER_API_KEY' : 'FOOTBALL_DATA_TOKEN'}</code> en el archivo{' '}
+          <code>.env</code> y reinicia.
+        </Callout>
+      ) : status.configured && !changing ? (
+        <div className="row" style={{ gap: 8 }}>
+          <button type="button" className="btn sm" disabled={busy} onClick={() => setChanging(true)}>
+            Cambiar la clave
+          </button>
+          <button type="button" className="btn sm ghost" disabled={busy} onClick={() => void save(null)}>
+            Quitar
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="small">{info.steps}</div>
+          <div>
+            <a className="btn sm" href={info.signup} target="_blank" rel="noreferrer">
+              <Icon name="external" size={13} /> {info.signupLabel}
+            </a>
+          </div>
+          {form}
+        </>
+      )}
+    </div>
+  );
+}
+
+function FeedsCard() {
+  const s = useLive();
+  const feeds = s.system?.feeds ?? null;
+  return (
+    <Card title="Fuentes de eventos (gratis)" id="fuentes">
+      {!feeds ? (
+        <div className="muted">Cargando…</div>
+      ) : (
+        <div className="stack" style={{ gap: 22 }}>
+          <div className="small ink2">
+            Con estas claves, al crear un evento eliges entre los próximos eventos del recinto (fecha, hora, apertura de la venta y límite de compra oficiales) en vez de
+            escribirlos, y la sala vigila el evento los días antes de la venta. Solo leen datos públicos: no entran en ninguna web de venta ni compran nada. entradas.com y la web
+            del Real Madrid no tienen una API pública oficial: sus eventos se escriben a mano (los partidos del Real Madrid sí salen con «Partidos»).
+          </div>
+          <FeedBlock feed="ticketmaster" status={feeds.ticketmaster} configurable={feeds.configurable} />
+          <div className="divider" />
+          <FeedBlock feed="football" status={feeds.football} configurable={feeds.configurable} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 export function SettingsPage() {
+  const location = useLocation();
+  // /ajustes#fuentes lleva directamente a esa tarjeta.
+  useEffect(() => {
+    const id = location.hash.slice(1);
+    if (id) document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, [location.hash]);
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
         <div>
           <h1>Ajustes</h1>
-          <div className="sub">Telegram, proveedores y datos del sistema.</div>
+          <div className="sub">Telegram, fuentes de eventos, proveedores y datos del sistema.</div>
         </div>
       </div>
       <TelegramCard />
+      <FeedsCard />
       <ProvidersCard />
       <SystemCard />
     </div>

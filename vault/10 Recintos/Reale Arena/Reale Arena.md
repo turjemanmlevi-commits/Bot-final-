@@ -3,6 +3,9 @@ type: "venue"
 id: "reale-arena"
 name: "Reale Arena"
 city: "San Sebastián"
+club:
+  - "Real Sociedad"
+  - "Real Sociedad de Fútbol"
 capacity: 39313
 aliases:
   - "Anoeta"

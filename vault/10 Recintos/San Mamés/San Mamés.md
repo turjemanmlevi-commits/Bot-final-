@@ -3,6 +3,8 @@ type: "venue"
 id: "san-mames"
 name: "San Mamés"
 city: "Bilbao"
+club:
+  - "Athletic Club"
 capacity: 53289
 aliases:
   - "Estadio San Mamés"

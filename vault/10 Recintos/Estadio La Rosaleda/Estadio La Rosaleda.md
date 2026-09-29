@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-la-rosaleda"
 name: "Estadio La Rosaleda"
 city: "Málaga"
+club:
+  - "Málaga CF"
 capacity: 30778
 aliases:
   - "La Rosaleda"

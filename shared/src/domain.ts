@@ -631,6 +631,7 @@ export const ALERT_KINDS = [
   'RECOVERY_REQUIRED',
   'NO_PROGRESS',
   'HUMAN_TASK',
+  'EVENT_WATCH',
 ] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
@@ -890,6 +891,8 @@ export interface SystemStatus {
   circuits: CircuitState[];
   journal: { healthy: boolean; pending: number; lagMs: number; lastCommitAt: IsoDateTime | null; driver: 'postgres' | 'pglite' | 'memory' };
   telegram: TelegramStatus;
+  /** Fuentes oficiales de eventos (Ticketmaster, partidos). */
+  feeds: import('./feeds').FeedsStatus;
 }
 
 export interface TelegramChatSeen {

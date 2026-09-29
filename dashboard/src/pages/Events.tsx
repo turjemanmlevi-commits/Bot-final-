@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
-import { LIMIT_SEMANTICS_LABEL, type CatalogEvent, type ProviderMode } from '@to/shared';
+import { FEED_LABEL, LIMIT_SEMANTICS_LABEL, type CatalogEvent, type EventWatch, type ProviderMode } from '@to/shared';
 import { EventForm } from '../components/EventForm';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Pill } from '../components/ui';
-import { fmtDateTime, fmtRel } from '../lib/format';
+import { fmtDateTime, fmtRel, fmtTime } from '../lib/format';
 import { useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
@@ -13,6 +13,55 @@ const MODE_TAG: Record<ProviderMode, string> = {
   SIMULATED: 'simulado',
   AUTHORIZED_API: 'API autorizada',
 };
+
+/** Vigilancia antes de la venta: si toca, desde cuándo, última consulta y últimos cambios oficiales. */
+function WatchLine({ event, watch, now }: { event: CatalogEvent; watch: EventWatch | undefined; now: number }) {
+  const days = event.watchDaysBefore ?? 0;
+  if (days <= 0) return <div className="small muted">Sin vigilancia (en «Editar» → «Vigilar desde»).</div>;
+  const what = event.onSaleAt ? 'de la venta' : 'del evento';
+  const source = event.officialFeed ? FEED_LABEL[event.officialFeed] : null;
+  if (!watch || watch.state === 'WAITING') {
+    const anchor = Date.parse(event.onSaleAt ?? event.startsAt);
+    const from = new Date(anchor - days * 86_400_000).toISOString();
+    if (anchor <= now) return <div className="small muted">Ya {event.onSaleAt ? 'abrió la venta' : 'pasó el evento'}: no hay nada que vigilar.</div>;
+    if (Date.parse(from) <= now) {
+      return (
+        <div className="small ink2">
+          <Icon name="eye" size={12} /> Empezando la vigilancia…
+        </div>
+      );
+    }
+    return (
+      <div className="small ink2">
+        <Icon name="eye" size={12} /> Vigilará desde {days} {days === 1 ? 'día' : 'días'} antes {what}: {fmtDateTime(from)} ({fmtRel(from, now)})
+        {source ? `, consultando ${source}` : ', con recordatorios por Telegram'}.
+      </div>
+    );
+  }
+  if (watch.state === 'DONE') return <div className="small muted">Vigilancia terminada (ya abrió).</div>;
+  return (
+    <div className="stack" style={{ gap: 4 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <Pill tone="live" icon="eye">
+          Vigilando
+        </Pill>
+        <span className="small ink2">
+          {source
+            ? watch.lastCheckAt
+              ? `Última consulta a ${source}: ${fmtTime(watch.lastCheckAt)}`
+              : `Consultando ${source}…`
+            : 'Recordatorios por Telegram (sin evento oficial vinculado)'}
+        </span>
+      </div>
+      {watch.lastError ? <div className="small" style={{ color: 'var(--critical-ink)' }}>{watch.lastError}</div> : null}
+      {watch.changes.slice(0, 3).map((c) => (
+        <div key={`${c.at}-${c.text}`} className="small">
+          <b>{fmtDateTime(c.at)}</b> · {c.text}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function EventsPage() {
   const s = useLive();
@@ -182,8 +231,14 @@ export function EventsPage() {
                     </dl>
                     <div className="row">
                       <Pill tone={verified ? 'good' : 'critical'}>{verified ? 'Límites verificados' : 'Límites sin verificar: no se puede armar'}</Pill>
+                      {e.officialFeed ? (
+                        <Pill tone="good" icon="link" title={`Identificador oficial: ${e.officialId ?? ''}`}>
+                          Oficial: {FEED_LABEL[e.officialFeed]}
+                        </Pill>
+                      ) : null}
                       {e.limits.notes ? <span className="small ink2">{e.limits.notes}</span> : null}
                     </div>
+                    <WatchLine event={e} watch={s.watches[e.id]} now={now} />
                   </div>
                 </Card>
               </div>

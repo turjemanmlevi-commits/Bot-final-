@@ -16,6 +16,7 @@ import type {
   ConfigVersion,
   DecisionRecord,
   EndReason,
+  EventWatch,
   GatesReport,
   HumanTask,
   Id,
@@ -82,6 +83,8 @@ export class Store {
   readonly inventory = new Map<Id, InventorySnapshotSummary>();
   /** Desfase medido del reloj de cada proveedor (ms, positivo = el proveedor va adelantado). */
   readonly clockSkew = new Map<string, number>();
+  /** Vigilancia de los eventos antes de la venta (por eventId). */
+  readonly watches = new Map<Id, EventWatch>();
   vaultReport: VaultCompileReport | null = null;
   gatesReport: GatesReport | null = null;
 
@@ -127,6 +130,9 @@ export class Store {
         case 'meta':
           if (row.id === 'gates') this.gatesReport = row.data as GatesReport;
           break;
+        case 'eventWatch':
+          this.watches.set(row.id, row.data as EventWatch);
+          break;
         default:
           break;
       }
@@ -137,6 +143,18 @@ export class Store {
     this.accounts.set(a.id, a);
     this.journal.persist('account', a.id, a);
     this.hub.upsert('account', a.id, a);
+  }
+
+  putWatch(w: EventWatch): void {
+    this.watches.set(w.eventId, w);
+    this.journal.persist('eventWatch', w.eventId, w);
+    this.hub.upsert('eventWatch', w.eventId, w);
+  }
+
+  removeWatch(eventId: Id): void {
+    if (!this.watches.delete(eventId)) return;
+    this.journal.remove('eventWatch', eventId);
+    this.hub.remove('eventWatch', eventId);
   }
 
   putAlert(a: Alert): void {

@@ -15,6 +15,7 @@ import type {
   CircuitState,
   Claim,
   DecisionRecord,
+  EventWatch,
   HumanTask,
   InventorySnapshotSummary,
   KillSwitch,
@@ -57,6 +58,8 @@ export interface LiveState {
   vault: VaultCompileReport | null;
   scenarios: ScenarioInfo[];
   providerAuthorizations: ProviderAuthorization[];
+  /** Vigilancia de cada evento antes de la venta (por eventId). */
+  watches: Rec<EventWatch>;
   audit: AuditEvent[];
 }
 
@@ -84,6 +87,7 @@ const EMPTY: LiveState = {
   vault: null,
   scenarios: [],
   providerAuthorizations: [],
+  watches: {},
   audit: [],
 };
 
@@ -113,6 +117,7 @@ function fromBootstrap(b: BootstrapState, prev: LiveState): LiveState {
     vault: b.vault,
     scenarios: b.scenarios,
     providerAuthorizations: b.providerAuthorizations,
+    watches: byId(b.watches ?? [], (w) => w.eventId),
     decisions: prev.decisions,
     metrics: prev.metrics,
     audit: prev.audit,
@@ -135,6 +140,7 @@ const MAP_KEYS = {
   validation: 'validation',
   killSwitch: 'killSwitches',
   circuit: 'circuits',
+  eventWatch: 'watches',
 } as const;
 
 function apply(state: LiveState, messages: StreamMessage[]): LiveState {

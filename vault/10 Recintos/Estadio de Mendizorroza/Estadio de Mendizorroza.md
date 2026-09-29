@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-de-mendizorroza"
 name: "Estadio de Mendizorroza"
 city: "Vitoria-Gasteiz"
+club:
+  - "Deportivo Alavés"
 capacity: 19840
 aliases:
   - "Mendizorroza"

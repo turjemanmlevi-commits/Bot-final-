@@ -3,6 +3,9 @@ type: "venue"
 id: "abanca-balaidos"
 name: "Abanca-Balaídos"
 city: "Vigo"
+club:
+  - "RC Celta"
+  - "RC Celta de Vigo"
 capacity: 24870
 aliases:
   - "Balaídos"

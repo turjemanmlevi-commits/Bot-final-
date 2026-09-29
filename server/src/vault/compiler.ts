@@ -14,11 +14,13 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
   CAPABILITIES,
+  FEEDS,
   LIMIT_SEMANTICS,
   PROHIBITED_CAPABILITIES,
   type CapabilityName,
   type CatalogEvent,
   type EventLimits,
+  type FeedId,
   type LimitSemantics,
   type ProviderAuthorization,
   type ProviderMode,
@@ -87,6 +89,8 @@ interface VenueDraft {
   zoneAliasIndex: Record<string, string>;
   /** Secciones sin aforo: se avisa una vez por recinto (el aforo solo lo usa el simulador). */
   missingCapacity: number;
+  /** Clubes que juegan allí como locales (propiedad `club`, texto o lista). */
+  clubs: string[];
 }
 
 const toPosix = (p: string) => p.split(path.sep).join('/');
@@ -258,6 +262,7 @@ class Compiler {
         sectionAliasIndex: {},
         zoneAliasIndex: {},
         missingCapacity: 0,
+        clubs: asStringList(note.data.club),
       });
       for (const key of [id, name, note.basename, ...aliases]) this.venueLookup.set(normalizeLabel(key), id);
     }
@@ -595,9 +600,33 @@ class Compiler {
         sourceFile: note.file,
         tags: asStringList(note.data.tags),
         url,
+        ...this.official(note),
       });
     }
     return events.sort((a, b) => a.startsAt.localeCompare(b.startsAt) || a.id.localeCompare(b.id));
+  }
+
+  /** Evento elegido de una fuente oficial y vigilancia (propiedades opcionales). */
+  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore'> {
+    const feedRaw = asString(note.data.officialFeed);
+    const idRaw = asString(note.data.officialId) ?? (typeof note.data.officialId === 'number' ? String(note.data.officialId) : null);
+    let officialFeed: FeedId | null = null;
+    if (feedRaw) {
+      if ((FEEDS as readonly string[]).includes(feedRaw)) officialFeed = feedRaw as FeedId;
+      else this.warn(note.file, `officialFeed desconocida: ${feedRaw} (ticketmaster o football)`);
+    }
+    if (officialFeed && !idRaw) this.warn(note.file, 'Tiene `officialFeed` pero no `officialId`: no se podrá vigilar en la fuente');
+    let watch = asNumber(note.data.watchDaysBefore);
+    if (watch !== null && (!Number.isInteger(watch) || watch < 0 || watch > 60)) {
+      this.warn(note.file, '`watchDaysBefore` debe ser un número entero de días entre 0 y 60');
+      watch = Math.min(60, Math.max(0, Math.round(watch)));
+    }
+    return {
+      officialFeed: officialFeed && idRaw ? officialFeed : null,
+      officialId: officialFeed && idRaw ? idRaw : null,
+      officialSale: officialFeed ? asString(note.data.officialSale) : null,
+      watchDaysBefore: watch,
+    };
   }
 
   private limits(note: VaultNote): EventLimits {
@@ -696,7 +725,7 @@ export async function compileVault(opts: CompileOptions): Promise<CompiledVault>
         hash: a.hash,
         zones: a.zones.length,
         sections: a.sections.length,
-        sourceFile: c.venueDrafts().find((v) => v.id === a.venueId)?.note.file ?? '',
+        ...venueMeta(c.venueDrafts().find((v) => v.id === a.venueId)),
       })),
     events: events.length,
     providers: providers.length,
@@ -704,6 +733,10 @@ export async function compileVault(opts: CompileOptions): Promise<CompiledVault>
     warnings: c.warnings,
   };
   return { report, artifacts, events, providers };
+}
+
+function venueMeta(v: VenueDraft | undefined): { sourceFile: string; city: string | null; aliases: string[]; clubs: string[] } {
+  return { sourceFile: v?.note.file ?? '', city: v?.city ?? null, aliases: v?.aliases ?? [], clubs: v?.clubs ?? [] };
 }
 
 /** Artefacto que corresponde a un evento: el específico si tiene overrides, si no el base del recinto. */

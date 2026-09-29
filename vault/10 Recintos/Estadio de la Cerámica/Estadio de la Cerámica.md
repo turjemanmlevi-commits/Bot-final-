@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-de-la-ceramica"
 name: "Estadio de la Cerámica"
 city: "Villarreal"
+club:
+  - "Villarreal CF"
 capacity: 23500
 aliases:
   - "La Cerámica"

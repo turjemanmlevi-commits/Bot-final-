@@ -3,6 +3,9 @@ type: venue
 id: estadio-santiago-bernabeu
 name: Estadio Santiago Bernabéu
 city: Madrid
+club:
+  - "Real Madrid"
+  - "Real Madrid CF"
 aliases:
   - "Santiago Bernabéu"
   - "Bernabéu"

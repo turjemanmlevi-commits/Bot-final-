@@ -32,6 +32,7 @@ import type {
   ValidationReport,
   VenueArtifactSummary,
 } from './domain';
+import type { EventWatch, FeedId } from './feeds';
 
 export const API_PREFIX = '/api';
 
@@ -55,6 +56,14 @@ export interface CatalogEvent extends TicketEvent {
   tags: string[];
   /** Página oficial del evento (http/https) o null. Solo se muestra como enlace. */
   url: string | null;
+  /** Evento elegido de una fuente oficial (Ticketmaster o partidos), o null si se escribió a mano. */
+  officialFeed: FeedId | null;
+  /** Identificador del evento en esa fuente. */
+  officialId: string | null;
+  /** Fase de venta elegida de la fuente («Venta general» o el nombre de la preventa): su hora es la apertura. */
+  officialSale: string | null;
+  /** Días antes de la venta desde los que se vigila el evento (null o 0 = no se vigila). */
+  watchDaysBefore: number | null;
 }
 
 /** Autorización humana de capabilities por proveedor, declarada en el vault. */
@@ -84,7 +93,18 @@ export interface VaultCompileReport {
   compilerVersion: string;
   durationMs: number;
   notes: number;
-  venues: Array<{ venueId: Id; name: string; hash: string; zones: number; sections: number; sourceFile: string }>;
+  venues: Array<{
+    venueId: Id;
+    name: string;
+    hash: string;
+    zones: number;
+    sections: number;
+    sourceFile: string;
+    city: string | null;
+    aliases: string[];
+    /** Clubes que juegan allí como locales (estadios de fútbol). */
+    clubs: string[];
+  }>;
   events: number;
   providers: number;
   errors: VaultIssue[];
@@ -188,6 +208,7 @@ export interface EntityMap {
   validation: ValidationReport;
   metrics: OperationMetrics;
   inventory: InventorySnapshotSummary;
+  eventWatch: EventWatch;
 }
 export type EntityKind = keyof EntityMap;
 
@@ -205,6 +226,8 @@ export interface BootstrapState {
   vault: VaultCompileReport | null;
   scenarios: ScenarioInfo[];
   providerAuthorizations: ProviderAuthorization[];
+  /** Vigilancia de los eventos antes de la venta. */
+  watches: EventWatch[];
 }
 
 export type UpsertMessage = {

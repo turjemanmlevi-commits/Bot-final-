@@ -32,7 +32,7 @@ const STEPS: Step[] = [
     who: 'Tú',
     title: 'Evento: enlace oficial, hora de la venta y límites',
     icon: 'calendar',
-    text: 'Eventos → Nuevo evento. Pega el enlace oficial, la hora exacta de apertura de la venta (hora de Madrid; en el Real Madrid, la de tu fase) y los límites de las condiciones oficiales. Marca «He comprobado estos límites».',
+    text: 'Eventos → Nuevo evento. Elige el recinto y dónde se vende: con las claves gratuitas de Ajustes · Fuentes de eventos salen los próximos eventos de Ticketmaster (o los partidos del estadio) y «Usar este evento» rellena el enlace, la fecha, la apertura de la venta y el límite oficial; «Vigilar desde: 2 días antes» avisa por Telegram si algo cambia. Si no sale (entradas.com, fase de socios del Real Madrid), escribe el enlace, la hora de apertura de tu fase (hora de Madrid) y los límites de las condiciones oficiales. Marca «He comprobado estos límites».',
     link: { to: '/eventos', label: 'Ir a Eventos' },
   },
   {

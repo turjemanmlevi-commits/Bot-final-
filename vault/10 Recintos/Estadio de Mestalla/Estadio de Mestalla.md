@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-de-mestalla"
 name: "Estadio de Mestalla"
 city: "Valencia"
+club:
+  - "Valencia CF"
 capacity: 49430
 aliases:
   - "Mestalla"

@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-ramon-sanchez-pizjuan"
 name: "Estadio Ramón Sánchez-Pizjuán"
 city: "Sevilla"
+club:
+  - "Sevilla FC"
 capacity: 43883
 aliases:
   - "Sánchez-Pizjuán"

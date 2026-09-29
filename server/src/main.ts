@@ -11,6 +11,8 @@ import { serve } from '@hono/node-server';
 import { ENV_FILE, ENV_TEMPLATE, env } from './env';
 import { APP_VERSION, createApp } from './app';
 import { createHttpApp } from './http/app';
+import { FeedControl } from './feeds/control';
+import { EventWatcher } from './feeds/watcher';
 import { asideName, probePglite } from './store/dbcheck';
 import { MemoryDriver, PgliteDriver, PostgresDriver, type JournalDriver } from './store/drivers';
 import { TelegramControl } from './telegram/control';
@@ -127,8 +129,23 @@ async function main(): Promise<void> {
     { token: env.telegramToken, chatId: env.telegramChatId, notifier },
   );
 
+  // Fuentes oficiales de eventos (Ticketmaster, partidos) y vigilancia antes de la venta.
+  const feeds = new FeedControl(
+    {
+      runtime: app.runtime,
+      timeZone: env.timeZone,
+      envFile: ENV_FILE,
+      envTemplate: ENV_TEMPLATE,
+      ticketmasterBase: env.ticketmasterApiBase,
+      footballBase: env.footballApiBase,
+    },
+    { ticketmasterKey: env.ticketmasterKey, footballToken: env.footballDataToken },
+  );
+  const watcher = new EventWatcher({ app, feeds, timeZone: env.timeZone });
+  watcher.start();
+
   const dist = existsSync(path.join(env.dashboardDist, 'index.html')) ? env.dashboardDist : null;
-  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram });
+  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram, feeds });
   const server = serve({ fetch: http.fetch, port: env.port, hostname: env.host }, (info) => {
     const url = `http://${env.host === '0.0.0.0' ? 'localhost' : env.host}:${info.port}`;
     console.log('');
@@ -143,6 +160,8 @@ async function main(): Promise<void> {
     console.log(
       `  Telegram    ${notifier ? (env.telegramChatId ? `activado (chat ${env.telegramChatId})` : 'bot conectado; falta el chat principal: ábrelo en Telegram, pulsa «Iniciar» y elígelo en Ajustes · Telegram') : 'sin configurar: pega el token de tu bot en el dashboard → Ajustes · Telegram'}`,
     );
+    const sources = [env.ticketmasterKey ? 'Ticketmaster' : null, env.footballDataToken ? 'partidos' : null].filter(Boolean);
+    console.log(`  Eventos     ${sources.length > 0 ? `fuentes oficiales: ${sources.join(' y ')}` : 'sin fuentes oficiales: pon la clave gratuita en Ajustes · Fuentes de eventos'}`);
     console.log('');
     console.log('  Demo: botón "Nueva demo" en el dashboard, o  npm run seed:demo');
     console.log('');
@@ -163,6 +182,7 @@ async function main(): Promise<void> {
     closing = true;
     log.info(`Cerrando (${signal})…`);
     telegram.stop();
+    watcher.stop();
     server.close();
     await app.stop().catch((err: Error) => log.error('Error al cerrar', { error: err.message }));
     process.exit(0);

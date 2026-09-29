@@ -3,6 +3,9 @@ type: "venue"
 id: "riyadh-air-metropolitano"
 name: "Riyadh Air Metropolitano"
 city: "Madrid"
+club:
+  - "Atlético de Madrid"
+  - "Club Atlético de Madrid"
 capacity: 70460
 aliases:
   - "Metropolitano"

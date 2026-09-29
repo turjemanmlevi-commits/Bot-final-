@@ -30,8 +30,8 @@ Todas las acciones en la web las hace **una persona, con su propia cuenta**. `au
 
 ## Cómo preparar una compra en Ticketmaster
 
-1. **Evento** — Dashboard → *Eventos* → **Nuevo evento**. Proveedor *Ticketmaster*, pega el enlace oficial del evento (`https://www.ticketmaster.es/event/...`) y la fecha y hora de apertura de la venta.
-2. **Límites** — Cópialos de la página del evento o de sus condiciones («máximo X entradas por cliente / por pedido»). Ticketmaster suele contar el límite **por cliente**: con varias cuentas del mismo titular o la misma tarjeta el cupo es uno solo → semántica *por titular* (`PER_HOLDER`) o *por medio de pago* (`PER_PAYMENT_METHOD`).
+1. **Evento** — Dashboard → *Eventos* → **Nuevo evento**. Elige el recinto y *Ticketmaster*: con la clave gratuita de la Discovery API (Ajustes · Fuentes de eventos) salen los **próximos eventos del recinto** y **Usar este evento** rellena el enlace oficial, la fecha, la apertura de la venta o de la preventa y el límite oficial (ver [[Buscar eventos oficiales y vigilar la venta]]). Sin clave: pega el enlace oficial del evento (`https://www.ticketmaster.es/event/...`) y la fecha y hora de apertura de la venta.
+2. **Límites** — Si la API publica el límite («Hay un límite de 6 entradas por cliente») se pone solo. Si no, cópialos de la página del evento o de sus condiciones («máximo X entradas por cliente / por pedido»). Ticketmaster suele contar el límite **por cliente**: con varias cuentas del mismo titular o la misma tarjeta el cupo es uno solo → semántica *por titular* (`PER_HOLDER`) o *por medio de pago* (`PER_PAYMENT_METHOD`).
 3. **Cuentas** — *Cuentas* → **Nueva cuenta**, proveedor *Ticketmaster*, una por persona del grupo.
 4. **Operación** — sigue [[Comprar entradas reales (paso a paso)]].
 

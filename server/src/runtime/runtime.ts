@@ -232,6 +232,7 @@ export class Runtime {
       vault: store.vaultReport,
       scenarios: scenarioInfos(),
       providerAuthorizations: store.providerAuthorizations,
+      watches: [...store.watches.values()],
     };
   }
 

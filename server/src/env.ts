@@ -65,6 +65,13 @@ export const env = {
   telegramChatId: optional('TELEGRAM_CHAT_ID'),
   /** Solo para pruebas: servidor que imita la Bot API de Telegram. */
   telegramApiBase: str('TELEGRAM_API_BASE', 'https://api.telegram.org'),
+  /** Clave gratuita de la Discovery API de Ticketmaster (developer.ticketmaster.com → Consumer Key). */
+  ticketmasterKey: optional('TICKETMASTER_API_KEY'),
+  /** Token gratuito de football-data.org (partidos de LaLiga y Champions). */
+  footballDataToken: optional('FOOTBALL_DATA_TOKEN'),
+  /** Solo para pruebas: servidores que imitan esas APIs. */
+  ticketmasterApiBase: str('TICKETMASTER_API_BASE', 'https://app.ticketmaster.com'),
+  footballApiBase: str('FOOTBALL_DATA_API_BASE', 'https://api.football-data.org'),
   /** Minutos que tiene una persona para responder una tarea de compra manual. */
   manualTaskMinutes: int('MANUAL_TASK_MINUTES', 30),
   simSeed: int('SIM_SEED', 1),

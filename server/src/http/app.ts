@@ -14,6 +14,8 @@ import {
   CommandRequestSchema,
   DemoSeedSchema,
   EventNoteInputSchema,
+  FEEDS,
+  FeedKeySchema,
   HumanTaskResponseInputSchema,
   KillSwitchInputSchema,
   OperationConfigSchema,
@@ -26,6 +28,8 @@ import {
   type ApiErrorBody,
   type EventNoteInput,
   type EventNoteResult,
+  type FeedId,
+  type FeedKeyResult,
   type LabelResolutionResult,
   type OperationConfig,
   type StreamMessage,
@@ -37,6 +41,8 @@ import type { z } from 'zod';
 import type { App, CompileResult } from '../app';
 import { resolveLabel, venueIndex } from '../domain/venue';
 import { runGates } from '../gates/gates';
+import { FeedError } from '../feeds/common';
+import { FeedUsageError, type FeedControl } from '../feeds/control';
 import { AccountError } from '../runtime/accounts';
 import { CartError } from '../runtime/carts';
 import { seedDemo } from '../runtime/demo';
@@ -52,11 +58,13 @@ export interface HttpOptions {
   operatorToken: string | null;
   /** Configuración de Telegram desde el dashboard (token y chat principal). */
   telegram?: TelegramControl | null;
+  /** Fuentes oficiales de eventos (Ticketmaster, partidos). */
+  feeds?: FeedControl | null;
 }
 
 class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 500,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502,
     readonly code: string,
     message: string,
     readonly details?: unknown,
@@ -158,6 +166,12 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     } else if (err instanceof OperationError || err instanceof AccountError || err instanceof TaskError || err instanceof CartError) {
       status = err.code === 'NOT_FOUND' ? 404 : 409;
       code = err.code;
+    } else if (err instanceof FeedUsageError) {
+      status = err.code === 'NOT_FOUND' ? 404 : err.code === 'NOT_CONFIGURED' ? 409 : 400;
+      code = `FEED_${err.code}`;
+    } else if (err instanceof FeedError) {
+      status = err.kind === 'RATE' ? 429 : 502;
+      code = `FEED_${err.kind}`;
     } else if (err instanceof VaultWriteError) {
       status = err.code === 'NOT_FOUND' ? 404 : err.code === 'CONFLICT' ? 409 : 400;
       code = `VAULT_${err.code}`;
@@ -359,6 +373,58 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     const result: TelegramConfigResult = await telegramControl().setMainChat(b.chatId, actorOf(c));
     return c.json(result);
   });
+
+  // ---------------------------------------------------------------------------
+  // Fuentes oficiales de eventos (Ticketmaster, partidos): solo lectura
+  // ---------------------------------------------------------------------------
+
+  const feedControl = () => {
+    if (!opts.feeds) throw new ApiError(409, 'FEEDS_UNAVAILABLE', 'Este servidor no tiene las fuentes de eventos activadas.');
+    return opts.feeds;
+  };
+  const feedParam = (raw: string | undefined): FeedId => {
+    if (!raw || !(FEEDS as readonly string[]).includes(raw)) throw new ApiError(400, 'BAD_REQUEST', 'Fuente desconocida (ticketmaster o football)');
+    return raw as FeedId;
+  };
+  http.get('/api/feeds', (c) => c.json(feedControl().status()));
+  // Clave de la fuente (null = quitarla). Se comprueba con la fuente y se guarda en .env.
+  http.put('/api/feeds/:feed/key', async (c) => {
+    sameSite(c);
+    const feed = feedParam(c.req.param('feed'));
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      throw new ApiError(400, 'BAD_JSON', 'El cuerpo no es JSON válido');
+    }
+    let key: string | null = null;
+    if (!(json && typeof json === 'object' && (json as { key?: unknown }).key === null)) {
+      const r = FeedKeySchema.safeParse(json);
+      if (!r.success) throw new ApiError(400, 'BAD_REQUEST', `Clave: ${r.error.issues[0]?.message ?? 'no válida'}`);
+      key = r.data.key;
+    }
+    const result: FeedKeyResult = await feedControl().setKey(feed, key, actorOf(c));
+    return c.json(result);
+  });
+  // Próximos eventos del recinto (o por nombre): ?feed=ticketmaster&venueId=…&days=14&by=event|sale&q=…
+  http.get('/api/feeds/events', async (c) => {
+    const feed = feedParam(c.req.query('feed'));
+    const days = Number(c.req.query('days') ?? 14);
+    if (!Number.isFinite(days) || days < 1 || days > 400) throw new ApiError(400, 'BAD_REQUEST', 'days: entre 1 y 400');
+    const by = c.req.query('by') === 'sale' ? 'sale' : 'event';
+    const q = (c.req.query('q') ?? '').trim().slice(0, 100) || null;
+    const venueId = (c.req.query('venueId') ?? '').trim() || null;
+    return c.json(await feedControl().upcoming({ feed, venueId, days, by, q }));
+  });
+  http.get('/api/feeds/:feed/events/:id', async (c) => {
+    const feed = feedParam(c.req.param('feed'));
+    const id = c.req.param('id');
+    if (!/^[A-Za-z0-9_.:-]{1,80}$/.test(id)) throw new ApiError(400, 'BAD_REQUEST', 'Identificador no válido');
+    const event = await feedControl().lookup(feed, id);
+    if (!event) throw new ApiError(404, 'NOT_FOUND', 'La fuente ya no tiene ese evento');
+    return c.json(event);
+  });
+  http.get('/api/watches', (c) => c.json([...runtime.store.watches.values()]));
 
   // ---------------------------------------------------------------------------
   // Cuentas

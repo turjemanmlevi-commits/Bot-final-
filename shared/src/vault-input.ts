@@ -8,6 +8,7 @@
 import { z } from 'zod';
 import type { CatalogEvent, VaultCompileReport, VaultIssue } from './api';
 import { LIMIT_SEMANTICS, type TelegramStatus } from './domain';
+import { FEEDS } from './feeds';
 
 /** Fecha y hora local sin zona, como la escribe Obsidian: 2026-09-29T10:00 (se interpreta en VAULT_TZ). */
 export const LOCAL_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
@@ -46,8 +47,24 @@ export const EventNoteInputSchema = z
     limitsSource: z.string().trim().max(500),
     limitsNotes: z.string().trim().max(500).optional(),
     notes: z.string().max(5000).optional(),
+    /** Evento elegido de una fuente oficial: de dónde sale y su identificador allí. */
+    officialFeed: z.enum(FEEDS).nullable().optional(),
+    officialId: z
+      .string()
+      .trim()
+      .max(80)
+      .regex(/^[A-Za-z0-9_.:-]+$/, 'Identificador oficial no válido')
+      .nullable()
+      .optional(),
+    /** Fase de venta elegida de la fuente («Venta general» o la preventa): su hora es la apertura. */
+    officialSale: z.string().trim().max(120).nullable().optional(),
+    /** Vigilar el evento desde N días antes de la venta (0 o null = no vigilar). */
+    watchDaysBefore: z.number().int().min(0).max(60).nullable().optional(),
   })
   .superRefine((v, ctx) => {
+    if (Boolean(v.officialFeed) !== Boolean(v.officialId)) {
+      ctx.addIssue({ code: 'custom', path: ['officialId'], message: 'Falta la fuente o el identificador del evento oficial' });
+    }
     if (v.limitsVerified && v.limitSemantics === 'UNKNOWN') {
       ctx.addIssue({ code: 'custom', path: ['limitSemantics'], message: 'Si los límites están verificados, di cómo se cuentan (por cuenta, titular, hogar o tarjeta)' });
     }

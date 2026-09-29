@@ -12,6 +12,11 @@ import type {
   CommandResult,
   EventNoteInput,
   EventNoteResult,
+  FeedEvent,
+  FeedEventsResult,
+  FeedId,
+  FeedKeyResult,
+  FeedSearchBy,
   GatesReport,
   HumanTask,
   HumanTaskResponseInput,
@@ -142,4 +147,14 @@ export const Api = {
   telegramSetToken: (token: string) => api<TelegramConfigResult>('/api/telegram/token', { method: 'PUT', body: { token } }),
   /** Elige (o quita, con null) el chat principal de Telegram. */
   telegramSetMainChat: (chatId: string | null) => api<TelegramConfigResult>('/api/telegram/main-chat', { method: 'PUT', body: { chatId } }),
+  /** Clave de una fuente oficial de eventos (null = quitarla). */
+  feedSetKey: (feed: FeedId, key: string | null) => api<FeedKeyResult>(`/api/feeds/${feed}/key`, { method: 'PUT', body: { key } }),
+  /** Próximos eventos de un recinto (o por nombre) en una fuente oficial. */
+  feedEvents: (p: { feed: FeedId; venueId?: string | null; days: number; by?: FeedSearchBy; q?: string | null }) => {
+    const qs = new URLSearchParams({ feed: p.feed, days: String(p.days), by: p.by ?? 'event' });
+    if (p.venueId) qs.set('venueId', p.venueId);
+    if (p.q) qs.set('q', p.q);
+    return api<FeedEventsResult>(`/api/feeds/events?${qs.toString()}`);
+  },
+  feedEvent: (feed: FeedId, id: string) => api<FeedEvent>(`/api/feeds/${feed}/events/${encodeURIComponent(id)}`),
 };

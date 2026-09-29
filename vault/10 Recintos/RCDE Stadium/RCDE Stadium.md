@@ -3,6 +3,9 @@ type: "venue"
 id: "rcde-stadium"
 name: "RCDE Stadium"
 city: "Cornellà de Llobregat"
+club:
+  - "RCD Espanyol"
+  - "RCD Espanyol de Barcelona"
 capacity: 40000
 aliases:
   - "Estadio RCDE"

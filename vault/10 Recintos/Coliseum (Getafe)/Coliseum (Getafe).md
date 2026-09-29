@@ -3,6 +3,8 @@ type: "venue"
 id: "coliseum-getafe"
 name: "Coliseum (Getafe)"
 city: "Getafe"
+club:
+  - "Getafe CF"
 capacity: 16500
 aliases:
   - "Coliseum Alfonso Pérez"

@@ -3,6 +3,9 @@ type: "venue"
 id: "abanca-riazor"
 name: "Abanca-Riazor"
 city: "A Coruña"
+club:
+  - "RC Deportivo"
+  - "Deportivo de La Coruña"
 capacity: 32490
 aliases:
   - "Riazor"

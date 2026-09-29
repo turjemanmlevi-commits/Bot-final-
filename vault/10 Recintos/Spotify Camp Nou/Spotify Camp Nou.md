@@ -3,6 +3,8 @@ type: "venue"
 id: "spotify-camp-nou"
 name: "Spotify Camp Nou"
 city: "Barcelona"
+club:
+  - "FC Barcelona"
 capacity: 99354
 aliases:
   - "Camp Nou"

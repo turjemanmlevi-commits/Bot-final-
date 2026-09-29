@@ -7,6 +7,9 @@ import {
   LOCAL_DATETIME_RE,
   type CatalogEvent,
   type EventNoteInput,
+  type FeedEvent,
+  type FeedId,
+  type FeedSale,
   type LimitSemantics,
   type ProviderAuthorization,
   type ProviderMode,
@@ -17,6 +20,7 @@ import { fmtRel } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 import { Icon } from './Icon';
+import { fmtMadrid, OfficialEventPicker } from './OfficialEventPicker';
 import { Callout, Card } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -87,7 +91,23 @@ interface FormState {
   limitsSource: string;
   limitsNotes: string;
   notes: string;
+  /** Evento elegido de una fuente oficial (se vigila en ella). */
+  officialFeed: FeedId | null;
+  officialId: string;
+  officialSale: string | null;
+  /** Días antes de la venta desde los que se vigila ('0' = no). */
+  watchDaysBefore: string;
 }
+
+/** Opciones de «Vigilar desde». */
+const WATCH_OPTIONS: Array<[string, string]> = [
+  ['0', 'No vigilar'],
+  ['1', '1 día antes'],
+  ['2', '2 días antes'],
+  ['3', '3 días antes'],
+  ['7', '1 semana antes'],
+  ['14', '2 semanas antes'],
+];
 
 const FIELDS: readonly Field[] = [
   'name',
@@ -106,6 +126,10 @@ const FIELDS: readonly Field[] = [
   'limitsSource',
   'limitsNotes',
   'notes',
+  'officialFeed',
+  'officialId',
+  'officialSale',
+  'watchDaysBefore',
 ];
 
 const MODE_LABEL: Record<ProviderMode, string> = {
@@ -187,6 +211,10 @@ function blank(providerId: string): FormState {
     limitsSource: '',
     limitsNotes: '',
     notes: '',
+    officialFeed: null,
+    officialId: '',
+    officialSale: null,
+    watchDaysBefore: '2',
   };
 }
 
@@ -208,7 +236,16 @@ function fromEvent(e: CatalogEvent): FormState {
     limitsSource: e.limits.source,
     limitsNotes: e.limits.notes,
     notes: '',
+    officialFeed: e.officialFeed ?? null,
+    officialId: e.officialId ?? '',
+    officialSale: e.officialSale ?? null,
+    watchDaysBefore: String(e.watchDaysBefore ?? 0),
   };
+}
+
+/** Hoy en Madrid (AAAA-MM-DD), para citar de cuándo es el dato oficial. */
+function madridToday(): string {
+  return madridLocal(Date.now()).slice(0, 10);
 }
 
 const toInt = (v: string): number => (v.trim() === '' ? Number.NaN : Number(v.trim()));
@@ -262,6 +299,8 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
   /** Nota creada desde este formulario (las siguientes veces se actualiza en vez de crear). */
   const [created, setCreated] = useState<{ file: string; id: string | null } | null>(null);
   const tz = useMemo(browserTimeZone, []);
+  /** Último evento elegido de la fuente oficial (para enseñar de dónde sale cada dato). */
+  const [picked, setPicked] = useState<{ event: FeedEvent; sale: FeedSale | null } | null>(null);
 
   // El catálogo de proveedores puede llegar después de abrir el formulario.
   useEffect(() => {
@@ -294,6 +333,55 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
 
   const bad = (k: Field): CSSProperties | undefined => (errors[k] ? { borderColor: 'var(--critical)' } : undefined);
 
+  /** Rellena el formulario con los datos oficiales del evento elegido. */
+  const pickOfficial = (e: FeedEvent, sale: FeedSale | null) => {
+    setPicked({ event: e, sale });
+    setErrors({});
+    setF((x) => {
+      const n = e.limit.perCustomer;
+      const src = e.feed === 'ticketmaster' ? 'Ticketmaster (API oficial)' : 'football-data.org';
+      const limits: Partial<FormState> =
+        n !== null
+          ? {
+              limitPerAccount: String(n),
+              limitPerGroup: String(n),
+              limitPerOperation: String(Math.max(n, toInt(x.limitPerOperation) || 0)),
+              limitSemantics: e.limit.semantics ?? 'PER_HOLDER',
+              limitsVerified: true,
+              limitsSource: `${src}, ${madridToday()}: «${e.limit.text ?? `${n} por cliente`}»${e.url ? ` · ${e.url}` : ''}`.slice(0, 500),
+            }
+          : { limitsVerified: false, limitsSource: e.url ? `Página oficial: ${e.url}`.slice(0, 500) : x.limitsSource };
+      // Los partidos los vende el club en su web: Real Madrid → su proveedor; el resto → «Otra web oficial».
+      let providerId = x.providerId;
+      if (e.feed === 'football' && (providerId === '' || providerId === 'ticketmaster' || providers.find((p) => p.providerId === providerId)?.mode === 'SIMULATED')) {
+        const isRM = (s.vault?.venues.find((v) => v.venueId === x.venueId)?.clubs ?? []).some((c) => /real madrid/i.test(c));
+        const wanted = isRM ? 'real-madrid' : 'manual';
+        if (providers.some((p) => p.providerId === wanted)) providerId = wanted;
+      }
+      const providerUrl = providers.find((p) => p.providerId === providerId)?.url ?? '';
+      return {
+        ...x,
+        providerId,
+        name: e.name.slice(0, 120),
+        url: e.url ?? (x.url || providerUrl),
+        providerEventRef: e.feed === 'football' ? `partido-${e.id}` : e.id,
+        startsAt: e.startsAtLocal ?? x.startsAt,
+        onSaleAt: sale?.startsAtLocal ?? (e.feed === 'football' ? x.onSaleAt : ''),
+        currency: e.price?.currency && /^[A-Z]{3}$/.test(e.price.currency) ? e.price.currency : x.currency,
+        ...limits,
+        officialFeed: e.feed,
+        officialId: e.id,
+        officialSale: sale?.name ?? null,
+        watchDaysBefore: x.watchDaysBefore === '0' ? '2' : x.watchDaysBefore,
+      };
+    });
+  };
+
+  const unlinkOfficial = () => {
+    setPicked(null);
+    setF((x) => ({ ...x, officialFeed: null, officialId: '', officialSale: null }));
+  };
+
   const validate = (): { body: EventNoteInput | null; errs: Errors } => {
     const url = f.url.trim();
     const raw: EventNoteInput = {
@@ -313,6 +401,10 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
       limitsSource: f.limitsSource,
       limitsNotes: f.limitsNotes.trim() === '' ? undefined : f.limitsNotes,
       ...(creating && f.notes.trim() !== '' ? { notes: f.notes } : {}),
+      officialFeed: f.officialFeed,
+      officialId: f.officialFeed ? f.officialId : null,
+      officialSale: f.officialFeed ? f.officialSale : null,
+      watchDaysBefore: Number(f.watchDaysBefore) || 0,
     };
     const errs: Errors = {};
     if (url !== '' && !/^https?:\/\//i.test(url)) errs.url = 'Pega el enlace completo, empezando por https://';
@@ -372,6 +464,8 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
 
   const startEpoch = madridEpoch(f.startsAt);
   const saleEpoch = madridEpoch(f.onSaleAt);
+  const anchorEpoch = saleEpoch ?? startEpoch;
+  const watchFrom = anchorEpoch === null ? null : anchorEpoch - (Number(f.watchDaysBefore) || 0) * 86_400_000;
   const errorCount = Object.keys(errors).length;
   const title = initial ? `Editar ${initial.name}` : createdEvent ? `Editar ${createdEvent.name}` : 'Nuevo evento';
 
@@ -395,22 +489,20 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
         <h3 className="sign">1 · Evento</h3>
         <div className="stack">
           <div className="form-grid">
-            <div className="field" style={{ gridColumn: 'span 2' }}>
-              <label htmlFor="evf-name">Nombre del evento</label>
-              <input
-                id="evf-name"
-                className="input"
-                value={f.name}
-                onChange={(e) => set('name', e.target.value)}
-                placeholder="Real Madrid – Atlético · LaLiga"
-                aria-invalid={Boolean(errors.name)}
-                style={bad('name')}
-              />
-              <FieldError msg={errors.name} />
-            </div>
             <div className="field">
               <label htmlFor="evf-venue">Recinto</label>
-              <select id="evf-venue" className="input" value={f.venueId} onChange={(e) => set('venueId', e.target.value)} aria-invalid={Boolean(errors.venueId)} style={bad('venueId')}>
+              <select
+                id="evf-venue"
+                className="input"
+                value={f.venueId}
+                onChange={(e) => {
+                  set('venueId', e.target.value);
+                  // El evento oficial vinculado era de otro recinto.
+                  if (f.officialFeed) unlinkOfficial();
+                }}
+                aria-invalid={Boolean(errors.venueId)}
+                style={bad('venueId')}
+              >
                 <option value="">Elige el recinto…</option>
                 {venues.map((v) => (
                   <option key={v.venueId} value={v.venueId}>
@@ -430,7 +522,10 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
                 id="evf-provider"
                 className="input"
                 value={f.providerId}
-                onChange={(e) => set('providerId', e.target.value)}
+                onChange={(e) => {
+                  set('providerId', e.target.value);
+                  if (f.officialFeed === 'ticketmaster' && e.target.value !== 'ticketmaster') unlinkOfficial();
+                }}
                 aria-invalid={Boolean(errors.providerId)}
                 style={bad('providerId')}
               >
@@ -443,6 +538,28 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
                 {f.providerId && !provider ? <option value={f.providerId}>{f.providerId} (no está en el vault)</option> : null}
               </select>
               <FieldError msg={errors.providerId} />
+            </div>
+          </div>
+          <OfficialEventPicker
+            venueId={f.venueId}
+            providerId={f.providerId}
+            linked={f.officialFeed ? { feed: f.officialFeed, id: f.officialId, name: picked?.event.name ?? (initial?.officialId === f.officialId ? initial.name : null), sale: f.officialSale } : null}
+            onPick={pickOfficial}
+            onUnlink={unlinkOfficial}
+          />
+          <div className="form-grid">
+            <div className="field" style={{ gridColumn: 'span 2' }}>
+              <label htmlFor="evf-name">Nombre del evento</label>
+              <input
+                id="evf-name"
+                className="input"
+                value={f.name}
+                onChange={(e) => set('name', e.target.value)}
+                placeholder="Real Madrid – Atlético · LaLiga"
+                aria-invalid={Boolean(errors.name)}
+                style={bad('name')}
+              />
+              <FieldError msg={errors.name} />
             </div>
             <div className="field" style={{ gridColumn: 'span 2' }}>
               <label htmlFor="evf-url">Enlace oficial del evento</label>
@@ -553,6 +670,28 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
                   La venta abre después del evento: revisa las fechas.
                 </span>
               ) : null}
+              {f.officialSale ? <span className="hint">Es la hora oficial de «{f.officialSale}».</span> : null}
+            </div>
+            <div className="field">
+              <label htmlFor="evf-watch">Vigilar desde</label>
+              <select id="evf-watch" className="input" value={f.watchDaysBefore} onChange={(e) => set('watchDaysBefore', e.target.value)}>
+                {WATCH_OPTIONS.map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                    {v !== '0' ? (f.onSaleAt ? ' de la venta' : ' del evento') : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="hint">
+                {f.watchDaysBefore === '0'
+                  ? 'Sin vigilancia ni recordatorios.'
+                  : f.officialFeed
+                    ? `Consulta ${f.officialFeed === 'ticketmaster' ? 'Ticketmaster' : 'los partidos'} cada 10 min (cada 2 en las 3 horas finales): si cambia la fecha, la venta, el límite o se cancela, te avisa por Telegram y lo actualiza aquí. Y recordatorios el día antes y 1 hora antes.`
+                    : 'Sin evento oficial vinculado: recordatorios por Telegram al empezar, el día antes y 1 hora antes.'}
+              </span>
+              {watchFrom !== null && f.watchDaysBefore !== '0' ? (
+                <span className="hint">{watchFrom <= now ? 'Ya está dentro de la vigilancia: empieza al guardar.' : `Empieza el ${fmtMadrid(new Date(watchFrom).toISOString())}.`}</span>
+              ) : null}
             </div>
           </div>
           <div className="small muted">
@@ -570,6 +709,33 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
         <h3 className="sign">3 · Límites de compra</h3>
         <div className="stack">
           <div className="small ink2">Cópialos de las condiciones oficiales. Sin límites verificados no se puede armar ninguna operación (fail-closed).</div>
+          {picked?.event.feed === 'ticketmaster' && picked.event.limit.perCustomer !== null ? (
+            <Callout tone="good" icon="check">
+              <b>Límite leído de Ticketmaster:</b> «{picked.event.limit.text}». Puesto: {picked.event.limit.perCustomer} por cuenta, contado por titular (Ticketmaster cuenta por
+              cliente: mismo nombre, cuenta o tarjeta). Si la página del evento dice otra cosa, cámbialo.
+            </Callout>
+          ) : picked?.event.feed === 'ticketmaster' ? (
+            <Callout tone="warning">
+              <b>Ticketmaster no publica el límite de este evento en su API.</b> Míralo en la página del evento
+              {picked.event.url ? (
+                <>
+                  {' '}
+                  (
+                  <a href={picked.event.url} target="_blank" rel="noreferrer">
+                    abrir
+                  </a>
+                  )
+                </>
+              ) : null}
+              : suele poner «Límite de X entradas por cliente». Escríbelo abajo y marca la casilla.
+              {picked.event.limit.text ? <div className="small">Lo que sí dice: «{picked.event.limit.text}»</div> : null}
+            </Callout>
+          ) : picked?.event.feed === 'football' ? (
+            <Callout icon="info">
+              El límite lo pone el club para cada partido (en el Real Madrid: condiciones de la venta del partido en realmadrid.com; las entradas de socio son personales). Escríbelo
+              abajo y marca la casilla.
+            </Callout>
+          ) : null}
           <div className="form-grid">
             <div className="field">
               <label htmlFor="evf-lim-acc">Por cuenta</label>

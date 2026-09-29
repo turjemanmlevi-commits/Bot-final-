@@ -3,6 +3,9 @@ type: "venue"
 id: "estadio-el-sardinero"
 name: "Estadio El Sardinero"
 city: "Santander"
+club:
+  - "Racing de Santander"
+  - "Real Racing Club de Santander"
 capacity: 22514
 aliases:
   - "El Sardinero"

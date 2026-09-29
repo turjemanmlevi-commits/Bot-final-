@@ -3,6 +3,8 @@ type: "venue"
 id: "estadi-ciutat-de-valencia"
 name: "Estadi Ciutat de València"
 city: "Valencia"
+club:
+  - "Levante UD"
 capacity: 26354
 aliases:
   - "Ciutat de València"

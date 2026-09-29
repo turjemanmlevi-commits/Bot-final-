@@ -151,6 +151,7 @@ export const ALERT_KIND_LABEL: Record<AlertKind, string> = {
   RECOVERY_REQUIRED: 'Recuperación necesaria',
   NO_PROGRESS: 'Sin progreso',
   HUMAN_TASK: 'Tarea humana',
+  EVENT_WATCH: 'Vigilancia del evento',
 };
 
 export const GATE_NAME: Record<GateId, string> = {

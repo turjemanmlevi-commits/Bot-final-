@@ -786,6 +786,11 @@ export class OperationService {
           recentChats: [],
           configurable: false,
         },
+      feeds: ctx.feedsStatus?.() ?? {
+        ticketmaster: { feed: 'ticketmaster', configured: false, ok: null, detail: 'Sin clave.' },
+        football: { feed: 'football', configured: false, ok: null, detail: 'Sin token.' },
+        configurable: false,
+      },
     };
   }
 }

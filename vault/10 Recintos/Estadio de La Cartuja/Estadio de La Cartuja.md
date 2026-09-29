@@ -3,6 +3,9 @@ type: "venue"
 id: "estadio-de-la-cartuja"
 name: "Estadio de La Cartuja"
 city: "Sevilla"
+club:
+  - "Real Betis"
+  - "Real Betis Balompié"
 capacity: 68887
 aliases:
   - "La Cartuja"

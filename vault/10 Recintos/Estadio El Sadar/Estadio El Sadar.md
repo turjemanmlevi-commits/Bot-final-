@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-el-sadar"
 name: "Estadio El Sadar"
 city: "Pamplona"
+club:
+  - "CA Osasuna"
 capacity: 23576
 aliases:
   - "El Sadar"

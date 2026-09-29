@@ -85,10 +85,24 @@ POS_TEXT = {
 POS_CA = {"Izquierda": "esquerra", "Central": "central", "Derecha": "dreta"}
 
 
+# Otros nombres con los que aparece el club en los calendarios (football-data.org).
+CLUB_ALT = {
+    "RC Celta": ["RC Celta de Vigo"],
+    "RC Deportivo": ["Deportivo de La Coruña"],
+    "RCD Espanyol": ["RCD Espanyol de Barcelona"],
+    "Racing de Santander": ["Real Racing Club de Santander"],
+    "Real Betis": ["Real Betis Balompié"],
+    "Real Sociedad": ["Real Sociedad de Fútbol"],
+    "Rayo Vallecano": ["Rayo Vallecano de Madrid"],
+    "Atlético de Madrid": ["Club Atlético de Madrid"],
+}
+
+
 class Venue:
-    def __init__(self, vid, name, city, kind_tag, source, aliases, capacity=None, tags=()):
+    def __init__(self, vid, name, city, kind_tag, source, aliases, capacity=None, tags=(), club=None):
         self.vid, self.name, self.city, self.kind_tag, self.source = vid, name, city, kind_tag, source
         self.aliases, self.capacity, self.tags = aliases, capacity, list(tags)
+        self.clubs = ([club] + CLUB_ALT.get(club, [])) if club else None
         self.zones = []  # (name, desc, aliases, [sections])
 
     def link(self):
@@ -133,7 +147,7 @@ class Venue:
                 "views:\n  - type: table\n    name: Secciones\n    order:\n      - file.name\n      - note.zone\n      - note.level\n      - note.kind\n```\n"
             )
         with open(os.path.join(folder, f"{self.name}.md"), "w", encoding="utf-8") as f:
-            f.write(fm({"type": "venue", "id": self.vid, "name": self.name, "city": self.city, "capacity": self.capacity,
+            f.write(fm({"type": "venue", "id": self.vid, "name": self.name, "city": self.city, "club": self.clubs, "capacity": self.capacity,
                         "aliases": uniq(self.aliases, [self.name]), "source": self.source, "verifiedAt": TODAY, "verifiedBy": "asistente",
                         "confidence": 0.7, "tags": ["recinto", "real", self.kind_tag] + self.tags}))
             f.write(f"\n# {self.name}\n\n**{self.city}**{cap}. {intro}\n\n## Cómo leer el plano\n\n{howto}\n\n## Zonas\n\n" + "\n".join(zone_lines) + "\n\n")
@@ -153,7 +167,7 @@ def pista_sections(prefix="Pista"):
 
 def stadium(d, laliga=True):
     src = (SRC_LALIGA if laliga else "Estadio de conciertos de Barcelona (nombres habituales de sus gradas)") + ". Gradas y niveles: estructura orientativa con los nombres habituales del estadio; " + ORIENT + "."
-    v = Venue(d["id"], d["name"], d["city"], "estadio", src, d["aliases"], d.get("capacity"), ["laliga"] if laliga else [])
+    v = Venue(d["id"], d["name"], d["city"], "estadio", src, d["aliases"], d.get("capacity"), ["laliga"] if laliga else [], d.get("club"))
     if d.get("concerts"):
         v.tags.append("conciertos")
         v.add_zone("Pista (conciertos)", "Solo en conciertos: de pie sobre el césped.", ["Pista", "Pista conciertos"], pista_sections())

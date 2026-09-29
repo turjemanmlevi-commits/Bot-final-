@@ -9,7 +9,7 @@
 
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { EventNoteInput, LayoutZone, VenueQuickInput } from '@to/shared';
+import type { EventNoteInput, FeedId, LayoutZone, VenueQuickInput } from '@to/shared';
 import { isMap, parseDocument, stringify } from 'yaml';
 import { slugify } from '../util/normalize';
 import { splitFrontmatter } from './markdown';
@@ -95,6 +95,10 @@ function eventProps(input: EventNoteInput, ctx: EventWriteContext): Record<strin
     limitsVerifiedAt: input.limitsVerified ? today : null,
     limitsVerifiedBy: input.limitsVerified ? ctx.actor : null,
     limitsNotes: input.limitsNotes ?? '',
+    officialFeed: input.officialFeed ?? null,
+    officialId: input.officialFeed ? (input.officialId ?? null) : null,
+    officialSale: input.officialFeed ? (input.officialSale ?? null) : null,
+    watchDaysBefore: input.watchDaysBefore ?? null,
   };
 }
 
@@ -106,9 +110,41 @@ function eventBody(input: EventNoteInput, providerNote: string): string {
     '',
   ];
   if (input.url) lines.push(`- Página oficial: ${input.url}`);
+  if (input.officialFeed && input.officialId) lines.push(`- Elegido de la fuente oficial (${OFFICIAL_LABEL[input.officialFeed]}): \`${input.officialId}\``);
   if (input.limitsSource) lines.push(`- Condiciones / límites: ${input.limitsSource}`);
+  if (input.watchDaysBefore) {
+    lines.push(
+      `- Vigilancia: desde ${input.watchDaysBefore} ${input.watchDaysBefore === 1 ? 'día' : 'días'} antes de la venta${input.officialFeed ? ' (si cambia algo oficial, aviso por Telegram y se actualiza aquí)' : ' (recordatorios por Telegram)'}.`,
+    );
+  }
   lines.push('', '## Notas', '', input.notes?.trim() || '_Apunta aquí lo que conviene saber para la compra (fases de venta, requisitos, precios)._', '');
   return lines.join('\n');
+}
+
+const OFFICIAL_LABEL: Record<FeedId, string> = { ticketmaster: 'Ticketmaster', football: 'partidos de football-data.org' };
+
+/**
+ * Cambia solo algunas propiedades de una nota de evento (lo que actualiza la
+ * vigilancia cuando la fuente oficial cambia una fecha). El resto no se toca.
+ */
+export async function patchEventNote(vaultDir: string, sourceFile: string, patch: Record<string, unknown>): Promise<void> {
+  const abs = path.resolve(vaultDir, sourceFile);
+  const root = path.resolve(vaultDir);
+  if (!abs.startsWith(root + path.sep)) throw new VaultWriteError('Ruta de nota no válida', 'BAD_REQUEST');
+  let text: string;
+  try {
+    text = await readFile(abs, 'utf8');
+  } catch {
+    throw new VaultWriteError(`No se encuentra la nota ${sourceFile}`, 'NOT_FOUND');
+  }
+  const { yaml, body } = splitFrontmatter(text);
+  if (yaml === null) throw new VaultWriteError(`La nota ${sourceFile} no tiene propiedades (frontmatter)`, 'BAD_REQUEST');
+  const doc = parseDocument(yaml, { schema: 'core' });
+  if (doc.errors.length > 0 || !isMap(doc.contents)) throw new VaultWriteError(`Las propiedades de ${sourceFile} tienen errores`, 'BAD_REQUEST');
+  for (const [key, value] of Object.entries(patch)) doc.set(key, value);
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const front = `---\n${doc.toString({ lineWidth: 0 }).trimEnd()}\n---\n`;
+  await writeFile(abs, (front + body).replace(/\r?\n/g, eol), 'utf8');
 }
 
 export async function createEventNote(input: EventNoteInput, eventId: string, ctx: EventWriteContext): Promise<string> {

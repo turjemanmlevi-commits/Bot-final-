@@ -3,6 +3,8 @@ type: "venue"
 id: "estadio-manuel-martinez-valero"
 name: "Estadio Manuel Martínez Valero"
 city: "Elche"
+club:
+  - "Elche CF"
 capacity: 33732
 aliases:
   - "Martínez Valero"

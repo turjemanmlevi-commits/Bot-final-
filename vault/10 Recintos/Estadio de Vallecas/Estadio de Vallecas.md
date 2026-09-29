@@ -3,6 +3,9 @@ type: "venue"
 id: "estadio-de-vallecas"
 name: "Estadio de Vallecas"
 city: "Madrid"
+club:
+  - "Rayo Vallecano"
+  - "Rayo Vallecano de Madrid"
 capacity: 14708
 aliases:
   - "Vallecas"

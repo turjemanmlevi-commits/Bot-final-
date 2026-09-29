@@ -67,6 +67,9 @@ Pulsa **Crear recinto**: el sistema escribe las notas en `10 Recintos/<recinto>/
 
 **Eventos → Nuevo evento**:
 
+> [!tip] Más rápido: elígelo de la lista oficial
+> Con las claves gratuitas de **Ajustes · Fuentes de eventos**, al elegir el **recinto** y **dónde se vende** salen los **próximos eventos** de ese recinto en Ticketmaster (o los próximos **partidos** del club si es un estadio de LaLiga, como el Bernabéu). **Usar este evento** rellena el nombre, el enlace, la fecha, la **apertura de la venta** (o de la preventa) y el **límite** oficial, y con **Vigilar desde: 2 días antes** la sala te avisa por Telegram si algo cambia. Ver [[Buscar eventos oficiales y vigilar la venta]]. Sin claves (o en entradas.com), se escribe a mano:
+
 1. **Nombre del evento**, **Recinto** y **Dónde se vende** (Real Madrid, Ticketmaster o entradas.com).
 2. **Enlace oficial del evento**: la página del evento en la web oficial. Es el botón «Abrir la web oficial» de cada tarea (el sistema nunca la visita).
 3. **Fecha y hora del evento** y **Apertura de la venta (T0)**, en **hora de Madrid**. En el Real Madrid, la apertura de **tu** fase (socios, Madridistas, público general…).
@@ -79,6 +82,8 @@ Pulsa **Crear recinto**: el sistema escribe las notas en `10 Recintos/<recinto>/
 | Por operación | El total máximo entre todos (por ejemplo, personas × límite por persona) |
 | Cómo cuenta el límite | **Por titular** en Ticketmaster y en el Real Madrid casi siempre («máximo X por cliente / por socio»). **Por cuenta** solo si cada cuenta tiene de verdad su propio cupo. **Por hogar** o **Por medio de pago** si las condiciones lo dicen así |
 | De dónde salen los límites | Enlace o texto de las condiciones oficiales |
+
+5. **Vigilar desde** (apartado *Fechas*): **2 días antes** de la venta viene puesto. Manda recordatorios por Telegram (al empezar, el día antes y una hora antes) y, si el evento se eligió de la lista oficial, avisa y lo actualiza si cambia la hora de la venta.
 
 Marca **«He comprobado estos límites en las condiciones oficiales»** solo cuando lo hayas leído en la web oficial y pulsa **Guardar evento**. Sin esa casilla, o si no se sabe cómo cuenta el límite, **no se puede armar** la operación: el sistema falla cerrado.
 
