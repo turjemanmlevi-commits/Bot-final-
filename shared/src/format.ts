@@ -36,7 +36,7 @@ export const COMMAND_LABEL: Record<OperationCommand, string> = {
   validate: 'Validar',
   arm: 'Armar',
   disarm: 'Desarmar',
-  readiness: 'Readiness',
+  readiness: 'Comprobación previa',
   'start-now': 'Empezar ya',
   pause: 'Pausar',
   resume: 'Reanudar',

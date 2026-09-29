@@ -1,6 +1,6 @@
 import { allowedCommands, COMMAND_LABEL, type OperationCommand, type OperationSummary } from '@to/shared';
 import { Api } from '../lib/api';
-import { euros, parseEuros } from '../lib/format';
+import { eurosEs, parseEuros } from '../lib/format';
 import { useAction } from '../lib/hooks';
 import { useDialog } from './Dialog';
 import { Icon, type IconName } from './Icon';
@@ -57,7 +57,7 @@ export function OperationActions({
       const v = await ask({
         title: 'Bajar el precio máximo',
         body: 'Precio por entrada, con gastos. Solo se puede bajar mientras la operación está armada o en marcha.',
-        input: { label: `Nuevo máximo (${op.currency})`, type: 'number', defaultValue: maxUnitPrice ? euros(maxUnitPrice) : '' },
+        input: { label: `Nuevo máximo (${op.currency}, p. ej. 119,50)`, type: 'text', defaultValue: maxUnitPrice ? eurosEs(maxUnitPrice) : '' },
         confirmText: 'Bajar precio',
       });
       if (typeof v !== 'string') return;

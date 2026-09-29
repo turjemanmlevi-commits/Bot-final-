@@ -553,6 +553,10 @@ h4 {
   .page-head h1 {
     font-size: 26px;
   }
+  /* Red de seguridad: una tabla sin .table-wrap se desplaza dentro de su tarjeta, no la página. */
+  .card-body:has(table.t) {
+    overflow-x: auto;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -917,6 +921,57 @@ table.t tr.clickable {
   color: var(--muted);
 }
 
+.field .hint.warn {
+  color: var(--warning-ink);
+  font-weight: 600;
+}
+
+.field .hint.error {
+  color: var(--critical-ink);
+  font-weight: 600;
+}
+
+.input[aria-invalid='true'] {
+  border-color: var(--critical);
+}
+
+/* Importe escrito a mano con su lectura al lado («= 120,00 €»). */
+.money-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.money-row .input {
+  flex: 1 1 auto;
+}
+
+.money-read {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.money-read.error {
+  color: var(--critical-ink);
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+/* «Añadido: X · Deshacer» junto al plano; reserva su alto para que el plano no salte. */
+.pick-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  flex-wrap: wrap;
+  color: var(--ink-2);
+}
+
 .input,
 select.input,
 textarea.input {
@@ -1158,6 +1213,8 @@ textarea.input {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Las filas se adaptan al ancho de la tarjeta, no al de la pantalla. */
+  container-type: inline-size;
 }
 
 .barrow {
@@ -1192,6 +1249,8 @@ textarea.input {
 .barrow .bar {
   height: 14px;
   min-width: 2px;
+  /* Si falta sitio, cede la barra antes que la cifra. */
+  flex-shrink: 100;
   background: var(--data-1);
   border-radius: 0 4px 4px 0;
   transition: width 0.4s ease;
@@ -1203,11 +1262,14 @@ textarea.input {
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   white-space: nowrap;
+  /* Nunca se sale de la tarjeta: el valor completo está en el aviso al pasar o enfocar. */
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Móvil: rótulo encima y barra a todo el ancho; el valor baja de línea si no cabe. */
-@media (max-width: 600px) {
+/* Tarjeta estrecha (móvil): rótulo encima, barra a todo el ancho y el valor baja de línea si no cabe. */
+@container (max-width: 400px) {
   .barrow {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
@@ -1218,6 +1280,7 @@ textarea.input {
   }
   .barrow .bvalue {
     white-space: normal;
+    overflow: visible;
     overflow-wrap: anywhere;
   }
 }
@@ -1494,6 +1557,15 @@ textarea.input {
   gap: 12px;
   padding: 10px 28px;
   font-weight: 600;
+}
+
+.banner > svg {
+  flex: none;
+}
+
+.banner-text {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
 .banner.critical {

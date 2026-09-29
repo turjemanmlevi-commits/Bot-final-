@@ -202,15 +202,17 @@ function Shell() {
 
       <div className="main">
         {connectionLost ? (
-          <div className="banner offline" role="alert">
+          <div className="banner warning offline" role="alert">
             <Icon name="alert" size={18} />
-            Sin conexión con el servidor: los datos pueden estar desactualizados
+            <span className="banner-text">Sin conexión con el servidor: los datos pueden estar desactualizados</span>
           </div>
         ) : null}
         {globalKill ? (
           <div className="banner critical" role="alert">
             <Icon name="power" size={18} />
-            Kill switch GLOBAL activo{globalKill.reason ? ` — ${globalKill.reason}` : ''}: no se envía ninguna acción automática.
+            <span className="banner-text">
+              Kill switch GLOBAL activo{globalKill.reason ? ` — ${globalKill.reason}` : ''}: no se envía ninguna acción automática.
+            </span>
             <NavLink to="/seguridad" className="btn sm" style={{ marginLeft: 'auto', background: '#fff', color: '#000', borderColor: '#fff' }}>
               Ir a Seguridad
             </NavLink>
@@ -218,7 +220,8 @@ function Shell() {
         ) : null}
         {journal && !journal.healthy ? (
           <div className="banner critical" role="alert">
-            <Icon name="octagon" size={18} /> El journal no está guardando: la automatización está pausada hasta que se recupere.
+            <Icon name="octagon" size={18} />
+            <span className="banner-text">El journal no está guardando: la automatización está pausada hasta que se recupere.</span>
           </div>
         ) : null}
         <header className="topbar">

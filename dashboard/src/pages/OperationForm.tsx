@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { LIMIT_SEMANTICS_LABEL, type OperationConfig } from '@to/shared';
+import { LIMIT_SEMANTICS_LABEL, type Account, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { VenueMap } from '../components/VenueMap';
 import { Callout, Card, Pill } from '../components/ui';
 import { Api } from '../lib/api';
-import { euros, formatMoney, fromLocalInput, parseEuros, toLocalInput } from '../lib/format';
+import { eurosEs, formatMoney, parseEuros, toLocalInput } from '../lib/format';
 import { useAction, useAsync } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
@@ -65,8 +65,8 @@ function fromConfig(c: OperationConfig): FormState {
     runWindowMinutes: String(c.runWindowMinutes),
     freezeLeadSeconds: String(c.freezeLeadSeconds),
     requestedQty: String(c.requestedQty),
-    maxUnitPrice: euros(c.maxUnitPrice),
-    budget: euros(c.budget),
+    maxUnitPrice: eurosEs(c.maxUnitPrice),
+    budget: eurosEs(c.budget),
     targets: c.preferences.targets,
     excludeSections: c.preferences.excludeSections,
     requireContiguous: c.preferences.requireContiguous,
@@ -80,6 +80,104 @@ function fromConfig(c: OperationConfig): FormState {
     scenarioId: c.simulation?.scenarioId ?? 'demo',
     seed: String(c.simulation?.seed ?? 1),
   };
+}
+
+/** T0 escrito en el campo de fecha y hora local → ISO, o null si está vacío o no es una fecha. */
+function parseT0(value: string): string | null {
+  if (!value.trim()) return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+/** Misma clave de grupo de límite que usa el servidor (domain/limits.ts). */
+function groupKeyOf(a: Account, semantics: LimitSemantics): string | null {
+  switch (semantics) {
+    case 'PER_ACCOUNT':
+      return `cuenta:${a.id}`;
+    case 'PER_HOLDER':
+      return a.holderRef ? `titular:${a.holderRef.trim().toLowerCase()}` : null;
+    case 'PER_HOUSEHOLD':
+      return a.householdRef ? `hogar:${a.householdRef.trim().toLowerCase()}` : null;
+    case 'PER_PAYMENT_METHOD':
+      return a.paymentRef ? `pago:${a.paymentRef.trim().toLowerCase()}` : null;
+    default:
+      return null;
+  }
+}
+
+const GROUP_NOUN: Record<LimitSemantics, string> = {
+  PER_ACCOUNT: 'cuenta',
+  PER_HOLDER: 'titular',
+  PER_HOUSEHOLD: 'hogar',
+  PER_PAYMENT_METHOD: 'medio de pago',
+  UNKNOWN: 'grupo',
+};
+
+/**
+ * ¿Se pueden sumar exactamente `qty` entradas con carritos de al menos `minGroup`,
+ * sin pasar el límite por cuenta ni por grupo? Devuelve un aviso o null.
+ */
+function qtyWarning(qty: number, minGroup: number, limits: EventLimits, accounts: Account[]): string | null {
+  if (!Number.isInteger(qty) || qty < 1 || !Number.isInteger(minGroup) || minGroup < 1) return null;
+  const perAccount = limits.perAccount;
+  if (perAccount < 1) return null;
+  if (limits.perOperation >= 1 && qty > limits.perOperation) return `El evento permite como máximo ${limits.perOperation} entradas por operación.`;
+  if (minGroup > qty) return `El grupo mínimo (${minGroup}) es mayor que las entradas pedidas (${qty}): ningún carrito podría cumplirlo.`;
+  if (minGroup > perAccount) return `Ninguna cuenta puede comprar grupos de ${minGroup}: el límite es ${perAccount} por cuenta.`;
+
+  // Lo que puede sumar un conjunto de cuentas: cada una aporta 0 o entre minGroup y su límite.
+  const addAccount = (reach: boolean[], cap: number): boolean[] => {
+    const next = [...reach];
+    reach.forEach((ok, t) => {
+      if (!ok) return;
+      for (let k = minGroup; k <= perAccount && t + k <= cap; k++) next[t + k] = true;
+    });
+    return next;
+  };
+
+  if (accounts.length === 0) {
+    // Sin cuentas elegidas: ¿lo permite algún número de cuentas?
+    let possible = false;
+    for (let n = 1; n * minGroup <= qty; n++) if (qty <= n * perAccount) possible = true;
+    return possible ? null : `Con grupos de al menos ${minGroup} y un máximo de ${perAccount} por cuenta no se puede sumar exactamente ${qty}.`;
+  }
+
+  const groups = new Map<string, number>();
+  for (const a of accounts) {
+    const key = groupKeyOf(a, limits.semantics);
+    if (key !== null) groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+  if (groups.size === 0) return null;
+  const perGroup = limits.perGroup >= 1 ? limits.perGroup : Number.POSITIVE_INFINITY;
+  let total: boolean[] = Array.from({ length: qty + 1 }, (_, i) => i === 0);
+  let capacity = 0;
+  for (const n of groups.values()) {
+    const cap = Math.min(qty, perGroup);
+    let inGroup: boolean[] = Array.from({ length: cap + 1 }, (_, i) => i === 0);
+    for (let i = 0; i < n; i++) inGroup = addAccount(inGroup, cap);
+    capacity += Math.min(perGroup, n * perAccount);
+    const next: boolean[] = Array.from({ length: qty + 1 }, () => false);
+    total.forEach((ok, t) => {
+      if (!ok) return;
+      inGroup.forEach((ok2, k) => {
+        if (ok2 && t + k <= qty) next[t + k] = true;
+      });
+    });
+    total = next;
+  }
+  if (total[qty]) return null;
+  const nAcc = [...groups.values()].reduce((a, b) => a + b, 0);
+  const limitText = `límite: ${perAccount} por cuenta${limits.semantics !== 'PER_ACCOUNT' && limits.perGroup >= 1 ? `, ${limits.perGroup} por ${GROUP_NOUN[limits.semantics]}` : ''}`;
+  if (capacity < qty) return `Con ${nAcc === 1 ? 'esta cuenta' : `estas ${nAcc} cuentas`} se pueden comprar como máximo ${capacity} entradas (${limitText}).`;
+  let best = 0;
+  for (let t = qty; t > 0; t--) {
+    if (total[t]) {
+      best = t;
+      break;
+    }
+  }
+  if (best === 0) return `Con estos límites (${limitText}) no se puede formar ni un grupo de ${minGroup}.`;
+  return `Con grupos de al menos ${minGroup} (${limitText}), ${nAcc === 1 ? 'esta cuenta no puede' : `estas ${nAcc} cuentas no pueden`} sumar exactamente ${qty}: lo más cercano es ${best}.`;
 }
 
 export function OperationFormPage() {
@@ -157,6 +255,25 @@ export function OperationFormPage() {
 
   const toggleAccount = (aid: string) =>
     setF((x) => ({ ...x, accountIds: x.accountIds.includes(aid) ? x.accountIds.filter((y) => y !== aid) : x.accountIds.length >= 10 ? x.accountIds : [...x.accountIds, aid] }));
+  // Último objetivo añadido desde el plano o las sugerencias, para poder deshacerlo.
+  const [added, setAdded] = useState<{ name: string; duplicate: boolean; seq: number } | null>(null);
+  useEffect(() => {
+    if (!added) return;
+    const t = setTimeout(() => setAdded(null), 8000);
+    return () => clearTimeout(t);
+  }, [added]);
+  const addTarget = (name: string) => {
+    const duplicate = f.targets.includes(name);
+    if (!duplicate) setF((x) => (x.targets.includes(name) ? x : { ...x, targets: [...x.targets, name] }));
+    setAdded((prev) => ({ name, duplicate, seq: (prev?.seq ?? 0) + 1 }));
+  };
+  const undoAdd = (name: string) => {
+    setF((x) => {
+      const i = x.targets.lastIndexOf(name);
+      return i < 0 ? x : { ...x, targets: x.targets.filter((_, j) => j !== i) };
+    });
+    setAdded(null);
+  };
   const moveTarget = (i: number, dir: -1 | 1) =>
     setF((x) => {
       const t = [...x.targets];
@@ -166,17 +283,22 @@ export function OperationFormPage() {
       return { ...x, targets: t };
     });
 
+  const currency = event?.currency ?? 'EUR';
+  const maxCents = parseEuros(f.maxUnitPrice);
+  const budgetCents = parseEuros(f.budget);
+  const t0Iso = parseT0(f.t0);
+
   const build = (): OperationConfig | null => {
     if (!event) return null;
-    const maxUnitPrice = parseEuros(f.maxUnitPrice);
-    const budget = parseEuros(f.budget);
-    if (maxUnitPrice === null || budget === null) return null;
+    const maxUnitPrice = maxCents;
+    const budget = budgetCents;
+    if (maxUnitPrice === null || budget === null || t0Iso === null) return null;
     const isSim = provider?.mode === 'SIMULATED';
     return {
       name: f.name.trim() || event.name,
       eventId: event.id,
       providerId: event.providerId,
-      t0: fromLocalInput(f.t0),
+      t0: t0Iso,
       runWindowMinutes: Math.trunc(Number(f.runWindowMinutes)),
       freezeLeadSeconds: Math.trunc(Number(f.freezeLeadSeconds)),
       requestedQty: Math.trunc(Number(f.requestedQty)),
@@ -212,9 +334,21 @@ export function OperationFormPage() {
     navigate(`/operaciones/${opId}`);
   };
 
-  const ready = Boolean(event) && f.accountIds.length > 0;
   const qty = Number(f.requestedQty);
-  const maxPrice = parseEuros(f.maxUnitPrice) ?? 0;
+  const minGroup = Number(f.minGroupSize);
+  const maxPrice = maxCents ?? 0;
+  const blocking = [
+    !event ? 'elige un evento' : null,
+    f.accountIds.length === 0 ? 'elige al menos una cuenta' : null,
+    t0Iso === null ? 'indica T0' : null,
+    maxCents === null ? 'revisa el máximo por entrada' : null,
+    budgetCents === null ? 'revisa el presupuesto' : null,
+  ].filter((x): x is string => x !== null);
+  const ready = blocking.length === 0;
+  const selectedAccounts = f.accountIds.map((aid) => s.accounts[aid]).filter((a): a is Account => a !== undefined);
+  const qtyWarn = event ? qtyWarning(Math.trunc(qty), Math.trunc(minGroup), event.limits, selectedAccounts) : null;
+  const budgetShort = Number.isFinite(qty) && qty > 0 && maxCents !== null && budgetCents !== null && budgetCents < Math.trunc(qty) * maxCents;
+  const t0Past = t0Iso !== null && Date.parse(t0Iso) < Date.now();
 
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -274,7 +408,26 @@ export function OperationFormPage() {
           <div className="form-grid">
             <div className="field">
               <label htmlFor="op-t0">T0 (apertura de venta, hora local)</label>
-              <input id="op-t0" className="input" type="datetime-local" step={1} value={f.t0} onChange={(e) => set('t0', e.target.value)} />
+              <input
+                id="op-t0"
+                className="input"
+                type="datetime-local"
+                step={1}
+                value={f.t0}
+                onChange={(e) => set('t0', e.target.value)}
+                aria-invalid={t0Iso === null}
+                aria-describedby="op-t0-hint"
+              />
+              {t0Iso === null ? (
+                <span id="op-t0-hint" className="hint error" role="alert">
+                  Indica la fecha y la hora de T0.
+                </span>
+              ) : (
+                <span id="op-t0-hint" className={`hint ${t0Past ? 'warn' : ''}`}>
+                  {new Date(t0Iso).toLocaleString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  {t0Past ? ' · esta hora ya ha pasado' : ''}
+                </span>
+              )}
             </div>
             <div className="field">
               <label htmlFor="op-win">Ventana (minutos)</label>
@@ -296,13 +449,17 @@ export function OperationFormPage() {
               <input id="op-qty" className="input" type="number" min={1} value={f.requestedQty} onChange={(e) => set('requestedQty', e.target.value)} />
             </div>
             <div className="field">
-              <label htmlFor="op-max">Máximo por entrada ({event?.currency ?? 'EUR'}, con gastos)</label>
-              <input id="op-max" className="input" type="number" step="0.01" value={f.maxUnitPrice} onChange={(e) => set('maxUnitPrice', e.target.value)} />
+              <label htmlFor="op-max">Máximo por entrada ({currency}, con gastos)</label>
+              <MoneyInput id="op-max" value={f.maxUnitPrice} cents={maxCents} currency={currency} onChange={(v) => set('maxUnitPrice', v)} />
             </div>
             <div className="field">
               <label htmlFor="op-budget">Presupuesto total</label>
-              <input id="op-budget" className="input" type="number" step="0.01" value={f.budget} onChange={(e) => set('budget', e.target.value)} />
-              <span className="hint">A precio máximo: {Number.isFinite(qty) ? formatMoney(qty * maxPrice, event?.currency ?? 'EUR') : '—'}</span>
+              <MoneyInput id="op-budget" value={f.budget} cents={budgetCents} currency={currency} onChange={(v) => set('budget', v)} />
+              <span className={`hint ${budgetShort ? 'warn' : ''}`}>
+                {Number.isFinite(qty) && qty > 0 && maxCents !== null
+                  ? `${Math.trunc(qty)} a precio máximo: ${formatMoney(Math.trunc(qty) * maxPrice, currency)}${budgetShort ? ' · el presupuesto no llega' : ''}`
+                  : '—'}
+              </span>
             </div>
             <div className="field">
               <label htmlFor="op-min">Grupo mínimo por carrito</label>
@@ -310,6 +467,11 @@ export function OperationFormPage() {
               <span className="hint">Evita entradas sueltas.</span>
             </div>
           </div>
+          {qtyWarn ? (
+            <div style={{ marginTop: 12 }}>
+              <Callout tone="warning">{qtyWarn}</Callout>
+            </div>
+          ) : null}
         </div>
 
         <div className="form-section">
@@ -335,12 +497,26 @@ export function OperationFormPage() {
             {artifact.data ? (
               <div className="stack" style={{ gap: 6 }}>
                 <span className="small muted">Toca una zona del plano para añadirla como objetivo (el número es el orden en que se intentará):</span>
-                <VenueMap
-                  artifact={artifact.data}
-                  targets={f.targets}
-                  compact
-                  onPick={(name) => set('targets', f.targets.includes(name) ? f.targets : [...f.targets, name])}
-                />
+                <div className="pick-note small" aria-live="polite">
+                  {added ? (
+                    added.duplicate ? (
+                      <span>
+                        <b>{added.name}</b> ya estaba en la lista.
+                      </span>
+                    ) : (
+                      <>
+                        <span>
+                          Añadido: <b>{added.name}</b>
+                        </span>
+                        <span aria-hidden>·</span>
+                        <button type="button" className="btn sm ghost" onClick={() => undoAdd(added.name)}>
+                          Deshacer
+                        </button>
+                      </>
+                    )
+                  ) : null}
+                </div>
+                <VenueMap artifact={artifact.data} targets={f.targets} onPick={addTarget} />
               </div>
             ) : null}
             {suggestions.length > 0 ? (
@@ -350,7 +526,7 @@ export function OperationFormPage() {
                   {suggestions
                     .filter((x) => !f.targets.includes(x.label))
                     .map((x) => (
-                      <button key={`${x.kind}-${x.label}`} type="button" className="chip suggest" onClick={() => set('targets', [...f.targets, x.label])}>
+                      <button key={`${x.kind}-${x.label}`} type="button" className="chip suggest" onClick={() => addTarget(x.label)}>
                         + {x.label} <span className="small muted">{x.kind}</span>
                       </button>
                     ))}
@@ -459,9 +635,40 @@ export function OperationFormPage() {
           <Link className="btn lg" to={id ? `/operaciones/${id}` : '/operaciones'}>
             Cancelar
           </Link>
-          {!ready ? <span className="small muted">Elige un evento y al menos una cuenta.</span> : null}
+          {!ready ? <span className="small muted">Falta: {blocking.join(' · ')}.</span> : null}
         </div>
       </Card>
     </div>
+  );
+}
+
+/** Importe en texto libre ('119,50', '119.50', '1.234,50') con su lectura al lado: «= 119,50 €». */
+function MoneyInput({ id, value, cents, currency, onChange }: { id: string; value: string; cents: number | null; currency: string; onChange: (v: string) => void }) {
+  const invalid = cents === null;
+  return (
+    <>
+      <div className="money-row">
+        <input
+          id={id}
+          className="input mono"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          spellCheck={false}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-invalid={invalid}
+          aria-describedby={`${id}-read`}
+        />
+        <span id={`${id}-read`} className={`money-read ${invalid ? 'error' : ''}`}>
+          {invalid ? 'no válido' : `= ${formatMoney(cents, currency)}`}
+        </span>
+      </div>
+      {invalid ? (
+        <span className="hint error" role="alert">
+          Escribe un importe, por ejemplo 119,50.
+        </span>
+      ) : null}
+    </>
   );
 }

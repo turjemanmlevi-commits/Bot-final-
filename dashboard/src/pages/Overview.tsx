@@ -250,10 +250,11 @@ function RealPurchaseChecklist() {
     // Proveedor genérico «manual», simulador o nota de demo: sirven para ensayar, no para la compra real.
     const isDemoLike = (providerId: string, eventId: string) =>
       providerId === 'sim' || providerId === 'manual' || (s.events[eventId]?.tags.includes('demo') ?? false);
-    // Operaciones armadas no simuladas; primero las de eventos reales (no demo), después por T0.
+    // Operaciones reales armadas, por T0.
+    // Las de ensayo (proveedor «manual», simulador o evento demo) no cuentan para la compra real.
     const armedOps = Object.values(s.operations)
-      .filter((o) => isReal(o.providerId) && REAL_ARMED.includes(o.state))
-      .sort((a, b) => Number(isDemoLike(a.providerId, a.eventId)) - Number(isDemoLike(b.providerId, b.eventId)) || a.t0.localeCompare(b.t0));
+      .filter((o) => isReal(o.providerId) && REAL_ARMED.includes(o.state) && !isDemoLike(o.providerId, o.eventId))
+      .sort((a, b) => a.t0.localeCompare(b.t0));
     const firstOp = armedOps[0];
 
     // El evento de la operación real armada; si no hay, el próximo evento real (ni simulador, ni
@@ -261,8 +262,7 @@ function RealPurchaseChecklist() {
     const upcomingReal = Object.values(s.events)
       .filter((e) => !isDemoLike(e.providerId, e.id) && isReal(e.providerId) && Date.parse(e.startsAt) > now)
       .sort((a, b) => (a.onSaleAt ?? a.startsAt).localeCompare(b.onSaleAt ?? b.startsAt));
-    const realArmed = firstOp && !isDemoLike(firstOp.providerId, firstOp.eventId) ? firstOp : undefined;
-    const nextEvent = (realArmed ? s.events[realArmed.eventId] : undefined) ?? upcomingReal[0];
+    const nextEvent = (firstOp ? s.events[firstOp.eventId] : undefined) ?? upcomingReal[0];
     const eventVerified = nextEvent !== undefined && nextEvent.limits.verified && nextEvent.limits.semantics !== 'UNKNOWN';
     const armedIds = new Set(armedOps.map((o) => o.id));
     const leased = Object.values(s.accounts).filter((a) => a.leasedBy !== null && armedIds.has(a.leasedBy));

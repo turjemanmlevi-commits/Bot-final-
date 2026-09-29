@@ -8,6 +8,7 @@ import {
   LIMIT_SEMANTICS_LABEL,
   OPERATION_STATE_LABEL,
   REJECTION_REASON_LABEL,
+  SESSION_STATE_LABEL,
   STAGES,
   killSwitchKey,
   type Account,
@@ -20,6 +21,7 @@ import {
   type OperationState,
   type ReadinessPhase,
   type RejectionReason,
+  type SessionState,
   type StageName,
   type VenueArtifact,
 } from '@to/shared';
@@ -261,7 +263,8 @@ function PurchasePlan({ detail, artifact }: { detail: OperationDetail; artifact:
   const idle = live
     ? summary.accountIds
         .map((aid) => s.accounts[aid])
-        .filter((a): a is Account => a !== undefined && a.session.state === 'READY' && !tasks.some((t) => t.accountId === a.id))
+        // Las que ya tienen carrito se ven arriba con su carrito.
+        .filter((a): a is Account => a !== undefined && a.session.state === 'READY' && !tasks.some((t) => t.accountId === a.id) && !carts.some((c) => c.accountId === a.id))
         .map((a) => ({ account: a, reason: idleReason({ s, state: summary.state, providerId: summary.providerId, operationId: opId, account: a, alloc, minGroup }) }))
     : [];
   return (
@@ -424,7 +427,6 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                 <th>Sesión</th>
                 <th>Cola</th>
                 <th style={{ width: '18%' }}>Cupo</th>
-                <th>Ahora</th>
                 <th />
               </tr>
             </thead>
@@ -433,11 +435,13 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                 const a = s.accounts[aid];
                 const cap = alloc?.perAccount[aid];
                 if (!a) return null;
+                const doing = nowText(a);
                 return (
                   <tr key={aid}>
                     <td>
                       <b>{a.label}</b>
                       <div className="small muted mono">{aid}</div>
+                      {doing ? <div className="small ink2" style={{ marginTop: 2, minWidth: 180 }}>Ahora: {doing}</div> : null}
                     </td>
                     <td className="small">{cap?.groupKey ?? '—'}</td>
                     <td>
@@ -465,9 +469,6 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                       ) : (
                         '—'
                       )}
-                    </td>
-                    <td className="small ink2" style={{ minWidth: 160 }}>
-                      {nowText(a) ?? '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {a.session.state === 'CHALLENGE_REQUIRED' || a.session.state === 'LOGGED_OUT' || a.session.state === 'EXPIRED' || a.session.state === 'UNKNOWN' ? (
@@ -891,9 +892,46 @@ function PrepTab({ detail, artifact }: { detail: OperationDetail; artifact: Venu
 // Historial y replay
 // ---------------------------------------------------------------------------
 
-function describe(e: AuditEvent, currency: string): string {
+function describe(e: AuditEvent, currency: string, who: (accountId: unknown) => string): string {
   const p = (e.payload ?? {}) as Record<string, unknown>;
+  const session = (v: unknown) => SESSION_STATE_LABEL[v as SessionState] ?? String(v);
   switch (e.type) {
+    case 'operation.created':
+      return 'Operación creada';
+    case 'operation.config_updated':
+      return 'Configuración actualizada';
+    case 'operation.armed':
+      return 'Operación armada';
+    case 'operation.amended':
+      return 'Enmienda en caliente';
+    case 'runner.started':
+      return 'Reparto de tareas en marcha';
+    case 'runner.stopped':
+      return 'Reparto de tareas detenido';
+    case 'session.changed':
+      return `Sesión de ${who(p.accountId)}: ${session(p.from)} → ${session(p.to)}`;
+    case 'session.human_ready':
+      return `${who(p.accountId)}: «Sesión lista»`;
+    case 'session.open_requested':
+      return `Apertura de sesión pedida para ${who(p.accountId)}`;
+    case 'queue.passed':
+      return `${who(p.accountId)} pasó la cola`;
+    case 'alert.resolved':
+      return 'Alerta resuelta';
+    case 'alert.acked':
+      return 'Alerta vista';
+    case 'human_task.expired':
+      return 'Tarea humana caducada';
+    case 'cart.updated':
+      return `Carrito de ${who(p.accountId)}: ${String(p.qty)} entradas${typeof p.total === 'number' ? ` · ${formatMoney(p.total, currency)}` : ''}`;
+    case 'cart.expiry_set':
+      return `Nueva hora límite del carrito: ${typeof p.expiresAt === 'string' ? fmtTime(p.expiresAt) : '—'}`;
+    case 'decision.recorded':
+      return 'Decisión registrada';
+    case 'allocation.step':
+      return 'Paso de asignación';
+    case 'inventory.snapshot':
+      return 'Lectura de inventario';
     case 'operation.state_changed':
       return `Estado ${stateLabel(p.from)} → ${stateLabel(p.to)}${p.reason ? ` (${String(p.reason)})` : ''}`;
     case 'operation.command': {
@@ -902,7 +940,7 @@ function describe(e: AuditEvent, currency: string): string {
       return `Comando «${commandLabel(String(p.command))}»${has ? ` = ${value}` : ''}`;
     }
     case 'claim.reserved':
-      return `Reserva ${String(p.qty)} × ${String(p.offerRef)}`;
+      return `Reserva de ${String(p.qty)} para ${who(p.accountId)} · ${String(p.offerRef)}`;
     case 'claim.confirmed':
       return `Confirmado ${String(p.qty)} entradas (${String(p.level)}${p.resolution === 'RECONCILIATION' ? ', reconciliado' : ''})`;
     case 'claim.rejected':
@@ -937,6 +975,7 @@ function HistoryTab({ id, detail }: { id: string; detail: OperationDetail }) {
     const seen = new Set(liveEv.map((e) => e.seq));
     return [...liveEv, ...detail.timeline.filter((e) => !seen.has(e.seq))].sort((a, b) => b.seq - a.seq).slice(0, 250);
   }, [s.audit, detail.timeline, id]);
+  const who = (accountId: unknown) => (typeof accountId === 'string' ? (s.accounts[accountId]?.label ?? accountId) : '—');
   return (
     <div className="grid cols-2">
       <Card title="Línea de tiempo" flush className="span-2">
@@ -945,7 +984,7 @@ function HistoryTab({ id, detail }: { id: string; detail: OperationDetail }) {
             <li key={e.seq}>
               <span className="ts">{fmtTime(e.at)}</span>
               <span>
-                {describe(e, detail.config.currency)} <span className="muted small">· {e.actor}</span>
+                {describe(e, detail.config.currency, who)} <span className="muted small">· {e.actor}</span>
               </span>
             </li>
           ))}

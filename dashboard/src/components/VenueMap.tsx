@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { VenueArtifact, VenueSection, VenueZone } from '@to/shared';
 
 /**
@@ -692,6 +692,11 @@ export function VenueMap({
   const uid = `vm${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
   const [selected, setSelected] = useState<Spot | null>(null);
   const [hover, setHover] = useState<Spot | null>(null);
+  // Otro recinto (p. ej. al cambiar de evento en el formulario): se olvida la selección.
+  useEffect(() => {
+    setSelected(null);
+    setHover(null);
+  }, [artifact.hash]);
 
   // Ancho real del plano en pantalla (800 hasta que se mide).
   const svgRef = useRef<SVGSVGElement>(null);
@@ -743,30 +748,9 @@ export function VenueMap({
   // Marcadores numerados: uno por objetivo (y grada), sin pisarse.
   const markerR = MARKER_R * k;
   const { markers, unplaced } = useMemo(() => {
-    const placed: Marker[] = [];
+    type Ring = { rx: number; ry: number; angle: number; lo: number; hi: number };
+    const requests: Array<{ rank: number; x: number; y: number; ring?: Ring; span: number }> = [];
     const missing: Array<{ rank: number; label: string }> = [];
-    const tooClose = (x: number, y: number, except?: Marker) => placed.find((m) => m !== except && Math.hypot(m.x - x, m.y - y) < 2.2 * markerR);
-    const place = (rank: number, x: number, y: number, ring?: { rx: number; ry: number; angle: number; lo: number; hi: number }) => {
-      const clash = tooClose(x, y);
-      if (!clash) {
-        placed.push({ ranks: [rank], x, y });
-        return;
-      }
-      if (ring) {
-        // Se desplaza a lo largo del anillo sin salir de su zona.
-        for (const d of [8, -8, 16, -16, 24, -24, 32, -32]) {
-          const a = ring.angle + d;
-          if (a < ring.lo + 1 || a > ring.hi - 1) continue;
-          const [nx, ny] = pt(cx, cy, ring.rx, ring.ry, a);
-          if (!tooClose(nx, ny)) {
-            placed.push({ ranks: [rank], x: nx, y: ny });
-            return;
-          }
-        }
-      }
-      // Sin sitio: se apila en el mismo marcador («1·5»).
-      if (!clash.ranks.includes(rank)) clash.ranks.push(rank);
-    };
     targets.forEach((label, i) => {
       const rank = i + 1;
       const set = targetSets[i] ?? new Set<string>();
@@ -777,11 +761,12 @@ export function VenueMap({
         return;
       }
       if (hitCenter.length > 0) {
+        // Pista / de pie: en el centro de su rectángulo (o de todos los que abarca).
         const x0 = Math.min(...hitCenter.map((c) => c.x));
         const x1 = Math.max(...hitCenter.map((c) => c.x + c.w));
         const y0 = Math.min(...hitCenter.map((c) => c.y));
         const y1 = Math.max(...hitCenter.map((c) => c.y + c.h));
-        place(rank, (x0 + x1) / 2, (y0 + y1) / 2);
+        requests.push({ rank, x: (x0 + x1) / 2, y: (y0 + y1) / 2, span: 0 });
       }
       // Un marcador por grada: en su anillo central (el exterior lleva el rótulo).
       const zones = [...new Set(hitPieces.map((p) => p.zone.id))];
@@ -801,10 +786,44 @@ export function VenueMap({
         for (const { lo, hi } of runs) {
           const angle = (lo + hi) / 2;
           const [x, y] = pt(cx, cy, rx, ry, angle);
-          place(rank, x, y, { rx, ry, angle, lo, hi });
+          // Lo que abarca: una sección concreta ocupa poco; una grada entera, mucho.
+          requests.push({ rank, x, y, ring: { rx, ry, angle, lo, hi }, span: (hi - lo) * rs.length });
         }
       }
     });
+
+    // Primero lo más concreto (una sección), luego lo amplio (una grada): así el
+    // marcador de la grada es el que se aparta y el de la sección queda en su sitio.
+    requests.sort((a, b) => a.span - b.span || a.rank - b.rank);
+    const placed: Marker[] = [];
+    const tooClose = (x: number, y: number) => placed.find((m) => Math.hypot(m.x - x, m.y - y) < 2.2 * markerR);
+    for (const r of requests) {
+      const clash = tooClose(r.x, r.y);
+      if (!clash) {
+        placed.push({ ranks: [r.rank], x: r.x, y: r.y });
+        continue;
+      }
+      let moved = false;
+      if (r.ring) {
+        // Se desplaza a lo largo del anillo, siempre entero dentro de lo que marca.
+        const { rx, ry, angle, lo, hi } = r.ring;
+        for (const d of [8, -8, 16, -16, 24, -24, 32, -32]) {
+          const a = angle + d;
+          const half = (markerR / Math.hypot(rx * Math.sin(rad(a)), ry * Math.cos(rad(a)))) * (180 / Math.PI);
+          if (a - half < lo || a + half > hi) continue;
+          const [nx, ny] = pt(cx, cy, rx, ry, a);
+          if (!tooClose(nx, ny)) {
+            placed.push({ ranks: [r.rank], x: nx, y: ny });
+            moved = true;
+            break;
+          }
+        }
+      }
+      // Sin sitio: se apila en el mismo marcador («1·5»).
+      if (!moved && !clash.ranks.includes(r.rank)) clash.ranks = [...clash.ranks, r.rank].sort((a, b) => a - b);
+    }
+    // El 1 se dibuja el último para quedar por encima.
+    placed.sort((a, b) => Math.min(...b.ranks) - Math.min(...a.ranks));
     return { markers: placed, unplaced: missing };
   }, [targetsKey, targetSets, layout, centerRects, g]);
 
@@ -1025,7 +1044,7 @@ export function VenueMap({
         ))}
 
         {/* Orden de compra: el 1 queda por encima */}
-        {[...markers].reverse().map((m) => {
+        {markers.map((m) => {
           const text = m.ranks.join('·');
           const fsz = 13 * k;
           const w = Math.max(2 * markerR, CHAR_W * fsz * text.length + 12 * k);
@@ -1138,7 +1157,9 @@ export function VenueMap({
               ) : null}
             </>
           ) : (
-            'Toca o pasa el ratón por una zona para ver su nombre. Cada grada va del nivel más cercano al campo (dentro) al más alto (fuera). Plano orientativo: los sectores exactos están en el plano oficial de la venta.'
+            `${onPick ? 'Toca una zona para añadirla como objetivo.' : 'Toca o pasa el ratón por una zona para ver su nombre.'} ${
+              stadium ? 'Cada grada va del nivel más cercano al campo (dentro) al más alto (fuera).' : 'Los anillos van de la zona más cercana a la pista o la platea (dentro) a la más alta (fuera).'
+            } Plano orientativo: los sectores exactos están en el plano oficial de la venta.`
           )}
         </div>
       ) : null}
