@@ -11,6 +11,7 @@ import { AlertsPage } from './pages/Alerts';
 import { AuditPage } from './pages/Audit';
 import { CartsPage } from './pages/Carts';
 import { EventsPage } from './pages/Events';
+import { GuidePage } from './pages/Guide';
 import { OperationDetailPage } from './pages/OperationDetail';
 import { OperationFormPage } from './pages/OperationForm';
 import { OperationsPage } from './pages/Operations';
@@ -133,6 +134,7 @@ function Shell() {
         </div>
         <div className="nav-group">
           <span className="sign">Preparar</span>
+          <NavItem to="/guia" icon="book" label="Cómo se compra" />
           <NavItem to="/cuentas" icon="users" label="Cuentas" />
           <NavItem to="/eventos" icon="calendar" label="Eventos" />
           <NavItem to="/recintos" icon="map" label="Recintos · vault" />
@@ -233,6 +235,7 @@ function Shell() {
               <Route path="/calidad" element={<QualityPage />} />
               <Route path="/auditoria" element={<AuditPage />} />
               <Route path="/ajustes" element={<SettingsPage />} />
+              <Route path="/guia" element={<GuidePage />} />
               <Route path="*" element={<div className="empty"><div className="big">No existe</div><NavLink to="/">Volver al resumen</NavLink></div>} />
             </Routes>
           )}

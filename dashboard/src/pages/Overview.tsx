@@ -304,7 +304,9 @@ function RealPurchaseChecklist() {
           </tbody>
         </table>
       </div>
-      <div className="card-body small muted">Guía completa: nota «Comprar entradas reales (paso a paso)» del vault.</div>
+      <div className="card-body small muted">
+        Paso a paso visual: <Link to="/guia">Cómo se compra</Link> · guía completa en la nota «Comprar entradas reales (paso a paso)» del vault.
+      </div>
     </Card>
   );
 }
