@@ -58,7 +58,11 @@ try {
   if (-not $Src) { throw 'El archivo descargado no tiene el formato esperado.' }
   New-Item -ItemType Directory -Force -Path $Dest | Out-Null
   # Copia sin borrar nada de la carpeta; nunca pisa .env ni data\.
-  & robocopy $Src.FullName $Dest /E /NFL /NDL /NJH /NJS /NP /XF .env /XD data node_modules | Out-Null
+  # /XO: no pisa archivos que hayas modificado despues (tus notas del vault).
+  # Si ya tienes Obsidian configurado en el vault, se respeta tu configuracion.
+  $ExcludeDirs = @('data', 'node_modules')
+  if (Test-Path (Join-Path $Dest 'vault\.obsidian')) { $ExcludeDirs += (Join-Path $Dest 'vault\.obsidian'); $ExcludeDirs += (Join-Path $Src.FullName 'vault\.obsidian') }
+  & robocopy $Src.FullName $Dest /E /XO /NFL /NDL /NJH /NJS /NP /XF .env /XD @ExcludeDirs | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "No se pudieron copiar los archivos (robocopy $LASTEXITCODE). Si OneDrive esta sincronizando, pausalo y repite." }
   $global:LASTEXITCODE = 0
   Ok 'Proyecto copiado'
