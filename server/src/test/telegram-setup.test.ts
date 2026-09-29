@@ -254,3 +254,30 @@ describe('el número del bot guardado al arrancar', () => {
     }
   });
 });
+
+describe('cortes de red con Telegram', () => {
+  it('un envío que falla por la conexión se reintenta solo', async () => {
+    const { createServer } = await import('node:http');
+    const { TelegramNotifier } = await import('../telegram/telegram');
+    let sends = 0;
+    const server = createServer((req, res) => {
+      if (req.url?.endsWith('/sendMessage') && sends++ === 0) {
+        req.socket.destroy(); // como una conexión que el servidor ya había cerrado
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, result: req.url?.endsWith('/getMe') ? { username: 'x_bot' } : { message_id: 1 } }));
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const n = new TelegramNotifier({ token: REAL_FORMAT, chatId: '6626060160', apiBase: `http://127.0.0.1:${port}`, setupProfile: false });
+      const r = await n.sendTest();
+      assert.equal(r.ok, true, r.message);
+      assert.equal(sends, 2, 'el primer intento se cortó y el segundo llegó');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+});

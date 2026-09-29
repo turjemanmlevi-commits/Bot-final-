@@ -96,20 +96,37 @@ interface TgResponse<T> {
 }
 
 /** Llamada a la Bot API. El token nunca aparece en los mensajes de error. */
+/** Descripción corta de un fallo de red («fetch failed (ECONNRESET)»). */
+function networkError(err: unknown): string {
+  const e = err as Error & { cause?: { code?: string; message?: string } };
+  const cause = e.cause?.code ?? e.cause?.message;
+  return cause ? `${e.message} (${cause})` : e.message;
+}
+
 async function callTelegram<T>(apiBase: string, token: string, method: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
-  const timeout = AbortSignal.timeout(timeoutMs);
   const redact = (m: string) => m.split(token).join('<token>');
-  let res: Response;
-  try {
-    res = await fetch(`${apiBase}/bot${token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
-    });
-  } catch (err) {
-    throw new Error(redact((err as Error).message));
+  // Un corte de red momentáneo (p. ej. una conexión que Telegram ya había cerrado) se reintenta al
+  // momento: un aviso de apertura o una tarea no se puede perder. La escucha (getUpdates, con
+  // `signal`) la reintenta su propio bucle.
+  const attempts = signal ? 1 : 3;
+  let res: Response | null = null;
+  for (let i = 0; i < attempts && !res; i++) {
+    const timeout = AbortSignal.timeout(timeoutMs);
+    try {
+      res = await fetch(`${apiBase}/bot${token}/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+      });
+    } catch (err) {
+      const name = (err as Error).name;
+      const last = i === attempts - 1 || name === 'AbortError' || name === 'TimeoutError' || signal?.aborted === true;
+      if (last) throw new Error(redact(networkError(err)));
+      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+    }
   }
+  if (!res) throw new Error(`Telegram ${method}: sin respuesta`);
   let json: TgResponse<T>;
   try {
     json = (await res.json()) as TgResponse<T>;
@@ -297,7 +314,9 @@ export class TelegramNotifier implements Notifier {
           ? `${target} es el número de un bot, no el de una persona: elige tu chat en Ajustes · Telegram (el de quien pulsó «Iniciar»).`
           : /chat not found|bot was blocked|user is deactivated/i.test(message)
             ? `Telegram no deja escribir al chat ${target}: abre el bot en Telegram, pulsa «Iniciar» (/start) y vuelve a probar.`
-            : `No se pudo enviar: ${message}`,
+            : /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|network/i.test(message)
+              ? `No se pudo conectar con Telegram (${message}). Comprueba la conexión a Internet y vuelve a pulsar «Enviar mensaje de prueba»; si se repite, un antivirus o cortafuegos puede estar bloqueando a Node.js.`
+              : `No se pudo enviar: ${message}`,
       };
     }
   }
