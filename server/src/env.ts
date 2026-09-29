@@ -69,7 +69,12 @@ export const env = {
   ticketmasterKey: optional('TICKETMASTER_API_KEY'),
   /** Token gratuito de football-data.org (partidos de LaLiga y Champions). */
   footballDataToken: optional('FOOTBALL_DATA_TOKEN'),
+  /** Clave de la API de Claude (platform.claude.com → API keys): busca y lee los eventos de cada web de venta. */
+  anthropicKey: optional('ANTHROPIC_API_KEY'),
+  /** Modelo de Claude fijo (opcional); sin él, el Opus más reciente de la cuenta. */
+  anthropicModel: optional('ANTHROPIC_MODEL'),
   /** Solo para pruebas: servidores que imitan esas APIs. */
+  anthropicApiBase: optional('ANTHROPIC_API_BASE'),
   ticketmasterApiBase: str('TICKETMASTER_API_BASE', 'https://app.ticketmaster.com'),
   footballApiBase: str('FOOTBALL_DATA_API_BASE', 'https://api.football-data.org'),
   /** Minutos que tiene una persona para responder una tarea de compra manual. */

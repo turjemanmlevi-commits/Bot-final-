@@ -32,7 +32,7 @@ const STEPS: Step[] = [
     who: 'Tú',
     title: 'Evento: enlace oficial, hora de la venta y límites',
     icon: 'calendar',
-    text: 'Eventos → Nuevo evento. Primero «Dónde se vende»; después el evento: ábrelo en la web oficial y pulsa el marcador «📥 Enviar a la sala» (sin claves), o elígelo de la lista oficial (con la clave gratuita de Ticketmaster o de los partidos). Se rellenan solos el recinto, el nombre, el enlace, la fecha, la apertura de la venta y el límite que publique la web; «Vigilar desde: 2 días antes» avisa por Telegram. Lo que la página no diga (p. ej. la fase de socios del Real Madrid), complétalo. Marca «He comprobado estos límites».',
+    text: 'Eventos → Nuevo evento. Primero «Dónde se vende»: con Claude conectado (Ajustes → Claude), Claude busca sus próximos eventos; eliges uno y lee su fecha, la apertura, cuántas entradas se pueden comprar por persona (con la frase de las condiciones), el recinto y su plano oficial. En «5 · Dónde queréis las entradas» toca hasta 3 sitios del plano (🟢 1ª, 🟠 2ª, 🔵 3ª preferencia). Sin Claude: marcador «📥 Enviar a la sala» o la lista oficial. «Vigilar desde: 2 días antes» avisa por Telegram. En Telegram también: /evento. Si el límite no sale de la web oficial, compruébalo y marca «He comprobado estos límites».',
     link: { to: '/eventos', label: 'Ir a Eventos' },
   },
   {

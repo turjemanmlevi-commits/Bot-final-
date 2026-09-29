@@ -693,6 +693,7 @@ export function VenueMap({
   targets = [],
   compact = false,
   onPick,
+  rankColors,
 }: {
   artifact: VenueArtifact;
   /** Zona o sección a resaltar (p. ej. el objetivo de una tarea). */
@@ -702,6 +703,8 @@ export function VenueMap({
   compact?: boolean;
   /** Si se indica, tocar una sección la elige (p. ej. para añadirla como objetivo). */
   onPick?: (sectionName: string) => void;
+  /** Color de cada preferencia (1ª, 2ª, 3ª…): se pinta la zona y su marcador. */
+  rankColors?: readonly string[];
 }) {
   const layout = useMemo(() => buildLayout(artifact), [artifact]);
   const uid = `vm${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`;
@@ -771,6 +774,12 @@ export function VenueMap({
   const dim = hlSet.size > 0;
   const isHl = (s: Spot) => hlSet.has(s.section.id);
   const isTarget = (s: Spot) => targetSets.some((set) => set.has(s.section.id));
+  /** Color de la preferencia más alta que incluye la sección (o null). */
+  const rankColor = (s: Spot): string | null => {
+    if (!rankColors) return null;
+    const i = targetSets.findIndex((set) => set.has(s.section.id));
+    return i >= 0 ? (rankColors[i] ?? null) : null;
+  };
 
   // Marcadores numerados: uno por objetivo (y grada), sin pisarse.
   const markerR = MARKER_R * k;
@@ -963,7 +972,7 @@ export function VenueMap({
                 width={c.w}
                 height={c.h}
                 rx={6}
-                fill={on ? HL_FILL : 'color-mix(in srgb, var(--data-1) 55%, var(--surface))'}
+                fill={on ? HL_FILL : (rankColor(c) ?? 'color-mix(in srgb, var(--data-1) 55%, var(--surface))')}
                 opacity={c.section.closed ? 0.3 : dim && !on ? 0.45 : 1}
                 stroke={isSel || t ? 'var(--ink)' : 'none'}
                 strokeWidth={isSel ? 2.5 : t ? 2 : 0}
@@ -999,7 +1008,7 @@ export function VenueMap({
             <path
               key={p.pid}
               d={sectorPath(cx, cy, r0, r1, p.a1, p.a2)}
-              fill={on ? HL_FILL : accessible ? ACCESSIBLE_FILL : tierFill(p.ring, layout.rings)}
+              fill={on ? HL_FILL : (rankColor(p) ?? (accessible ? ACCESSIBLE_FILL : tierFill(p.ring, layout.rings)))}
               opacity={p.section.closed ? 0.25 : dim && !on ? 0.4 : 1}
               stroke={isSel || t ? 'var(--ink)' : 'var(--surface)'}
               strokeWidth={isSel ? 2.5 : t ? 1.6 : 1}
@@ -1075,10 +1084,11 @@ export function VenueMap({
           const text = m.ranks.join('·');
           const fsz = 13 * k;
           const w = Math.max(2 * markerR, CHAR_W * fsz * text.length + 12 * k);
+          const color = rankColors?.[Math.min(...m.ranks) - 1];
           return (
             <g key={`m-${text}-${m.x.toFixed(0)}-${m.y.toFixed(0)}`} pointerEvents="none">
-              <rect x={m.x - w / 2} y={m.y - markerR} width={w} height={2 * markerR} rx={markerR} fill="var(--ink)" stroke="var(--surface)" strokeWidth={Math.max(2, 1.5 * k)} />
-              <text x={m.x} y={m.y} textAnchor="middle" dominantBaseline="central" fontSize={fsz} fontWeight={800} fill="var(--surface)">
+              <rect x={m.x - w / 2} y={m.y - markerR} width={w} height={2 * markerR} rx={markerR} fill={color ?? 'var(--ink)'} stroke="#fff" strokeWidth={Math.max(2, 1.5 * k)} />
+              <text x={m.x} y={m.y} textAnchor="middle" dominantBaseline="central" fontSize={fsz} fontWeight={800} fill={color ? '#fff' : 'var(--surface)'}>
                 {text}
               </text>
             </g>

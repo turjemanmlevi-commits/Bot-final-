@@ -60,6 +60,14 @@ export const EventNoteInputSchema = z
     officialSale: z.string().trim().max(120).nullable().optional(),
     /** Vigilar el evento desde N días antes de la venta (0 o null = no vigilar). */
     watchDaysBefore: z.number().int().min(0).max(60).nullable().optional(),
+    /** Dónde queréis sentaros (zonas o secciones del recinto, en orden de preferencia). */
+    preferredTargets: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+    /** Imagen del plano oficial (tal cual se ve al comprar) y dónde está cada zona en ella. */
+    planImage: z.string().trim().max(1000).regex(/^https:\/\/\S+$/i, 'La imagen del plano tiene que ser un enlace https://').nullable().optional(),
+    planPoints: z
+      .array(z.object({ zone: z.string().trim().min(1).max(120), x: z.number().min(0).max(100), y: z.number().min(0).max(100) }))
+      .max(80)
+      .optional(),
   })
   .superRefine((v, ctx) => {
     if (Boolean(v.officialFeed) !== Boolean(v.officialId)) {
@@ -216,4 +224,37 @@ export function parseVenueLayout(text: string): ParsedLayout {
   if (out.length > 60) errors.push('Como máximo 60 zonas');
   if (used.size > 400) errors.push('Como máximo 400 secciones');
   return { zones: out, errors };
+}
+
+/** Dónde queréis sentaros: zonas o secciones del recinto, en orden de preferencia. */
+export const PreferredTargetsSchema = z.object({
+  targets: z.array(z.string().trim().min(1).max(120)).max(30),
+});
+
+/**
+ * Estructura orientativa de un recinto nuevo según su nombre, cuando no hay
+ * plano (se revisa después con el plano oficial en Recintos).
+ */
+export function guessVenueLayout(name: string): string {
+  const n = norm(name);
+  if (/estadi|stadium|camp nou|campo de futbol|coliseum/.test(n)) return 'Tribuna\nPreferencia\nFondo Norte\nFondo Sur';
+  if (/teatro|teatre|auditori|opera|gran casino|sala /.test(`${n} `)) return 'Patio de butacas\nAnfiteatro';
+  if (/arena|palacio|pabellon|palau|center|centre|multiusos|coliseo|toros|velodromo|wizink/.test(n)) return 'Pista (de pie)\nGrada baja\nGrada alta';
+  if (/festival|recinto|parque|parc|ferial|playa|explanada|ifema|fira/.test(n)) return 'General (de pie)';
+  return 'General';
+}
+
+/** Punto del plano en la nota de Obsidian: «Fondo Sur @ 50,92» (zona @ x,y en %). */
+export function formatPlanPoint(p: { zone: string; x: number; y: number }): string {
+  const n = (v: number) => String(Math.round(v * 10) / 10);
+  return `${p.zone} @ ${n(p.x)},${n(p.y)}`;
+}
+
+export function parsePlanPoint(raw: string): { zone: string; x: number; y: number } | null {
+  const m = /^(.+?)\s*@\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*$/.exec(raw.trim());
+  if (!m) return null;
+  const x = Number(m[2]);
+  const y = Number(m[3]);
+  if (!(x >= 0 && x <= 100 && y >= 0 && y <= 100)) return null;
+  return { zone: (m[1] ?? '').trim(), x, y };
 }

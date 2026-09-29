@@ -893,6 +893,8 @@ export interface SystemStatus {
   telegram: TelegramStatus;
   /** Fuentes oficiales de eventos (Ticketmaster, partidos). */
   feeds: import('./feeds').FeedsStatus;
+  /** Claude (API de Anthropic): investiga los eventos por ti. */
+  ai: import('./ai').AiStatus;
 }
 
 export interface TelegramChatSeen {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { LIMIT_SEMANTICS_LABEL, type Account, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
+import { LIMIT_SEMANTICS_LABEL, PREFERENCE_COLORS, type Account, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { VenueMap } from '../components/VenueMap';
 import { Callout, Card, Pill } from '../components/ui';
@@ -208,6 +208,8 @@ export function OperationFormPage() {
         ...x,
         eventId: ev.id,
         name: x.name || ev.name,
+        // Dónde queréis las entradas, elegido al crear el evento (1ª, 2ª y 3ª preferencia).
+        targets: x.targets.length > 0 ? x.targets : (ev.preferredTargets ?? []),
         t0: ev.onSaleAt && Date.parse(ev.onSaleAt) > Date.now() ? toLocalInput(ev.onSaleAt) : x.t0,
         requestedQty: String(Math.min(Number(x.requestedQty), ev.limits.perOperation || Number(x.requestedQty))),
         // Las colas de las webs reales son largas: la ventana por defecto se amplía.
@@ -244,7 +246,7 @@ export function OperationFormPage() {
       return {
         ...x,
         eventId,
-        targets: [],
+        targets: next?.preferredTargets ?? [],
         accountIds: next ? x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId) : [],
         name: nameFollowsEvent ? (next?.name ?? '') : x.name,
         t0: next?.onSaleAt && Date.parse(next.onSaleAt) > Date.now() ? toLocalInput(next.onSaleAt) : x.t0,
@@ -480,8 +482,11 @@ export function OperationFormPage() {
             <div className="chips" aria-label="Objetivos en orden">
               {f.targets.length === 0 ? <span className="small muted">Sin objetivos = cualquier sección permitida del recinto.</span> : null}
               {f.targets.map((t, i) => (
-                <span key={`${t}-${i}`} className="chip">
-                  <span className="rank">{i + 1}</span> {t}
+                <span key={`${t}-${i}`} className="chip" style={PREFERENCE_COLORS[i] ? { borderColor: PREFERENCE_COLORS[i], borderWidth: 2 } : undefined}>
+                  <span className="rank" style={PREFERENCE_COLORS[i] ? { color: PREFERENCE_COLORS[i], fontWeight: 800 } : undefined}>
+                    {i + 1}
+                  </span>{' '}
+                  {t}
                   <button type="button" aria-label={`Subir ${t}`} onClick={() => moveTarget(i, -1)}>
                     <Icon name="up" size={13} />
                   </button>
@@ -516,7 +521,7 @@ export function OperationFormPage() {
                     )
                   ) : null}
                 </div>
-                <VenueMap artifact={artifact.data} targets={f.targets} onPick={addTarget} />
+                <VenueMap artifact={artifact.data} targets={f.targets} onPick={addTarget} rankColors={PREFERENCE_COLORS} />
               </div>
             ) : null}
             {suggestions.length > 0 ? (

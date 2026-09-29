@@ -31,6 +31,7 @@ import {
   type VenueArtifact,
   type VenueSection,
   type VenueZone,
+  parsePlanPoint,
 } from '@to/shared';
 import { hashOf, sha256 } from '../util/hash';
 import { compactLabel, normalizeLabel, slugify } from '../util/normalize';
@@ -607,7 +608,7 @@ class Compiler {
   }
 
   /** Evento elegido de una fuente oficial y vigilancia (propiedades opcionales). */
-  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore'> {
+  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap'> {
     const feedRaw = asString(note.data.officialFeed);
     const idRaw = asString(note.data.officialId) ?? (typeof note.data.officialId === 'number' ? String(note.data.officialId) : null);
     let officialFeed: FeedId | null = null;
@@ -626,7 +627,26 @@ class Compiler {
       officialId: officialFeed && idRaw ? idRaw : null,
       officialSale: officialFeed ? asString(note.data.officialSale) : null,
       watchDaysBefore: watch,
+      preferredTargets: asStringList(note.data.preferredTargets).slice(0, 30),
+      seatMap: this.seatMap(note),
     };
+  }
+
+  /** Plano oficial (planImage) y dónde está cada zona en él (planPoints: «Zona @ x,y»). */
+  private seatMap(note: VaultNote): CatalogEvent['seatMap'] {
+    const image = asString(note.data.planImage);
+    if (!image) return null;
+    if (!/^https:\/\/\S+$/i.test(image)) {
+      this.warn(note.file, '`planImage` debe ser un enlace https:// a la imagen del plano');
+      return null;
+    }
+    const points: Array<{ zone: string; x: number; y: number }> = [];
+    for (const raw of asStringList(note.data.planPoints).slice(0, 80)) {
+      const p = parsePlanPoint(raw);
+      if (p) points.push(p);
+      else this.warn(note.file, `Punto del plano no válido: «${raw}» (se escribe «Zona @ x,y», en %)`);
+    }
+    return { image, points };
   }
 
   private limits(note: VaultNote): EventLimits {

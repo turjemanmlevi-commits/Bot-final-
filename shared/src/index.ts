@@ -7,3 +7,4 @@ export * from './vault-input';
 export * from './feeds';
 export * from './matching';
 export * from './page-import';
+export * from './ai';

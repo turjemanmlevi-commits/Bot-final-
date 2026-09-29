@@ -647,6 +647,152 @@ function SystemCard() {
 }
 
 // ---------------------------------------------------------------------------
+// Claude (IA): busca y lee los eventos de cada web de venta
+// ---------------------------------------------------------------------------
+
+/** La clave de Claude dentro de lo pegado (sk-ant-…). */
+function extractAiKey(raw: string): string | null {
+  return raw.match(/sk-ant-[A-Za-z0-9_-]{20,}/)?.[0] ?? null;
+}
+
+function ClaudeCard() {
+  const s = useLive();
+  const toast = useToast();
+  const status = s.system?.ai ?? null;
+  const [input, setInput] = useState('');
+  const [changing, setChanging] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [last, setLast] = useState<Outcome | null>(null);
+
+  const report = (ok: boolean, message: string) => {
+    setLast({ ok, message, at: new Date().toISOString() });
+    toast(message, ok ? 'info' : 'error');
+  };
+  const save = async (key: string | null) => {
+    setBusy(true);
+    try {
+      const r = await Api.aiSetKey(key);
+      report(r.ok, r.message);
+      if (r.ok) {
+        setInput('');
+        setChanging(false);
+      }
+    } catch (e) {
+      report(false, e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const connect = () => {
+    const key = extractAiKey(input);
+    if (!key) {
+      report(false, 'Eso no parece una clave de Claude: empieza por «sk-ant-». Cópiala entera.');
+      return;
+    }
+    void save(key);
+  };
+
+  const pill = !status?.configured ? (
+    <Pill tone="warning">Sin clave</Pill>
+  ) : status.ok === false ? (
+    <Pill tone="critical">No funciona</Pill>
+  ) : (
+    <Pill tone="good">Conectado</Pill>
+  );
+
+  return (
+    <Card title="Claude (IA)" id="claude" actions={pill}>
+      {!status ? (
+        <div className="muted">Cargando…</div>
+      ) : (
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="small ink2">
+            Al crear un evento eliges la web de venta y <b>Claude</b> mira sus próximos eventos. Al elegir uno, lee sus datos: la fecha y la hora, la apertura de la
+            venta, <b>cuántas entradas se pueden comprar por persona</b> (con la frase de las condiciones), el recinto y su plano oficial, para que elijáis dónde queréis
+            las entradas. Solo lee páginas públicas: no entra en ninguna cuenta ni compra nada. En Telegram también funciona: escribe <b>/evento</b> al bot.
+          </div>
+          {status.configured ? (
+            <div className="small">
+              {status.detail} · Modelo: <b>{status.model}</b> · Gastado desde que se abrió la sala: <b>{status.spentUsd.toFixed(2)} $</b> (aprox.)
+            </div>
+          ) : null}
+          {last ? (
+            <Callout tone={last.ok ? 'good' : 'critical'}>
+              {fmtTime(last.at)} — {last.message}
+            </Callout>
+          ) : null}
+          {!status.configurable ? (
+            <Callout tone="warning">
+              Este servidor no permite ponerla desde aquí: escribe <code>ANTHROPIC_API_KEY</code> en el archivo <code>.env</code> y reinicia.
+            </Callout>
+          ) : status.configured && !changing ? (
+            <div className="row" style={{ gap: 8 }}>
+              <button type="button" className="btn sm" disabled={busy} onClick={() => setChanging(true)}>
+                Cambiar la clave
+              </button>
+              <button type="button" className="btn sm ghost" disabled={busy} onClick={() => void save(null)}>
+                Quitar
+              </button>
+            </div>
+          ) : (
+            <>
+              <ol className="small" style={{ margin: 0, paddingLeft: 20 }}>
+                <li>
+                  Entra en <b>platform.claude.com</b> con tu cuenta y, en <b>Billing</b>, añade crédito (se paga por consulta).
+                </li>
+                <li>
+                  En <b>API keys</b> pulsa <b>Create key</b>, ponle un nombre (p. ej. «Sala de control») y copia la clave (empieza por <code>sk-ant-</code>).
+                </li>
+                <li>Pégala aquí y pulsa «Conectar».</li>
+              </ol>
+              <div>
+                <a className="btn sm" href="https://platform.claude.com/settings/keys" target="_blank" rel="noreferrer">
+                  <Icon name="external" size={13} /> Abrir API keys
+                </a>
+              </div>
+              <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ flex: '1 1 320px', minWidth: 0 }}>
+                  <label htmlFor="ai-key">Clave de la API de Claude</label>
+                  <input
+                    id="ai-key"
+                    className="input mono"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !busy && input.trim()) connect();
+                    }}
+                    placeholder="sk-ant-…"
+                  />
+                </div>
+                <button type="button" className="btn primary" disabled={busy || !input.trim()} onClick={connect}>
+                  <Icon name="link" size={15} /> {busy ? 'Comprobando…' : 'Conectar'}
+                </button>
+                {changing ? (
+                  <button type="button" className="btn" disabled={busy} onClick={() => setChanging(false)}>
+                    Cancelar
+                  </button>
+                ) : null}
+              </div>
+              <div className="small muted">
+                Se comprueba al momento y se guarda solo en este ordenador (archivo .env, que no se sube a ningún sitio). Nunca la pegues en un chat: si lo has hecho,
+                bórrala en platform.claude.com y crea otra.
+              </div>
+            </>
+          )}
+          <div className="small muted">
+            Cada búsqueda cuesta unos céntimos (lo cobra Anthropic a tu cuenta; el total real está en platform.claude.com). La misma búsqueda repetida en los 30 minutos
+            siguientes es gratis. Claude no interviene en la compra: al abrir la venta, el bot avisa al segundo.
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Fuentes oficiales de eventos
 // ---------------------------------------------------------------------------
 
@@ -864,9 +1010,10 @@ export function SettingsPage() {
       <div className="page-head">
         <div>
           <h1>Ajustes</h1>
-          <div className="sub">Telegram, fuentes de eventos, proveedores y datos del sistema.</div>
+          <div className="sub">Claude (IA), Telegram, fuentes de eventos, proveedores y datos del sistema.</div>
         </div>
       </div>
+      <ClaudeCard />
       <TelegramCard />
       <FeedsCard />
       <ProvidersCard />

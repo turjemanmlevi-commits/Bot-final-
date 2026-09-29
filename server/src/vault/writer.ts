@@ -9,7 +9,7 @@
 
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { EventNoteInput, FeedId, LayoutZone, VenueQuickInput } from '@to/shared';
+import { formatPlanPoint, type EventNoteInput, type FeedId, type LayoutZone, type VenueQuickInput } from '@to/shared';
 import { isMap, parseDocument, stringify } from 'yaml';
 import { slugify } from '../util/normalize';
 import { splitFrontmatter } from './markdown';
@@ -99,6 +99,10 @@ function eventProps(input: EventNoteInput, ctx: EventWriteContext): Record<strin
     officialId: input.officialFeed ? (input.officialId ?? null) : null,
     officialSale: input.officialFeed ? (input.officialSale ?? null) : null,
     watchDaysBefore: input.watchDaysBefore ?? null,
+    // Sin el campo (p. ej. al editar desde otra pantalla) se conservan los que hubiera.
+    ...(input.preferredTargets !== undefined ? { preferredTargets: input.preferredTargets } : {}),
+    ...(input.planImage !== undefined ? { planImage: input.planImage } : {}),
+    ...(input.planPoints !== undefined ? { planPoints: input.planPoints.map(formatPlanPoint) } : {}),
   };
 }
 
@@ -111,6 +115,8 @@ function eventBody(input: EventNoteInput, providerNote: string): string {
   ];
   if (input.url) lines.push(`- Página oficial: ${input.url}`);
   if (input.officialFeed && input.officialId) lines.push(`- Elegido de la fuente oficial (${OFFICIAL_LABEL[input.officialFeed]}): \`${input.officialId}\``);
+  if (input.preferredTargets && input.preferredTargets.length > 0) lines.push(`- Dónde queremos sentarnos (en orden): ${input.preferredTargets.join(' → ')}`);
+  if (input.planImage) lines.push(`- Plano oficial: ${input.planImage}`);
   if (input.limitsSource) lines.push(`- Condiciones / límites: ${input.limitsSource}`);
   if (input.watchDaysBefore) {
     lines.push(
@@ -156,6 +162,9 @@ export async function createEventNote(input: EventNoteInput, eventId: string, ct
     type: 'event',
     id: eventId,
     ...eventProps(input, ctx),
+    preferredTargets: input.preferredTargets ?? [],
+    planImage: input.planImage ?? null,
+    planPoints: (input.planPoints ?? []).map(formatPlanPoint),
     closedSections: [],
     overrideNotes: [],
     tags: ['evento', 'real'],

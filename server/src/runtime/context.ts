@@ -87,6 +87,10 @@ export class Ctx {
   telegramStatus: (() => import('@to/shared').TelegramStatus) | null = null;
   /** Estado de las fuentes oficiales de eventos (Ticketmaster, partidos). */
   feedsStatus: (() => import('@to/shared').FeedsStatus) | null = null;
+  /** Estado de Claude (API de Anthropic). */
+  aiStatus: (() => import('@to/shared').AiStatus) | null = null;
+  /** Crear eventos con Claude desde el bot de Telegram (lo pone el servidor al arrancar). */
+  eventAssistant: import('../ai/assistant').EventAssistant | null = null;
   readonly startedAt: number;
 
   constructor(

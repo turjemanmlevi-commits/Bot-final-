@@ -1089,6 +1089,159 @@ textarea.input {
   color: var(--ink);
 }
 
+/* Elegir dónde: 1ª, 2ª y 3ª preferencia, cada una con su color. */
+.pref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 4px 0 6px;
+  border-radius: 15px;
+  border: 2px solid var(--pref, var(--line-strong));
+  background: color-mix(in srgb, var(--pref, var(--surface)) 14%, var(--surface));
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pref-chip .pref-rank {
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  display: inline-grid;
+  place-items: center;
+  background: var(--pref);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pref-chip button {
+  border: 0;
+  background: transparent;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--ink-2);
+}
+
+.pref-chip button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.pref-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  border: 1px dashed var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.pref-option:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.pref-option.on {
+  border: 2px solid var(--pref);
+  background: color-mix(in srgb, var(--pref) 16%, var(--surface));
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.plan-official {
+  position: relative;
+  display: block;
+  /* Del tamaño de la imagen (no del ancho de la tarjeta): así los puntos caen en su sitio. */
+  width: fit-content;
+  align-self: flex-start;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: #fff;
+}
+
+.plan-official img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 640px;
+}
+
+.plan-pin {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform: translate(-50%, -50%);
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  border: 2px solid #fff;
+  background: rgba(17, 24, 39, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.plan-pin:hover,
+.plan-pin:focus-visible {
+  z-index: 2;
+  outline: 3px solid var(--focus, #2563eb);
+}
+
+.plan-pin.on {
+  background: var(--pref);
+  min-width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  line-height: 28px;
+  font-size: 14px;
+  z-index: 1;
+}
+
+/* Cerca de los bordes, el nombre se abre hacia dentro del plano (no se corta). */
+.plan-pin.end {
+  transform: translate(calc(-100% + 14px), -50%);
+}
+
+.plan-pin.start {
+  transform: translate(-14px, -50%);
+}
+
+.plan-pin.end .plan-pin-name {
+  order: -1;
+  margin-left: 0;
+  margin-right: 6px;
+}
+
+.plan-pin .plan-pin-name {
+  display: none;
+  margin-left: 6px;
+  font-weight: 700;
+}
+
+.plan-pin:hover .plan-pin-name,
+.plan-pin:focus-visible .plan-pin-name,
+.plan-pin.on .plan-pin-name {
+  display: inline;
+}
+
 /* --------------------------------------------------------------------------
    Visualización: medidores, barras, cifras
    -------------------------------------------------------------------------- */
@@ -1903,6 +2056,15 @@ dialog.modal .modal-foot {
   }
   .chip.suggest {
     min-height: 36px;
+  }
+  .pref-option,
+  .pref-chip {
+    min-height: 38px;
+  }
+  .plan-pin {
+    min-width: 32px;
+    height: 32px;
+    line-height: 28px;
   }
 }
 

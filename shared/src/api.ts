@@ -64,6 +64,10 @@ export interface CatalogEvent extends TicketEvent {
   officialSale: string | null;
   /** Días antes de la venta desde los que se vigila el evento (null o 0 = no se vigila). */
   watchDaysBefore: number | null;
+  /** Dónde queréis sentaros, en orden (zonas o secciones): la operación empieza con estos objetivos. */
+  preferredTargets: string[];
+  /** Plano oficial (imagen tal cual se ve al comprar) y dónde está cada zona en él, o null. */
+  seatMap: { image: string; points: Array<{ zone: string; x: number; y: number }> } | null;
 }
 
 /** Autorización humana de capabilities por proveedor, declarada en el vault. */

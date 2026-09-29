@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import {
+  aiDefaultSale,
+  aiEventDraft,
+  aiLayoutText,
+  AI_STATUS_LABEL,
   EventNoteInputSchema,
+  guessVenueLayout,
   LIMIT_SEMANTICS,
   LIMIT_SEMANTICS_LABEL,
   LOCAL_DATETIME_RE,
+  type AiEventDetails,
   type CatalogEvent,
   type EventNoteInput,
   type FeedEvent,
@@ -21,8 +27,10 @@ import { Api, ApiError } from '../lib/api';
 import { fmtRel } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
+import { ClaudeEventPicker, fmtLocalDate } from './ClaudeEventPicker';
 import { Icon } from './Icon';
 import { EventSourcePanel, fmtMadrid } from './OfficialEventPicker';
+import { SeatPicker, type PlanState } from './SeatPicker';
 import { Callout, Card } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -101,23 +109,14 @@ interface FormState {
   watchDaysBefore: string;
   /** Recinto que no está en la sala: se crea al guardar (venueId = NEW_VENUE). */
   newVenue: { name: string; city: string | null } | null;
+  /** Dónde queréis las entradas: hasta 3 zonas, en orden de preferencia. */
+  seats: string[];
+  /** Plano oficial (imagen tal cual se ve al comprar) y dónde está cada zona en él. */
+  plan: PlanState | null;
 }
 
 /** Valor del selector de recinto para «recinto nuevo, se crea al guardar». */
 const NEW_VENUE = '__nuevo__';
-
-/** Estructura orientativa de un recinto nuevo según su nombre (se revisa después con el plano oficial). */
-function guessLayout(name: string): string {
-  const n = name
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase();
-  if (/estadi|stadium|camp nou|campo de futbol|coliseum/.test(n)) return 'Tribuna\nPreferencia\nFondo Norte\nFondo Sur';
-  if (/teatro|teatre|auditori|opera|gran casino|sala /.test(n)) return 'Patio de butacas\nAnfiteatro';
-  if (/arena|palacio|pabellon|palau|center|centre|multiusos|coliseo|toros|velodromo|wizink/.test(n)) return 'Pista (de pie)\nGrada baja\nGrada alta';
-  if (/festival|recinto|parque|parc|ferial|playa|explanada|ifema|fira/.test(n)) return 'General (de pie)';
-  return 'General';
-}
 
 /** Opciones de «Vigilar desde». */
 const WATCH_OPTIONS: Array<[string, string]> = [
@@ -150,6 +149,9 @@ const FIELDS: readonly Field[] = [
   'officialId',
   'officialSale',
   'watchDaysBefore',
+  'preferredTargets',
+  'planImage',
+  'planPoints',
 ];
 
 const MODE_LABEL: Record<ProviderMode, string> = {
@@ -236,6 +238,8 @@ function blank(providerId: string): FormState {
     officialSale: null,
     watchDaysBefore: '2',
     newVenue: null,
+    seats: [],
+    plan: null,
   };
 }
 
@@ -262,6 +266,8 @@ function fromEvent(e: CatalogEvent): FormState {
     officialSale: e.officialSale ?? null,
     watchDaysBefore: String(e.watchDaysBefore ?? 0),
     newVenue: null,
+    seats: e.preferredTargets ?? [],
+    plan: e.seatMap ?? null,
   };
 }
 
@@ -394,6 +400,97 @@ function ImportSummary({
   );
 }
 
+/** Lo que ha leído Claude: qué se ha rellenado, qué falta y qué venta es la vuestra. */
+function AiSummary({
+  info,
+  onSale,
+  venueNote,
+}: {
+  info: { details: AiEventDetails; sale: string | null };
+  onSale: (name: string) => void;
+  venueNote: { tone: 'good' | 'warning' | 'info'; text: string } | null;
+}) {
+  const d = info.details;
+  const got: string[] = [];
+  const missing: string[] = [];
+  (d.name ? got : missing).push('nombre');
+  (d.startsAtLocal ? got : missing).push(d.startsAtLocal && d.timeTBA ? 'fecha (hora por confirmar)' : 'fecha y hora');
+  (d.venue ? got : missing).push('recinto');
+  (d.url ? got : missing).push('enlace oficial');
+  (d.sales.length > 0 ? got : missing).push('apertura de la venta');
+  (d.limit.perPerson !== null ? got : missing).push('entradas por persona');
+  if (d.planImageUrl) got.push('plano oficial');
+  const host = (u: string) => {
+    try {
+      return new URL(u).hostname.replace(/^www\./, '');
+    } catch {
+      return u;
+    }
+  };
+  const bad = d.status === 'CANCELLED' || d.status === 'POSTPONED' || d.status === 'SOLD_OUT';
+  return (
+    <Callout tone={missing.length === 0 ? 'good' : 'warning'} icon="check">
+      <div className="stack" style={{ gap: 8 }}>
+        <b>🤖 {d.name}</b>
+        <div className="small">
+          {fmtLocalDate(d.startsAtLocal, d.timeTBA)}
+          {d.venue ? ` · ${d.venue}` : ''}
+          {d.city ? ` (${d.city})` : ''}
+          {d.status ? <span style={bad ? { color: 'var(--critical-ink)', fontWeight: 700 } : undefined}> · {AI_STATUS_LABEL[d.status]}</span> : null}
+        </div>
+        <div className="small">
+          Rellenado: {got.join(', ')}.{' '}
+          {missing.length > 0 ? (
+            <b>
+              No lo ha encontrado: {missing.join(', ')}
+              {missing.includes('apertura de la venta') ? ' (si aún no está anunciada, la vigilancia te lo recordará)' : ''}. Complétalo abajo.
+            </b>
+          ) : (
+            'Revisa y, en el paso 5, toca dónde queréis las entradas.'
+          )}
+        </div>
+        {venueNote ? (
+          <div className="small" style={venueNote.tone === 'warning' ? { color: 'var(--warning-ink)' } : undefined}>
+            {venueNote.text}
+          </div>
+        ) : null}
+        {d.sales.length > 0 ? (
+          <div className="stack" style={{ gap: 4 }}>
+            <span className="small">¿Qué venta es la vuestra? Su hora será la apertura (T0):</span>
+            <div className="row" style={{ gap: 6 }}>
+              {d.sales.map((x) => (
+                <button key={x.name} type="button" className={`btn sm ${info.sale === x.name ? 'primary' : ''}`} onClick={() => onSale(x.name)}>
+                  {info.sale === x.name ? <Icon name="check" size={12} /> : null} {x.name} · {fmtLocalDate(x.opensAtLocal)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {d.price && (d.price.min !== null || d.price.max !== null) ? (
+          <div className="small">
+            Precios: {[d.price.min, d.price.max].filter((x) => x !== null).join(' – ')} {d.price.currency}
+          </div>
+        ) : null}
+        {d.notes ? <div className="small ink2">ℹ️ {d.notes}</div> : null}
+        {d.sources.length > 0 ? (
+          <div className="small muted">
+            Fuentes:{' '}
+            {d.sources.slice(0, 4).map((u, i) => (
+              <span key={u}>
+                {i > 0 ? ' · ' : ''}
+                <a href={u} target="_blank" rel="noreferrer">
+                  {host(u)}
+                </a>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className="small muted">{d.cached ? 'Respuesta de hace un rato (gratis).' : `Consulta: ${d.cost.usd.toFixed(2).replace('.', ',')} $ · ${d.cost.seconds} s.`}</div>
+      </div>
+    </Callout>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
 export function EventForm({ initial, imported, onDone }: { initial?: CatalogEvent; imported?: PageImport | null; onDone: (eventId: string | null) => void }) {
@@ -414,6 +511,111 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
   const [picked, setPicked] = useState<{ event: FeedEvent; sale: FeedSale | null } | null>(null);
   /** Página oficial enviada con «📥 Enviar a la sala» (y qué evento y fase de venta se usan). */
   const [fromPage, setFromPage] = useState<{ page: PageImport; index: number; sale: string | null } | null>(null);
+  /** Evento leído por Claude (y qué fase de venta es la apertura). */
+  const [aiPicked, setAiPicked] = useState<{ details: AiEventDetails; sale: string | null } | null>(null);
+  /** Plano oficial recién encontrado por Claude: se sitúan sus zonas en cuanto el recinto esté listo. */
+  const [planFresh, setPlanFresh] = useState(false);
+  /** Qué pasa con el recinto del evento elegido (se crea al momento si no estaba). */
+  const [venueNote, setVenueNote] = useState<{ tone: 'good' | 'warning' | 'info'; text: string } | null>(null);
+  const [showAi, setShowAi] = useState(!initial);
+  const [otherWays, setOtherWays] = useState(false);
+  const aiReady = Boolean(s.system?.ai.configured);
+
+  /** El recinto del evento de Claude: el de la sala o uno nuevo, creado ya (para ver su plano y elegir dónde). */
+  const venueRun = useRef(0);
+  const ensureVenue = async (d: AiEventDetails) => {
+    const run = ++venueRun.current;
+    const known = d.vaultVenueId && venues.some((v) => v.venueId === d.vaultVenueId) ? d.vaultVenueId : null;
+    const name = (d.venue ?? '').trim().slice(0, 100);
+    const same = known ?? (name ? (venues.find((v) => v.name.trim().toLowerCase() === name.toLowerCase())?.venueId ?? null) : null);
+    if (same) {
+      setF((x) => ({ ...x, venueId: same, newVenue: null }));
+      setVenueNote({ tone: 'good', text: 'El recinto ya está en la sala: elegido automáticamente.' });
+      return;
+    }
+    if (name.length < 3) {
+      setVenueNote({ tone: 'warning', text: 'Claude no ha encontrado el recinto: elígelo en la lista.' });
+      return;
+    }
+    const layout = aiLayoutText(d.layout);
+    setVenueNote({ tone: 'info', text: `Creando el recinto «${name}»${layout ? ' con las zonas de la web oficial' : ''}…` });
+    try {
+      const r = await Api.createVenue({
+        name,
+        city: d.city ?? undefined,
+        source: (layout
+          ? `Zonas leídas por Claude de ${d.sources[0] ?? d.url ?? 'la web de venta'}: revísalas con el plano oficial`
+          : `Creado al elegir el evento${d.url ? ` (${d.url})` : ''}. Estructura orientativa: revísala con el plano oficial`
+        ).slice(0, 300),
+        layout: layout || guessVenueLayout(name),
+      });
+      if (run !== venueRun.current) return;
+      if (r.venueId) {
+        const id = r.venueId;
+        setF((x) => ({ ...x, venueId: id, newVenue: null }));
+        setVenueNote({ tone: 'good', text: `Recinto nuevo creado: ${name} (${layout ? 'con las zonas de la web oficial' : 'estructura orientativa: revísala en Recintos'}).` });
+      } else {
+        setF((x) => ({ ...x, venueId: NEW_VENUE, newVenue: { name, city: d.city } }));
+        setVenueNote({ tone: 'warning', text: `El recinto «${name}» tiene errores en el vault: revísalo en Recintos o elige otro.` });
+      }
+    } catch (e) {
+      if (run !== venueRun.current) return;
+      setF((x) => ({ ...x, venueId: NEW_VENUE, newVenue: { name, city: d.city } }));
+      setVenueNote({ tone: 'warning', text: `No se pudo crear el recinto «${name}» (${e instanceof Error ? e.message : String(e)}): elige uno de la lista.` });
+    }
+  };
+
+  /** Rellena el formulario con lo que ha leído Claude. */
+  const applyAi = (d: AiEventDetails) => {
+    const nowLocal = madridLocal(Date.now());
+    const draft = aiEventDraft(d, { today: nowLocal.slice(0, 10), nowLocal });
+    setAiPicked({ details: d, sale: aiDefaultSale(d.sales, nowLocal)?.name ?? null });
+    setPicked(null);
+    setFromPage(null);
+    setErrors({});
+    setPlanFresh(Boolean(d.planImageUrl));
+    setF((x) => {
+      const n = draft.limit?.perAccount ?? null;
+      const limits: Partial<FormState> =
+        draft.limit && n !== null
+          ? {
+              limitPerAccount: String(n),
+              limitPerGroup: String(n),
+              limitPerOperation: String(Math.max(n, toInt(x.limitPerOperation) || 0)),
+              limitSemantics: draft.limit.semantics,
+              limitsVerified: draft.limit.verified,
+              limitsSource: draft.limit.source,
+              limitsNotes: draft.limit.notes,
+            }
+          : { limitsVerified: false, limitsSource: draft.limitsSource || x.limitsSource };
+      return {
+        ...x,
+        name: draft.name.length >= 3 ? draft.name : x.name,
+        url: draft.url ?? x.url,
+        providerEventRef: '',
+        startsAt: draft.startsAt ?? x.startsAt,
+        onSaleAt: draft.onSaleAt ?? '',
+        currency: draft.currency,
+        ...limits,
+        notes: draft.notes,
+        officialFeed: null,
+        officialId: '',
+        officialSale: null,
+        watchDaysBefore: x.watchDaysBefore === '0' ? '2' : x.watchDaysBefore,
+        seats: [],
+        plan: d.planImageUrl ? { image: d.planImageUrl, points: [] } : null,
+      };
+    });
+    void ensureVenue(d);
+  };
+
+  /** Otra fase de venta como apertura (socios, preventa, general…). */
+  const chooseAiSale = (name: string) => {
+    const sale = aiPicked?.details.sales.find((x) => x.name === name);
+    if (!aiPicked || !sale) return;
+    setAiPicked({ ...aiPicked, sale: name });
+    setF((x) => ({ ...x, onSaleAt: sale.opensAtLocal }));
+  };
 
   /** Rellena el formulario con lo leído de la página oficial. */
   const applyImported = (page: PageImport, index: number, saleName: string | null | undefined) => {
@@ -517,6 +719,29 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
   const provider = providers.find((p) => p.providerId === f.providerId);
   const perAccountMode = f.limitSemantics === 'PER_ACCOUNT';
 
+  /** Cuántas entradas se pueden comprar en total con las cuentas de esta web y este límite. */
+  const capacity = useMemo(() => {
+    const n = toInt(f.limitPerAccount);
+    if (!provider || provider.mode === 'SIMULATED' || !Number.isInteger(n) || n < 1) return null;
+    const accounts = Object.values(s.accounts).filter((a) => a.providerId === f.providerId);
+    if (accounts.length === 0) return `Aún no hay cuentas de ${provider.name}: añádelas en Cuentas (una por persona que va) para saber cuántas entradas podéis comprar.`;
+    const group: Record<LimitSemantics, ((a: (typeof accounts)[number]) => string) | null> = {
+      PER_ACCOUNT: (a) => a.id,
+      PER_HOLDER: (a) => a.holderRef,
+      PER_HOUSEHOLD: (a) => a.householdRef ?? a.holderRef,
+      PER_PAYMENT_METHOD: (a) => a.paymentRef ?? a.id,
+      UNKNOWN: null,
+    };
+    const by = group[f.limitSemantics];
+    if (!by) return null;
+    const groups = new Set(accounts.map(by)).size;
+    const perGroup = perAccountMode ? n : toInt(f.limitPerGroup) || n;
+    const cap = toInt(f.limitPerOperation);
+    const total = Math.min(groups * perGroup, Number.isInteger(cap) && cap > 0 ? cap : Number.POSITIVE_INFINITY);
+    const unit = { PER_ACCOUNT: 'cuentas', PER_HOLDER: 'titulares', PER_HOUSEHOLD: 'hogares', PER_PAYMENT_METHOD: 'tarjetas', UNKNOWN: '' }[f.limitSemantics];
+    return `Con tus ${accounts.length} cuenta${accounts.length === 1 ? '' : 's'} de ${provider.name} (${groups} ${unit}): hasta ${total} entrada${total === 1 ? '' : 's'} en total.`;
+  }, [provider, s.accounts, f.providerId, f.limitPerAccount, f.limitPerGroup, f.limitPerOperation, f.limitSemantics, perAccountMode]);
+
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => {
     setF((x) => ({ ...x, [k]: v }));
     setErrors((e) => {
@@ -610,6 +835,9 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
       officialId: f.officialFeed ? f.officialId : null,
       officialSale: f.officialFeed ? f.officialSale : null,
       watchDaysBefore: Number(f.watchDaysBefore) || 0,
+      preferredTargets: f.seats,
+      planImage: f.plan?.image ?? null,
+      planPoints: f.plan?.points ?? [],
     };
     const errs: Errors = {};
     if (url !== '' && !/^https?:\/\//i.test(url)) errs.url = 'Pega el enlace completo, empezando por https://';
@@ -636,7 +864,7 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
         name: nv.name,
         city: nv.city ?? undefined,
         source: `Creado al elegir el evento${f.url ? ` (${f.url})` : ''}. Estructura orientativa: revísala con el plano oficial`.slice(0, 300),
-        layout: guessLayout(nv.name),
+        layout: guessVenueLayout(nv.name),
       });
       return r.venueId;
     } catch (e) {
@@ -758,13 +986,40 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
               newVenue={f.venueId === NEW_VENUE ? f.newVenue : null}
             />
           ) : null}
-          <EventSourcePanel
-            key={f.providerId}
-            provider={provider ?? null}
-            linked={f.officialFeed ? { feed: f.officialFeed, id: f.officialId, name: picked?.event.name ?? (initial?.officialId === f.officialId ? initial.name : null), sale: f.officialSale } : null}
-            onPick={pickOfficial}
-            onUnlink={unlinkOfficial}
-          />
+          {provider && provider.mode !== 'SIMULATED' ? (
+            aiReady ? (
+              showAi ? (
+                <ClaudeEventPicker key={f.providerId} provider={provider} picked={aiPicked?.details.name ?? null} onPicked={applyAi} />
+              ) : (
+                <div>
+                  <button type="button" className="btn sm" onClick={() => setShowAi(true)}>
+                    🤖 Buscar el evento con Claude
+                  </button>
+                </div>
+              )
+            ) : (
+              <Callout tone="warning">
+                🤖 <b>Conecta Claude</b> en <Link to="/ajustes#claude">Ajustes → Claude (IA)</Link>: al elegir la web de venta buscará sus eventos y lo rellenará todo solo
+                (fechas, apertura, cuántas entradas por persona, el recinto y su plano para elegir dónde).
+              </Callout>
+            )
+          ) : null}
+          {aiPicked ? <AiSummary info={aiPicked} onSale={chooseAiSale} venueNote={venueNote} /> : null}
+          {!aiReady || otherWays || f.officialFeed !== null || !provider || provider.mode === 'SIMULATED' ? (
+            <EventSourcePanel
+              key={f.providerId}
+              provider={provider ?? null}
+              linked={f.officialFeed ? { feed: f.officialFeed, id: f.officialId, name: picked?.event.name ?? (initial?.officialId === f.officialId ? initial.name : null), sale: f.officialSale } : null}
+              onPick={pickOfficial}
+              onUnlink={unlinkOfficial}
+            />
+          ) : (
+            <div>
+              <button type="button" className="btn sm ghost" onClick={() => setOtherWays(true)}>
+                Otras formas de traer el evento (sin Claude)
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -780,6 +1035,8 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
                 value={f.venueId}
                 onChange={(e) => {
                   set('venueId', e.target.value);
+                  // Otro recinto: las zonas elegidas eran del anterior.
+                  if (e.target.value !== f.venueId) setF((x) => ({ ...x, seats: [] }));
                   // El evento oficial vinculado era de otro recinto.
                   if (f.officialFeed && e.target.value !== f.venueId) unlinkOfficial();
                 }}
@@ -804,7 +1061,7 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
               <span className="hint">
                 {f.venueId === NEW_VENUE
                   ? 'No estaba en la sala: al guardar se crea con una estructura orientativa (revísala después en Recintos).'
-                  : picked || fromPage
+                  : picked || fromPage || aiPicked
                     ? 'Elegido automáticamente según el evento.'
                     : null}{' '}
                 <Link to="/recintos?nuevo=1">Crear un recinto a mano</Link>
@@ -971,6 +1228,41 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
         <h3 className="sign">4 · Límites de compra</h3>
         <div className="stack">
           <div className="small ink2">Cópialos de las condiciones oficiales. Sin límites verificados no se puede armar ninguna operación (fail-closed).</div>
+          {aiPicked ? (
+            aiPicked.details.limit.perPerson !== null ? (
+              <Callout tone={aiPicked.details.limit.official ? 'good' : 'warning'} icon={aiPicked.details.limit.official ? 'check' : undefined}>
+                <b>{aiPicked.details.limit.official ? 'Leído de las condiciones oficiales' : 'Encontrado fuera de la web oficial'}:</b> {aiPicked.details.limit.perPerson} entradas
+                por persona{aiPicked.details.limit.quote ? ` — «${aiPicked.details.limit.quote}»` : ''}
+                {aiPicked.details.limit.sourceUrl ? (
+                  <>
+                    {' '}
+                    (
+                    <a href={aiPicked.details.limit.sourceUrl} target="_blank" rel="noreferrer">
+                      ver
+                    </a>
+                    )
+                  </>
+                ) : null}
+                . {aiPicked.details.limit.official ? 'Ya está puesto y verificado.' : 'Compruébalo en la web oficial y marca la casilla.'}
+              </Callout>
+            ) : (
+              <Callout tone="warning">
+                <b>Claude no ha encontrado cuántas entradas se pueden comprar por persona</b> en las condiciones de este evento. Míralo en la web oficial
+                {aiPicked.details.url ? (
+                  <>
+                    {' '}
+                    (
+                    <a href={aiPicked.details.url} target="_blank" rel="noreferrer">
+                      abrir
+                    </a>
+                    )
+                  </>
+                ) : null}
+                , escríbelo abajo y marca la casilla.
+              </Callout>
+            )
+          ) : null}
+          {capacity ? <div className="small">{capacity}</div> : null}
           {picked?.event.feed === 'ticketmaster' && picked.event.limit.perCustomer !== null ? (
             <Callout tone="good" icon="check">
               <b>Límite leído de Ticketmaster:</b> «{picked.event.limit.text}». Puesto: {picked.event.limit.perCustomer} por cuenta, contado por titular (Ticketmaster cuenta por
@@ -1106,23 +1398,23 @@ export function EventForm({ initial, imported, onDone }: { initial?: CatalogEven
       </div>
 
       <div className="form-section">
-        <h3 className="sign">5 · Notas</h3>
-        {creating ? (
-          <div className="field">
-            <label htmlFor="evf-notes">Notas (opcional)</label>
-            <textarea
-              id="evf-notes"
-              className="input"
-              rows={4}
-              value={f.notes}
-              onChange={(e) => set('notes', e.target.value)}
-              placeholder="Fases de venta, requisitos, precios… Se guardan en el cuerpo de la nota de Obsidian."
-              style={bad('notes')}
-            />
-            <FieldError msg={errors.notes} />
+        <h3 className="sign">5 · Dónde queréis las entradas</h3>
+        {f.venueId === NEW_VENUE && f.newVenue ? (
+          <div className="row small" style={{ gap: 8 }}>
+            <span className="muted">El recinto «{f.newVenue.name}» aún no está en la sala.</span>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={async () => {
+                const id = await createPendingVenue();
+                if (id) setF((x) => ({ ...x, venueId: id, newVenue: null }));
+              }}
+            >
+              Crear el recinto ahora para elegir dónde
+            </button>
           </div>
         ) : (
-          <div className="small muted">Las notas del cuerpo se editan en Obsidian ({target?.sourceFile}).</div>
+          <SeatPicker venueId={f.venueId || null} value={f.seats} onChange={(v) => set('seats', v)} plan={f.plan} onPlan={(p) => set('plan', p)} autoLocate={planFresh} />
         )}
       </div>
 

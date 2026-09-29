@@ -1,6 +1,13 @@
 import type {
   Account,
   AccountInput,
+  AiDetailsQuery,
+  AiEventDetails,
+  AiEventsQuery,
+  AiEventsResult,
+  AiKeyResult,
+  AiSeatMap,
+  AiSeatMapQuery,
   AccountPatch,
   Alert,
   ApiErrorBody,
@@ -158,4 +165,15 @@ export const Api = {
     return api<FeedEventsResult>(`/api/feeds/events?${qs.toString()}`);
   },
   feedEvent: (feed: FeedId, id: string) => api<FeedEvent>(`/api/feeds/${feed}/events/${encodeURIComponent(id)}`),
+  /** Clave de la API de Claude (null = quitarla): se comprueba y se guarda en .env. */
+  aiSetKey: (key: string | null) => api<AiKeyResult>('/api/ai/key', { method: 'PUT', body: { key } }),
+  /** Claude mira la web de venta y trae sus próximos eventos (tarda 1–2 min). */
+  aiEvents: (q: AiEventsQuery) => post<AiEventsResult>('/api/ai/events', q),
+  /** Claude lee el evento: fechas, fases de venta, límite por persona, precios, recinto y plano oficial. */
+  aiEvent: (q: AiDetailsQuery) => post<AiEventDetails>('/api/ai/event', q),
+  /** Claude sitúa cada zona sobre la imagen del plano oficial. */
+  aiSeatMap: (q: AiSeatMapQuery) => post<AiSeatMap>('/api/ai/seatmap', q),
+  /** Dónde queréis las entradas (zonas en orden de preferencia). */
+  setEventTargets: (eventId: string, targets: string[]) =>
+    api<EventNoteResult>(`/api/vault/events/${encodeURIComponent(eventId)}/targets`, { method: 'PUT', body: { targets } }),
 };

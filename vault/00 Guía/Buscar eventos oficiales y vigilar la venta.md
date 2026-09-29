@@ -6,17 +6,42 @@ tags:
 
 # Crear un evento sin escribirlo (y vigilar la venta)
 
-Al crear un evento ya no se escribe nada a mano: **primero eliges dónde se vende** y **después el evento**. El resto se rellena solo: el **recinto** (el de la sala o uno nuevo que se crea al guardar), el **nombre**, el **enlace oficial**, la **fecha y hora**, la **apertura de la venta** (o de la fase o preventa que elijas), el **límite de compra** si la web lo publica, y la **vigilancia** desde 2 días antes.
+Al crear un evento ya no se escribe nada a mano: **primero eliges dónde se vende** y **después el evento**. El resto se rellena solo: el **recinto** (el de la sala o uno nuevo, con sus zonas), el **nombre**, el **enlace oficial**, la **fecha y hora**, la **apertura de la venta** (o de la fase o preventa que elijas), **cuántas entradas se pueden comprar por persona** (con la frase de las condiciones) y la **vigilancia** desde 2 días antes. Y antes de guardar, **tocas en el plano del recinto dónde queréis las entradas** (1ª, 2ª y 3ª preferencia, cada una con su color).
 
 > [!important] Nada entra en las webs de venta
-> La sala **no visita** ticketmaster.es, entradas.com ni realmadrid.com por su cuenta, no inicia sesión y no compra. Esas webs bloquean los programas automáticos (Ticketmaster responde «403 prohibido» y entradas.com corta la conexión) y sus condiciones lo prohíben: intentarlo podría hacer que bloquearan **tu** conexión justo el día de la venta. Por eso hay dos caminos legítimos. Ver [[Uso legítimo y guardarraíles]].
+> La sala **no visita** ticketmaster.es, entradas.com ni realmadrid.com por su cuenta, no inicia sesión y no compra. Esas webs bloquean los programas automáticos (Ticketmaster responde «403 prohibido» y entradas.com corta la conexión) y sus condiciones lo prohíben: intentarlo podría hacer que bloquearan **tu** conexión justo el día de la venta. Claude lee páginas **públicas** con sus herramientas, desde los servidores de Anthropic, como lo haría una persona que busca información. La cola virtual no se salta: cada persona compra y paga en la web oficial con su cuenta. Ver [[Uso legítimo y guardarraíles]].
 
 ## Paso a paso
 
 **Eventos → Nuevo evento**:
 
 1. **Dónde se vende**: Ticketmaster, entradas.com, Real Madrid u «Otra web oficial».
-2. **Elige el evento**, de una de estas dos maneras:
+2. **Elige el evento**: con **Claude** (lo más cómodo) o con una de las otras dos maneras (A y B, más abajo).
+3. Revisa los datos y elige **qué venta es la vuestra** (socios, preventa, general…): su hora es la **apertura (T0)**.
+4. **Dónde queréis las entradas**: toca en el plano hasta 3 sitios.
+5. **Guardar evento**.
+
+### 🤖 Con Claude (recomendado)
+
+Se pone una vez: **Ajustes → Claude (IA)** → pega tu clave de la API (platform.claude.com → *API keys* → *Create key*; empieza por `sk-ant-`) y **Conectar**. Se guarda solo en este ordenador (archivo `.env`). Se paga por consulta a Anthropic (unos céntimos cada una; la misma búsqueda repetida en 30 minutos es gratis).
+
+Cada vez:
+
+1. Al elegir **dónde se vende**, Claude mira esa web y las oficiales de sus eventos y enseña la lista de los próximos (el mes, 2 meses o 4 meses). Tarda 1–2 minutos: se ve el tiempo que lleva.
+2. Pulsa **Elegir** en el evento: Claude lee su página y **las condiciones de venta** (1–2 minutos más) y se rellena todo. El recuadro «🤖» dice qué ha encontrado y qué falta.
+3. **Cuántas entradas por persona**: si Claude cita la frase de la **web de venta oficial**, queda puesto y **verificado**. Si solo lo encuentra en otra web (una noticia), lo pone pero **sin verificar**: compruébalo en la web oficial y marca la casilla. Debajo, la sala calcula **cuántas podéis comprar en total** con vuestras cuentas.
+4. **Recinto**: si ya está en la sala se elige solo; si no, se **crea al momento** con las zonas que usa la web de venta (o una estructura orientativa).
+5. **Plano**: si Claude encuentra la **imagen del plano oficial** (tal cual se ve al comprar), sale en el paso 5 con un **«+» en cada zona** (Claude las sitúa mirando la imagen). Si no hay imagen, o la web no deja verla desde aquí, sale el **plano de la sala**.
+
+Claude no interviene en la compra: el día de la venta, el bot avisa **al segundo** con lo que ya está preparado.
+
+### Dónde queréis las entradas (1ª, 2ª y 3ª)
+
+En el paso **5** toca hasta **3 sitios** del plano, en orden: 🟢 **1ª preferencia**, 🟠 **2ª**, 🔵 **3ª**. Otra vez para quitarlo; las flechas cambian el orden. Debajo están todas las zonas en botones (por si alguna no sale en la imagen). Se guarda en la nota del evento (`preferredTargets`) y la **operación empieza con esas zonas**: al abrir la venta, el bot manda a cada persona a la 1ª; si no hay entradas, a la 2ª y después a la 3ª, al instante.
+
+### 📱 Desde Telegram: /evento
+
+En el **chat principal** del bot escribe **/evento**: eliges la web de venta con un botón → Claude busca y enseña los próximos eventos → tocas uno → Claude lee sus datos (fecha, apertura, límite por persona, precios, recinto) → **✅ Crear · abre Venta general…** (o la fase que sea) → llega la **imagen del plano oficial** y tocas hasta 3 zonas (🟢 1ª, 🟠 2ª, 🔵 3ª) → **Listo**. Es lo mismo que en el dashboard: el evento queda creado con su recinto, su vigilancia y dónde queréis las entradas. Mientras Claude busca, el bot sigue respondiendo a todo lo demás.
 
 ### A · Sin claves: botón «📥 Enviar a la sala» (cualquier web oficial)
 
@@ -56,7 +81,11 @@ Para ponerlas: **Ticketmaster** → *Crear la clave gratis* (developer.ticketmas
 ## Recinto automático
 
 - Si el recinto ya está en la sala (los estadios de LaLiga, los grandes pabellones, las plazas de toros y los recintos de festivales), se elige solo, aunque la web lo llame distinto (por ejemplo, **WiZink Center** → *Movistar Arena*).
-- Si no está, sale **➕ «nombre» — recinto nuevo, se crea al guardar**: se crea con una estructura orientativa (estadio: Tribuna, Preferencia y Fondos; pabellón: Pista y gradas; teatro: Patio de butacas y Anfiteatro; festival: General). Revísala después en **Recintos** con el plano oficial.
+- Con **Claude**, si no está se crea **al momento** con las zonas y secciones que usa la web de venta, para poder elegir dónde antes de guardar.
+- Con el botón o la lista, sale **➕ «nombre» — recinto nuevo, se crea al guardar**: se crea con una estructura orientativa (estadio: Tribuna, Preferencia y Fondos; pabellón: Pista y gradas; teatro: Patio de butacas y Anfiteatro; festival: General). En el paso 5, **Crear el recinto ahora para elegir dónde** lo crea ya. Revísalo después en **Recintos** con el plano oficial.
+
+> [!note] El plano oficial en la nota
+> La imagen del plano se guarda en la nota del evento (`planImage`) y dónde está cada zona en ella (`planPoints`, una línea por zona: `Fondo Sur @ 50,92`, en % del ancho y del alto). Se puede corregir a mano en Obsidian.
 
 ## Límite de compra
 

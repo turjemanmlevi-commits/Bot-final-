@@ -10,6 +10,8 @@ import path from 'node:path';
 import { serve } from '@hono/node-server';
 import { ENV_FILE, ENV_TEMPLATE, env } from './env';
 import { APP_VERSION, createApp } from './app';
+import { EventAssistant } from './ai/assistant';
+import { ClaudeControl } from './ai/claude';
 import { createHttpApp } from './http/app';
 import { FeedControl } from './feeds/control';
 import { EventWatcher } from './feeds/watcher';
@@ -18,6 +20,7 @@ import { MemoryDriver, PgliteDriver, PostgresDriver, type JournalDriver } from '
 import { TelegramControl } from './telegram/control';
 import { TelegramNotifier } from './telegram/telegram';
 import { log } from './util/log';
+import { VaultAuthoring } from './vault/authoring';
 
 function makeDriver(): JournalDriver {
   switch (env.journalDriver) {
@@ -144,8 +147,16 @@ async function main(): Promise<void> {
   const watcher = new EventWatcher({ app, feeds, timeZone: env.timeZone });
   watcher.start();
 
+  // Claude busca y lee los eventos de cada web de venta (dashboard y /evento en Telegram).
+  const ai = new ClaudeControl(
+    { runtime: app.runtime, timeZone: env.timeZone, envFile: ENV_FILE, envTemplate: ENV_TEMPLATE, model: env.anthropicModel, baseURL: env.anthropicApiBase ?? undefined },
+    { apiKey: env.anthropicKey },
+  );
+  const authoring = new VaultAuthoring(app);
+  app.runtime.ctx.eventAssistant = new EventAssistant(app, ai, authoring);
+
   const dist = existsSync(path.join(env.dashboardDist, 'index.html')) ? env.dashboardDist : null;
-  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram, feeds });
+  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram, feeds, ai, authoring });
   const server = serve({ fetch: http.fetch, port: env.port, hostname: env.host }, (info) => {
     const url = `http://${env.host === '0.0.0.0' ? 'localhost' : env.host}:${info.port}`;
     console.log('');
@@ -162,6 +173,9 @@ async function main(): Promise<void> {
     );
     const sources = [env.ticketmasterKey ? 'Ticketmaster' : null, env.footballDataToken ? 'partidos' : null].filter(Boolean);
     console.log(`  Eventos     ${sources.length > 0 ? `fuentes oficiales: ${sources.join(' y ')}` : 'sin fuentes oficiales: pon la clave gratuita en Ajustes · Fuentes de eventos'}`);
+    console.log(
+      `  Claude      ${env.anthropicKey ? 'conectado: busca los eventos de cada web de venta (dashboard y /evento en Telegram)' : 'sin clave: pégala en el dashboard → Ajustes · Claude (IA)'}`,
+    );
     console.log('');
     console.log('  Demo: botón "Nueva demo" en el dashboard, o  npm run seed:demo');
     console.log('');

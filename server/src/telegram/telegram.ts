@@ -17,6 +17,7 @@ import { formatMoney, OPERATION_STATE_LABEL } from '@to/shared';
 import type { Notifier } from '../runtime/context';
 import type { Runtime } from '../runtime/runtime';
 import { log } from '../util/log';
+import { TelegramEventFlow } from './event-flow';
 
 interface TgChat {
   id: number;
@@ -61,6 +62,7 @@ export const HELP =
   '4. Con las entradas en el carrito pulsa <b>✅ N en carrito</b> y los minutos que le quedan. Si no hay por ese precio, <b>❌ No pude</b>: la siguiente zona llega al instante.\n' +
   '5. Paga en la web oficial y pulsa <b>💳 Ya lo he pagado</b>.\n\n' +
   '<b>Comandos</b>\n' +
+  '/evento — crear un evento con Claude: web de venta → evento → dónde sentaros (chat principal)\n' +
   '/tareas — tus tareas abiertas, con botones\n' +
   '/estado — cómo va cada operación\n' +
   '/pausa — pausar lo que está en marcha (chat principal)\n' +
@@ -69,6 +71,7 @@ export const HELP =
 
 /** Menú de comandos que se pone en el bot al conectar (setMyCommands). */
 export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
+  { command: 'evento', description: 'Crear un evento con Claude (chat principal)' },
   { command: 'tareas', description: 'Tus tareas abiertas, con botones' },
   { command: 'estado', description: 'Cómo va cada operación' },
   { command: 'ayuda', description: 'Cómo responder rápido' },
@@ -81,6 +84,7 @@ export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
 export const BOT_DESCRIPTION =
   'Bot privado de la sala de control para comprar entradas en la web oficial (Real Madrid, Ticketmaster, entradas.com).\n\n' +
   'Avisa en el segundo exacto en que abre la venta y dice a cada persona qué zona intentar, cuántas entradas y hasta qué precio. Se responde con un toque.\n\n' +
+  'Con /evento, Claude busca los eventos de la web de venta y los prepara con sus fechas, la apertura, el límite de compra y el recinto.\n\n' +
   'Pulsa «Iniciar»: te dirá el número de este chat para darte de alta.';
 
 export const BOT_SHORT_DESCRIPTION = 'Avisos al segundo y tareas con botones para comprar entradas en la web oficial.';
@@ -188,6 +192,8 @@ export class TelegramNotifier implements Notifier {
   private readonly retryMs: number;
   /** Número del propio bot (principio del token): nunca es el chat de nadie. */
   private readonly botId: string;
+  /** «/evento»: crear eventos con Claude desde Telegram. */
+  private readonly flow: TelegramEventFlow;
 
   constructor(private readonly opts: TelegramOptions) {
     this.botId = opts.token.split(':')[0] ?? '';
@@ -195,6 +201,44 @@ export class TelegramNotifier implements Notifier {
     this.apiBase = (opts.apiBase ?? 'https://api.telegram.org').replace(/\/+$/, '');
     this.timeZone = opts.timeZone ?? 'Europe/Madrid';
     this.retryMs = opts.retryMs ?? 5000;
+    this.flow = new TelegramEventFlow(
+      {
+        send: async (chatId, text, keyboard) => {
+          try {
+            const r = await this.sendNow(chatId, text, keyboard);
+            return typeof r?.message_id === 'number' ? r.message_id : null;
+          } catch (err) {
+            log.warn('Telegram: no se pudo enviar', { chatId, error: (err as Error).message });
+            return null;
+          }
+        },
+        photo: async (chatId, url, caption) => {
+          try {
+            await this.api('sendPhoto', { chat_id: chatId, photo: url, caption, parse_mode: 'HTML' });
+            return true;
+          } catch (err) {
+            // Telegram no ha podido descargar la imagen: se manda el enlace.
+            log.warn('Telegram: no se pudo enviar la imagen del plano', { error: (err as Error).message });
+            await this.sendNow(chatId, `${caption}: ${url}`).catch(() => undefined);
+            return false;
+          }
+        },
+        edit: async (chatId, messageId, text, keyboard) => {
+          await this.api('editMessageText', {
+            chat_id: chatId,
+            message_id: messageId,
+            text,
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+          }).catch(() => undefined);
+        },
+        answer: async (callbackId, text) => {
+          await this.api('answerCallbackQuery', { callback_query_id: callbackId, ...(text ? { text } : {}) }).catch(() => undefined);
+        },
+      },
+      () => this.runtime?.ctx.eventAssistant ?? null,
+    );
   }
 
   attach(runtime: Runtime): void {
@@ -541,6 +585,11 @@ export class TelegramNotifier implements Notifier {
       }
       const [kind, ref, result, extra] = (q.data ?? '').split(':');
       const actor = `telegram:${q.from.username ?? q.from.id}`;
+      if (kind === 'ev') {
+        // Crear un evento con Claude (/evento).
+        await this.flow.callback(chat, q.message?.message_id ?? null, q.id, q.data ?? '', actor, chat === this.chatId);
+        return;
+      }
       if (kind === 'p' && ref) {
         // «Ya lo he pagado» (en la web oficial).
         let text = 'Pagado ✅';
@@ -649,7 +698,13 @@ export class TelegramNotifier implements Notifier {
       return;
     }
     const main = chat === this.chatId;
-    if (cmd === '/estado') {
+    if (cmd === '/evento' || cmd === '/nuevo') {
+      if (!main) {
+        this.send(chat, 'Solo el chat principal puede crear eventos.');
+        return;
+      }
+      await this.flow.start(chat);
+    } else if (cmd === '/estado') {
       const ops = rt.ctx.ops.summaries().filter((o) => !['CLOSED', 'CANCELLED'].includes(o.state));
       const lines = ops.map((o) => `• <b>${esc(o.name)}</b>: ${OPERATION_STATE_LABEL[o.state]} · ${o.cartedQty}/${o.requestedQty} en carrito`);
       this.send(chat, lines.length ? lines.join('\n') : 'No hay operaciones activas.');

@@ -89,9 +89,9 @@ En Obsidian: **Abrir carpeta como vault** → `bot final\vault`. Empieza por la 
 Con estas ticketeras el sistema trabaja en **asistencia manual**. En el dashboard, **Cómo se compra** lo explica en 9 pasos con el plano. En resumen:
 
 1. **Cuentas → Nueva cuenta**: una por persona (alias y, si quiere, su chat de Telegram).
-2. **Eventos → Nuevo evento**: enlace oficial, fecha del evento, hora de apertura de la venta (T0) y límites de compra verificados en las condiciones oficiales.
+2. **Eventos → Nuevo evento**: eliges **dónde se vende** y, con **Claude** conectado (**Ajustes · Claude (IA)**), Claude busca sus próximos eventos; al elegir uno lee la fecha, la apertura de la venta (T0), **cuántas entradas se pueden comprar por persona** (con la frase de las condiciones oficiales), el recinto y su **plano oficial**. En **5 · Dónde queréis las entradas** tocas hasta 3 sitios del plano (🟢 1ª, 🟠 2ª, 🔵 3ª preferencia). También desde Telegram con **/evento**. Sin Claude: marcador «📥 Enviar a la sala» o la lista oficial de Ticketmaster / partidos.
 3. **Recintos · vault**: el Estadio Santiago Bernabéu ya viene incluido, con su plano. Para otro recinto, **Nuevo recinto**.
-4. **Operaciones → Nueva operación**: toca en el plano las zonas en orden de preferencia (salen numeradas 1, 2, 3…), cantidad, precio máximo y cuentas → **Crear y validar → Armar**. Cada persona recibe su **plan** (zonas en orden, cuántas, precio máximo).
+4. **Operaciones → Nueva operación**: empieza con las zonas elegidas en el evento (se pueden cambiar tocando el plano), cantidad, precio máximo y cuentas → **Crear y validar → Armar**. Cada persona recibe su **plan** (zonas en orden, cuántas, precio máximo).
 5. **El día de la venta**: cada persona inicia sesión en la web oficial y pulsa **Sesión lista** antes de T0. Hay que pulsarlo en cada compra: al armar, las cuentas vuelven a *Sin sesión* aunque lo pulsaran en un ensayo. A T0 le llega **«🚦 ¡Abre la venta!»** y su tarea («Añade 2 entradas · Lateral Este · Primer anfiteatro, máx. 120 €») con el plano y su zona resaltada. Compra en la web oficial y responde con las que tenga (**✅ 2 en carrito**, **✅ 1 en carrito**) o **No pude** (le llega al momento la siguiente zona); indica los minutos que le quedan al carrito, **paga en la web oficial** y marca **Ya lo he pagado** (en *Carritos* o en Telegram).
 6. **Si se acaba el tiempo del carrito**: los minutos indicados son una estimación, así que el carrito no se da por perdido. Llega la alerta **«…: se acabó el tiempo del carrito, ¿lo has pagado?»**: **Ya lo he pagado** si se pagó, o **Liberar** (en *Carritos*) si se perdió; esas entradas se vuelven a repartir mientras la venta siga abierta.
 
@@ -108,6 +108,16 @@ Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
 Es orientativo: los sectores exactos están en el plano oficial de cada venta.
 
+## Claude (IA)
+
+**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda solo en este ordenador (`.env`, variable `ANTHROPIC_API_KEY`); usa el Opus más reciente de tu cuenta (o el de `ANTHROPIC_MODEL`). Se paga por consulta a Anthropic; la misma búsqueda en 30 minutos es gratis.
+
+- **Lista de eventos** de la web de venta elegida (búsqueda y lectura web de Claude, en los servidores de Anthropic).
+- **Datos del evento**: fecha, fases de venta, límite por persona (queda **verificado solo si Claude cita la web de venta oficial**), precios, recinto (se crea al momento con sus zonas si no está) y la **imagen del plano oficial**, donde Claude sitúa cada zona para tocarla.
+- **Telegram `/evento`** (chat principal): lo mismo con botones, y el plano llega como imagen.
+
+Claude solo lee páginas públicas: no entra en ninguna cuenta, no compra y no interviene el día de la venta (el bot avisa al segundo con lo ya preparado).
+
 ## Telegram
 
 Todo desde el dashboard, sin tocar archivos ni reiniciar (**Ajustes · Telegram**):
@@ -122,7 +132,7 @@ Cada persona que vaya a comprar pulsa **Iniciar** en el bot y se le asigna su cu
 
 Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad**, de la cantidad pedida a 1 (`✅ 2 en carrito`, `✅ 1 en carrito`; en filas de 5, hasta 20), **❌ No pude** y **❓ No sé**. Tras «N en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (`5`, `8`, `10`, `15` o `20 min`) junto a **💳 Ya lo he pagado**. Los avisos de carrito a punto de caducar y el de «se acabó el tiempo del carrito, ¿lo has pagado?» llegan con **💳 Ya lo he pagado** y **⏱ Quedan 5 / 10 / 15 min**. Cuando una tarea se responde (en Telegram o en el dashboard), sus botones desaparecen en todos los chats. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard.
 
-Cada cuenta puede tener su propio chat (**Ajustes · Telegram → Asignar a una cuenta**, o **Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos (salen en el menú del bot): `/tareas`, `/estado`, `/ayuda`, `/id`; y solo en el chat principal, `/pausa` y `/parar_todo`.
+Cada cuenta puede tener su propio chat (**Ajustes · Telegram → Asignar a una cuenta**, o **Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos (salen en el menú del bot): `/tareas`, `/estado`, `/ayuda`, `/id`; y solo en el chat principal, `/evento` (crear un evento con Claude), `/pausa` y `/parar_todo`.
 
 Guía: `vault/00 Guía/Configurar Telegram.md`.
 
