@@ -223,3 +223,34 @@ describe('chat principal: el número del bot no vale', () => {
     }
   });
 });
+
+describe('el número del bot guardado al arrancar', () => {
+  it('no queda como chat principal aunque el bot se creara antes con él, y no se acepta en una cuenta', async () => {
+    const { TelegramNotifier } = await import('../telegram/telegram');
+    const tg = new FakeTelegram(REAL_FORMAT, 'bot_prueba_bot');
+    const base = await tg.listen();
+    const dir = await mkdtemp(path.join(tmpdir(), 'to-tgbot2-'));
+    await writeFixtureVault(dir);
+    const h = await createHarness(dir);
+    try {
+      // Como en main.ts: el bot se crea con lo que dice .env y después se le pasa al control.
+      const early = new TelegramNotifier({ token: REAL_FORMAT, chatId: '1234567890', apiBase: base, retryMs: 50 });
+      const c = new TelegramControl({ runtime: h.app.runtime, apiBase: base, envFile: null, retryMs: 50 }, { token: REAL_FORMAT, chatId: '1234567890', notifier: early });
+      assert.equal(c.status().mainChatId, null);
+      assert.equal(c.status().mainChatConfigured, false);
+      const http = createHttpApp(h.app, { dashboardDist: null, operatorToken: null, telegram: c });
+      const res = await http.request('/api/accounts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label: 'Levi', providerId: 'manual', holderRef: 'levi', verification: 'VERIFIED', telegramChatId: '1234567890' }),
+      });
+      assert.equal(res.status, 400);
+      assert.match(((await res.json()) as { error: { message: string } }).error.message, /número del propio bot/);
+      c.stop();
+    } finally {
+      await h.stop();
+      await tg.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

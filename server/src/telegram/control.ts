@@ -62,8 +62,16 @@ export class TelegramControl {
     opts.runtime.ctx.telegramStatus = () => this.status();
     if (initial.token) {
       this.token = initial.token;
-      this.install(initial.notifier ?? this.create(initial.token));
+      const n = initial.notifier ?? this.create(initial.token);
+      // El bot creado al arrancar pudo leer el número del propio bot como chat principal.
+      n.setMainChat(this.chatId);
+      this.install(n);
     }
+  }
+
+  /** ¿Es el número del propio bot? (no vale como chat de nadie) */
+  isBotChat(chatId: string | null | undefined): boolean {
+    return Boolean(chatId && this.token && isBotId(chatId, this.token));
   }
 
   status(): TelegramStatus {

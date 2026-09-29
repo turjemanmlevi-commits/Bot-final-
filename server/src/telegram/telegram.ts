@@ -169,9 +169,12 @@ export class TelegramNotifier implements Notifier {
   private readonly apiBase: string;
   private readonly timeZone: string;
   private readonly retryMs: number;
+  /** Número del propio bot (principio del token): nunca es el chat de nadie. */
+  private readonly botId: string;
 
   constructor(private readonly opts: TelegramOptions) {
-    this.chatId = opts.chatId;
+    this.botId = opts.token.split(':')[0] ?? '';
+    this.chatId = opts.chatId === this.botId ? null : opts.chatId;
     this.apiBase = (opts.apiBase ?? 'https://api.telegram.org').replace(/\/+$/, '');
     this.timeZone = opts.timeZone ?? 'Europe/Madrid';
     this.retryMs = opts.retryMs ?? 5000;
@@ -190,7 +193,7 @@ export class TelegramNotifier implements Notifier {
 
   /** Cambia el chat principal al momento (lo elige el dashboard). */
   setMainChat(chatId: string | null): void {
-    this.chatId = chatId;
+    this.chatId = chatId === this.botId ? null : chatId;
     this.refreshDetail();
   }
 
@@ -321,7 +324,7 @@ export class TelegramNotifier implements Notifier {
 
   /** Una cuenta acaba de quedar vinculada a un chat: se le explica qué va a recibir. */
   accountLinked(account: Account): void {
-    if (!account.telegramChatId) return;
+    if (!account.telegramChatId || account.telegramChatId === this.botId) return;
     this.send(
       account.telegramChatId,
       `✅ <b>Este chat es el de la cuenta «${esc(account.label)}»</b>\n` +
@@ -338,7 +341,7 @@ export class TelegramNotifier implements Notifier {
     const chats = new Set<string>();
     if (this.chatId) chats.add(this.chatId);
     const personal = accountId ? this.runtime?.store.accounts.get(accountId)?.telegramChatId : null;
-    if (personal) chats.add(personal);
+    if (personal && personal !== this.botId) chats.add(personal);
     return [...chats];
   }
 
@@ -400,7 +403,7 @@ export class TelegramNotifier implements Notifier {
     if (this.chatId) chats.add(this.chatId);
     for (const id of accountIds) {
       const personal = this.runtime?.store.accounts.get(id)?.telegramChatId;
-      if (personal) chats.add(personal);
+      if (personal && personal !== this.botId) chats.add(personal);
     }
     const keyboard: Button[][] | undefined = link ? [[{ text: '🌐 Abrir la web oficial', url: link }]] : undefined;
     for (const chat of chats) this.send(chat, text, keyboard);

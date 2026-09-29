@@ -365,8 +365,26 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
   // ---------------------------------------------------------------------------
 
   http.get('/api/accounts', (c) => c.json([...runtime.store.accounts.values()]));
-  http.post('/api/accounts', async (c) => c.json(ctx.accounts.create(await body(c, AccountInputSchema), actorOf(c)), 201));
-  http.patch('/api/accounts/:id', async (c) => c.json(ctx.accounts.update(c.req.param('id'), await body(c, AccountPatchSchema), actorOf(c))));
+  // El número del propio bot (el principio del token) no es el chat de ninguna persona.
+  const checkChat = (chatId: string | null | undefined) => {
+    if (opts.telegram?.isBotChat(chatId)) {
+      throw new ApiError(
+        400,
+        'BAD_REQUEST',
+        `telegramChatId: ${chatId} es el número del propio bot, no el de la persona. Pon el número que el bot le contesta a esa persona al pulsar «Iniciar» (sale en la lista del campo y en Ajustes · Telegram).`,
+      );
+    }
+  };
+  http.post('/api/accounts', async (c) => {
+    const b = await body(c, AccountInputSchema);
+    checkChat(b.telegramChatId);
+    return c.json(ctx.accounts.create(b, actorOf(c)), 201);
+  });
+  http.patch('/api/accounts/:id', async (c) => {
+    const b = await body(c, AccountPatchSchema);
+    checkChat(b.telegramChatId);
+    return c.json(ctx.accounts.update(c.req.param('id'), b, actorOf(c)));
+  });
   http.post('/api/accounts/:id/session/open', async (c) => c.json(await ctx.accounts.openSession(c.req.param('id'), actorOf(c))));
   http.post('/api/accounts/:id/session/ready', async (c) => {
     const b = await body(c, SessionHumanSchema);
