@@ -17,6 +17,19 @@ echo.
 
 where node >nul 2>nul
 if errorlevel 1 (
+  if exist "%ProgramFiles%\nodejs\node.exe" (
+    set "PATH=%ProgramFiles%\nodejs;%PATH%"
+  ) else (
+    where winget >nul 2>nul
+    if not errorlevel 1 (
+      echo   Node.js no esta instalado: instalandolo con winget ^(acepta el aviso de Windows^)...
+      winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-source-agreements --accept-package-agreements
+      set "PATH=%ProgramFiles%\nodejs;%PATH%"
+    )
+  )
+)
+where node >nul 2>nul
+if errorlevel 1 (
   echo   [X] No se encuentra Node.js.
   echo       Instala la version LTS desde https://nodejs.org ^(se abre ahora^),
   echo       reinicia el ordenador si te lo pide y vuelve a abrir INICIAR.bat.
