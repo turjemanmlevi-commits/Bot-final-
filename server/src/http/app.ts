@@ -9,6 +9,7 @@ import { streamSSE } from 'hono/streaming';
 import {
   AccountInputSchema,
   AccountPatchSchema,
+  CartExpirySchema,
   CartMarkSchema,
   CommandRequestSchema,
   DemoSeedSchema,
@@ -349,6 +350,10 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
   http.post('/api/human-tasks/:id/respond', async (c) => c.json(ctx.tasks.respond(c.req.param('id'), await body(c, HumanTaskResponseInputSchema), actorOf(c))));
 
   http.get('/api/carts', (c) => c.json([...runtime.store.carts.values()]));
+  http.post('/api/carts/:id/expiry', async (c) => {
+    const b = await body(c, CartExpirySchema);
+    return c.json(ctx.carts.setExpiry(c.req.param('id'), new Date(ctx.now() + b.minutes * 60_000).toISOString(), actorOf(c)));
+  });
   http.post('/api/carts/:id/mark', async (c) => {
     const b = await body(c, CartMarkSchema);
     return c.json(ctx.carts.mark(c.req.param('id'), b.state, actorOf(c), b.note));

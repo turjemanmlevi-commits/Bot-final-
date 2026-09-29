@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { after, before, describe, it } from 'node:test';
-import { createHarness, type Harness } from '../gates/harness';
+import { createHarness, manualConfig, type Harness } from '../gates/harness';
 import { writeFixtureVault } from '../gates/fixtures';
 import { TelegramNotifier } from '../telegram/telegram';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -190,6 +190,48 @@ describe('Telegram', () => {
     tg.message(555, '/parar_todo');
     await until(() => rt.ctx.safety.engagedFor({}) !== null, 'kill switch global');
     rt.ctx.safety.setKillSwitch('GLOBAL', null, false, null, 't');
+    n.stop();
+  });
+
+  it('«en carrito» por cantidad desde Telegram y minutos que le quedan al carrito', async () => {
+    const n = start('555');
+    await until(() => n.status().connected, 'conexión');
+    const rt = h.app.runtime;
+    const acc = rt.ctx.accounts.create({ label: 'Carla', providerId: 'manual', holderRef: 'carla', verification: 'VERIFIED', telegramChatId: '778' }, 't');
+    const op = rt.ctx.ops.create(manualConfig([acc.id], h.clock.now()), 't');
+    await rt.ctx.ops.command(op.id, { command: 'validate' }, 't');
+    assert.ok((await rt.ctx.ops.command(op.id, { command: 'arm' }, 't')).ok);
+    await h.clock.advance(500);
+    const session = [...rt.store.humanTasks.values()].find((t) => t.accountId === acc.id && t.kind === 'OPEN_SESSION' && t.state === 'OPEN');
+    rt.ctx.tasks.respond(session?.id ?? '', { result: 'READY' }, 't');
+    assert.ok((await rt.ctx.ops.command(op.id, { command: 'start-now' }, 't')).ok);
+    await h.clock.advance(1000);
+    const add = [...rt.store.humanTasks.values()].find((t) => t.accountId === acc.id && t.kind === 'ADD_TO_CART' && t.state === 'OPEN');
+    assert.equal(add?.target?.qty, 4);
+    await until(() => tg.sent.some((x) => x.method === 'sendMessage' && x.body.chat_id === '778' && String(x.body.text).includes('Añade')), 'tarea de compra');
+    const msg = tg.sent.find((x) => x.method === 'sendMessage' && x.body.chat_id === '778' && String(x.body.text).includes('Añade'));
+    const rows = (msg?.body.reply_markup as { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> }).inline_keyboard;
+    assert.deepEqual(
+      rows.flat().filter((b) => b.callback_data?.includes('IN_CART')).map((b) => b.text),
+      ['✅ 4 en carrito', '✅ 3 en carrito', '✅ 2 en carrito', '✅ 1 en carrito'],
+    );
+    // Solo consigue 2 de 4: el sistema debe saberlo para seguir buscando las otras 2.
+    tg.push({ callback_query: { id: 'q-cart', data: `t:${add?.id}:IN_CART:2`, from: { id: 778, username: 'carla' }, message: { chat: { id: 778 }, message_id: 9 } } });
+    await until(() => rt.store.humanTasks.get(add?.id ?? '')?.state === 'DONE', 'tarea respondida');
+    const alloc = rt.store.allocations.get(op.id);
+    assert.equal(alloc?.cartedQty, 2, 'cuenta 2, no 4');
+    const cart = [...rt.store.carts.values()].find((c) => c.operationId === op.id);
+    assert.equal(cart?.qty, 2);
+    assert.equal(cart?.expiresAt, null);
+    await until(() => tg.sent.some((x) => x.method === 'sendMessage' && x.body.chat_id === '778' && String(x.body.text).startsWith('⏱ ¿Cuántos minutos')), 'pregunta de minutos');
+    const ask = tg.sent.find((x) => x.method === 'sendMessage' && x.body.chat_id === '778' && String(x.body.text).startsWith('⏱ ¿Cuántos minutos'));
+    const mins = (ask?.body.reply_markup as { inline_keyboard: Array<Array<{ callback_data: string }>> }).inline_keyboard[0] ?? [];
+    assert.equal(mins.find((b) => b.callback_data.endsWith(':10'))?.callback_data, `x:${cart?.id}:10`);
+    // Otro chat no puede tocar este carrito.
+    tg.push({ callback_query: { id: 'q-min-bad', data: `x:${cart?.id}:5`, from: { id: 999 }, message: { chat: { id: 999 }, message_id: 10 } } });
+    tg.push({ callback_query: { id: 'q-min', data: `x:${cart?.id}:10`, from: { id: 778, username: 'carla' }, message: { chat: { id: 778 }, message_id: 11 } } });
+    await until(() => rt.store.carts.get(cart?.id ?? '')?.expiresAt !== null, 'caducidad anotada');
+    assert.equal(Date.parse(rt.store.carts.get(cart?.id ?? '')?.expiresAt ?? ''), h.clock.now() + 10 * 60_000);
     n.stop();
   });
 

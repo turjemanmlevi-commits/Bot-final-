@@ -124,6 +124,19 @@ export class CartService {
     return next;
   }
 
+  /** Una persona indica cuándo caduca el carrito en la web (p. ej. desde Telegram). */
+  setExpiry(cartId: Id, expiresAt: string, actor: string): Cart {
+    const cart = this.ctx.store.carts.get(cartId);
+    if (!cart) throw new CartError('El carrito no existe', 'NOT_FOUND');
+    if (cart.state !== 'ACTIVE' && cart.state !== 'REVIEW_REQUIRED') throw new CartError('El carrito ya está cerrado', 'NOT_ACTIVE');
+    const next: Cart = { ...cart, expiresAt, updatedAt: iso(this.ctx.now()) };
+    for (const key of [...this.warned]) if (key.startsWith(`${cartId}:`)) this.warned.delete(key);
+    this.ctx.alerts.resolveKey(`cart:${cartId}:expiring`, actor);
+    this.ctx.store.putCart(next);
+    this.ctx.journal.audit('cart.expiry_set', { cartId, expiresAt }, { operationId: cart.operationId, actor });
+    return next;
+  }
+
   /** Avisos de caducidad y paso a EXPIRED. */
   expiryTick(): void {
     const now = this.ctx.now();

@@ -227,7 +227,7 @@ export class TelegramNotifier implements Notifier {
     if (task.deadlineAt) lines.push(`⏱ Responde antes de las ${this.clock(task.deadlineAt)}`);
     lines.push('', esc(task.instructions));
     if (task.kind !== 'OPEN_SESSION') {
-      lines.push('', '<i>«En carrito» desde aquí asume la cantidad pedida al precio máximo; para indicar lo real, responde en el dashboard.</i>');
+      lines.push('', '<i>Pulsa cuántas tienes en el carrito (se anota al precio máximo; el precio exacto se puede indicar en el dashboard).</i>');
     }
     const keyboard: Button[][] = [];
     if (task.link) keyboard.push([{ text: '🌐 Abrir la web oficial', url: task.link }]);
@@ -237,7 +237,10 @@ export class TelegramNotifier implements Notifier {
         { text: '❌ No puedo', callback_data: `t:${task.id}:FAILED` },
       ]);
     } else {
-      keyboard.push([{ text: '✅ En carrito', callback_data: `t:${task.id}:IN_CART` }]);
+      // Un botón por cantidad: si solo entran algunas, el sistema sigue buscando las que faltan.
+      const max = Math.max(1, Math.min(6, task.target?.qty ?? 1));
+      const counts = Array.from({ length: max }, (_, i) => max - i);
+      keyboard.push(counts.map((n) => ({ text: `✅ ${n} en carrito`, callback_data: `t:${task.id}:IN_CART:${n}` })));
       keyboard.push([
         { text: '❌ No pude', callback_data: `t:${task.id}:FAILED` },
         { text: '❓ No sé', callback_data: `t:${task.id}:UNKNOWN` },
@@ -343,10 +346,34 @@ export class TelegramNotifier implements Notifier {
         await this.api('answerCallbackQuery', { callback_query_id: q.id, text: 'Este chat no está autorizado.' }).catch(() => undefined);
         return;
       }
-      const [kind, taskId, result] = (q.data ?? '').split(':');
+      const [kind, ref, result, extra] = (q.data ?? '').split(':');
+      const actor = `telegram:${q.from.username ?? q.from.id}`;
+      if (kind === 'x' && ref && result) {
+        // Minutos que le quedan al carrito (pregunta tras «en carrito»).
+        let text = 'Anotado ✅';
+        try {
+          const cart = rt.store.carts.get(ref);
+          if (!cart) throw new Error('El carrito ya no existe');
+          const account = rt.store.accounts.get(cart.accountId);
+          if (chat !== this.chatId && account?.telegramChatId !== chat) throw new Error('Este carrito es de otra cuenta');
+          const minutes = Number(result);
+          if (!Number.isInteger(minutes) || minutes < 1 || minutes > 60) throw new Error('Minutos no válidos');
+          rt.ctx.carts.setExpiry(cart.id, new Date(rt.ctx.now() + minutes * 60_000).toISOString(), actor);
+          text = `Te avisaremos antes de que caduque (${minutes} min).`;
+        } catch (err) {
+          text = (err as Error).message;
+        }
+        await this.api('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => undefined);
+        if (q.message) {
+          await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(
+            () => undefined,
+          );
+        }
+        return;
+      }
+      const taskId = ref;
       if (kind !== 't' || !taskId || !result) return;
       const task = rt.store.humanTasks.get(taskId);
-      const actor = `telegram:${q.from.username ?? q.from.id}`;
       let text = 'Hecho ✅';
       try {
         if (!task) throw new Error('La tarea ya no existe');
@@ -354,16 +381,26 @@ export class TelegramNotifier implements Notifier {
         const account = rt.store.accounts.get(task.accountId);
         if (chat !== this.chatId && account?.telegramChatId !== chat) throw new Error('Esta tarea es de otra cuenta');
         if (result === 'IN_CART') {
-          rt.ctx.tasks.respond(
+          const wanted = task.target?.qty ?? 1;
+          const n = extra === undefined ? wanted : Number(extra);
+          if (!Number.isInteger(n) || n < 1 || n > wanted) throw new Error('Cantidad no válida');
+          const done = rt.ctx.tasks.respond(
             taskId,
             {
               result: 'IN_CART',
-              qty: task.target?.qty ?? 1,
+              qty: n,
               unitPrice: task.target?.maxUnitPrice ?? 1,
-              note: 'Confirmado por Telegram: cantidad pedida al precio máximo (corrígelo en el dashboard si fue distinto)',
+              note: `Confirmado por Telegram: ${n} en carrito, anotadas al precio máximo`,
             },
             actor,
           );
+          text = `Anotadas ${n} en carrito ✅`;
+          const cartId = done.claimId ? rt.store.claims.get(done.claimId)?.cartId : null;
+          if (cartId) {
+            this.send(chat, '⏱ ¿Cuántos minutos le quedan al carrito en la web? Te avisaremos antes de que caduque.', [
+              [5, 8, 10, 15, 20].map((m) => ({ text: `${m} min`, callback_data: `x:${cartId}:${m}` })),
+            ]);
+          }
         } else if (result === 'READY' || result === 'FAILED' || result === 'UNKNOWN') {
           rt.ctx.tasks.respond(taskId, { result }, actor);
         } else {

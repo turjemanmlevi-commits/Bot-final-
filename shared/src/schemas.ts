@@ -92,6 +92,11 @@ export const CartMarkSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
+export const CartExpirySchema = z.object({
+  /** Minutos que le quedan al carrito en la web del proveedor. */
+  minutes: z.number().int().min(1).max(60),
+});
+
 export const SessionHumanSchema = z.object({
   /** El humano confirma que ha resuelto el reto o iniciado sesión en el proveedor. */
   challenge: z.enum(CHALLENGE_TYPES).optional(),
