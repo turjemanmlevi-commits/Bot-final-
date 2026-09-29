@@ -88,7 +88,7 @@ export function CartCard({ cart }: { cart: Cart }) {
         <div className="row">
           {cart.openUrl ? (
             <a className="btn primary" href={cart.openUrl} target="_blank" rel="noreferrer">
-              <Icon name="external" size={14} /> Abrir carrito
+              <Icon name="external" size={14} /> {cart.confirmation === 'HUMAN' ? 'Abrir la web oficial para pagar' : 'Abrir carrito'}
             </a>
           ) : null}
           <button type="button" className="btn" disabled={busy} onClick={() => void markPaid()}>

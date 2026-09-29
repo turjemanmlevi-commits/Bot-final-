@@ -1,18 +1,330 @@
-import { useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router';
-import type { LabelResolutionResult, VenueSection } from '@to/shared';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { parseVenueLayout, type LabelResolutionResult, type VaultCompileReport, type VaultIssue, type VenueSection } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { Callout, Card, Empty, Pill, ViewDots } from '../components/ui';
 import { Api } from '../lib/api';
 import { fmtDate, fmtDateTime, shortHash } from '../lib/format';
 import { useAction, useAsync } from '../lib/hooks';
-import { useLive } from '../lib/store';
+import { live, useLive } from '../lib/store';
+
+// ---------------------------------------------------------------------------
+// Nuevo recinto (recinto rápido)
+// ---------------------------------------------------------------------------
+
+const EXAMPLE_PABELLON = ['Pista (de pie)', 'Grada Baja: 101, 102, 103', 'Grada Alta: 201, 202, 203'].join('\n');
+const EXAMPLE_ESTADIO = ['Tribuna: Baja, Alta', 'Fondo Norte: Baja, Alta', 'Fondo Sur: Baja, Alta', 'Lateral: Baja, Alta'].join('\n');
+
+/**
+ * Si la compilación trae errores (en esta u otras notas), el servidor puede
+ * mantener el catálogo anterior. Se espera como mucho esto a que el recinto
+ * llegue por el stream antes de explicar por qué no aparece.
+ */
+const WAIT_FOR_CATALOG_MS = 2000;
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+interface PendingVenue {
+  venueId: string;
+  folder: string;
+  report: VaultCompileReport;
+}
+
+function VenueQuickForm({ onClose }: { onClose: () => void }) {
+  const s = useLive();
+  const navigate = useNavigate();
+  const { run, busy } = useAction();
+  const [name, setName] = useState('');
+  const [city, setCity] = useState('');
+  const [source, setSource] = useState('');
+  const [layoutText, setLayoutText] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [createdWithErrors, setCreatedWithErrors] = useState<{ folder: string; issues: VaultIssue[] } | null>(null);
+  const [pending, setPending] = useState<PendingVenue | null>(null);
+  const [notListed, setNotListed] = useState<{ folder: string; report: VaultCompileReport } | null>(null);
+
+  const layout = useMemo(() => parseVenueLayout(layoutText), [layoutText]);
+  const sectionCount = layout.zones.reduce((n, z) => n + z.sections.length, 0);
+  const hasLayout = layoutText.trim() !== '';
+  const canSubmit =
+    !busy && pending === null && layout.errors.length === 0 && layout.zones.length > 0 && name.trim().length >= 3 && source.trim().length >= 3;
+
+  // En cuanto el recinto nuevo llega al catálogo en vivo, se abre su ficha.
+  useEffect(() => {
+    if (!pending) return;
+    const found = Object.values(s.venues).find((v) => v.venueId === pending.venueId && v.eventId === null && v.active);
+    if (found) {
+      setPending(null);
+      void navigate(`/recintos/${found.hash}`);
+    }
+  }, [pending, s.venues, navigate]);
+
+  // Si no llega, se explica por qué (normalmente, errores en otras notas del vault).
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => {
+      setPending(null);
+      setNotListed({ folder: pending.folder, report: pending.report });
+    }, WAIT_FOR_CATALOG_MS);
+    return () => clearTimeout(t);
+  }, [pending]);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitError(null);
+    setCreatedWithErrors(null);
+    setNotListed(null);
+    const r = await run(
+      async () => {
+        try {
+          return await Api.createVenue({ name: name.trim(), city: city.trim() || undefined, source: source.trim(), layout: layoutText });
+        } catch (e) {
+          setSubmitError(e instanceof Error ? e.message : String(e));
+          throw e;
+        }
+      },
+      (res) => `Recinto creado: ${res.files} notas en ${res.folder}`,
+    );
+    if (!r) return;
+    const errs = r.issues.filter((i) => i.severity === 'ERROR');
+    if (errs.length > 0) {
+      setCreatedWithErrors({ folder: r.folder, issues: errs });
+      return;
+    }
+    if (r.venueId === null) {
+      setNotListed({ folder: r.folder, report: r.report });
+      return;
+    }
+    const venueId = r.venueId;
+    const inStore = Object.values(live.getSnapshot().venues).find((v) => v.venueId === venueId && v.eventId === null && v.active);
+    if (inStore) {
+      void navigate(`/recintos/${inStore.hash}`);
+      return;
+    }
+    // Compilación sin errores: el servidor ya ha cargado el catálogo antes de responder,
+    // así que la ficha se puede abrir al instante aunque el stream aún no haya llegado.
+    const compiled = r.report.ok ? r.report.venues.find((v) => v.venueId === venueId) : undefined;
+    if (compiled) {
+      void navigate(`/recintos/${compiled.hash}`);
+      return;
+    }
+    setPending({ venueId, folder: r.folder, report: r.report });
+  };
+
+  const fillExample = (text: string) => {
+    setLayoutText(text);
+    setSubmitError(null);
+  };
+
+  return (
+    <Card
+      title="Nuevo recinto"
+      actions={
+        <button type="button" className="btn sm ghost" onClick={onClose} aria-label="Cerrar">
+          <Icon name="x" size={14} />
+        </button>
+      }
+    >
+      <form
+        className="stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <Callout icon="map">
+          Se crea una carpeta en «10 Recintos» de tu vault con una nota por zona y por sección. Luego puedes retocarlas en Obsidian (alias de la web, aforo, visión). El Estadio
+          Santiago Bernabéu ya está creado.
+        </Callout>
+
+        <div className="form-grid">
+          <div className="field">
+            <label htmlFor="venue-name">Nombre del recinto</label>
+            <input
+              id="venue-name"
+              className="input"
+              value={name}
+              maxLength={100}
+              required
+              onChange={(e) => setName(e.target.value)}
+              placeholder="WiZink Center"
+              autoFocus
+            />
+            {name !== '' && name.trim().length < 3 ? <span className="hint">Mínimo 3 caracteres.</span> : null}
+          </div>
+          <div className="field">
+            <label htmlFor="venue-city">Ciudad (opcional)</label>
+            <input id="venue-city" className="input" value={city} maxLength={80} onChange={(e) => setCity(e.target.value)} placeholder="Madrid" />
+          </div>
+          <div className="field">
+            <label htmlFor="venue-source">De dónde sale el plano</label>
+            <input
+              id="venue-source"
+              className="input"
+              value={source}
+              maxLength={300}
+              required
+              onChange={(e) => setSource(e.target.value)}
+              placeholder="Plano oficial del evento: https://…"
+            />
+            <span className="hint">Para saber de dónde salen los datos.</span>
+          </div>
+        </div>
+
+        <div className="grid cols-2" style={{ alignItems: 'start' }}>
+          <div className="field">
+            <label htmlFor="venue-layout">Zonas y secciones</label>
+            <textarea
+              id="venue-layout"
+              className="input mono"
+              rows={10}
+              maxLength={20_000}
+              value={layoutText}
+              onChange={(e) => setLayoutText(e.target.value)}
+              placeholder={EXAMPLE_PABELLON}
+              spellCheck={false}
+              style={{ width: '100%' }}
+            />
+            <span className="hint">
+              Una zona por línea. Detrás de «:» sus secciones separadas por comas. «(de pie)» marca una zona de pie. Una zona sin secciones tiene una sola sección con su
+              nombre.
+            </span>
+            <div className="row" style={{ gap: 6 }}>
+              <button type="button" className="btn ghost sm" onClick={() => fillExample(EXAMPLE_PABELLON)}>
+                Ejemplo: pabellón
+              </button>
+              <button type="button" className="btn ghost sm" onClick={() => fillExample(EXAMPLE_ESTADIO)}>
+                Ejemplo: estadio
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <span className="label">Vista previa · lo que se va a crear</span>
+            {!hasLayout ? (
+              <div className="small muted">Escribe las zonas (o pulsa un ejemplo) y aquí verás las zonas y secciones exactas que se crearán.</div>
+            ) : (
+              <div className="stack" style={{ gap: 10 }}>
+                <div className="row">
+                  <b>
+                    {plural(layout.zones.length, 'zona', 'zonas')} · {plural(sectionCount, 'sección', 'secciones')}
+                  </b>
+                </div>
+                {layout.errors.length > 0 ? (
+                  <Callout tone="critical">
+                    <div className="stack" style={{ gap: 4 }}>
+                      {layout.errors.map((err, i) => (
+                        <div key={i}>{err}</div>
+                      ))}
+                    </div>
+                  </Callout>
+                ) : null}
+                {layout.zones.map((z) => (
+                  <div key={z.name} className="stack" style={{ gap: 6 }}>
+                    <div className="row" style={{ gap: 6 }}>
+                      <b>{z.name}</b>
+                      {z.standing ? <Pill icon="users">de pie</Pill> : null}
+                      <span className="small muted">{plural(z.sections.length, 'sección', 'secciones')}</span>
+                    </div>
+                    <div className="chips">
+                      {z.sections.map((sec) => (
+                        <span key={sec.name} className="chip" style={{ paddingRight: 10 }}>
+                          {sec.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                {layout.zones.some((z) => z.sections.some((sec) => sec.name.startsWith(`${z.name} · `))) ? (
+                  <div className="small muted">
+                    Las secciones que se repiten en varias zonas llevan delante el nombre de la zona para no confundirlas.
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {submitError ? <Callout tone="critical">No se ha creado el recinto: {submitError}</Callout> : null}
+
+        {createdWithErrors ? (
+          <Callout tone="critical">
+            <div className="stack" style={{ gap: 6 }}>
+              <div>
+                Las notas se han creado en <span className="mono small">{createdWithErrors.folder}</span>, pero el vault encuentra errores en ellas. Corrígelos en Obsidian (al
+                guardar se recompila solo):
+              </div>
+              {createdWithErrors.issues.map((i, n) => (
+                <div key={n}>
+                  <span className="mono small">{i.file}</span> — {i.message}
+                </div>
+              ))}
+            </div>
+          </Callout>
+        ) : null}
+
+        {notListed ? (
+          <Callout tone="warning">
+            <div className="stack" style={{ gap: 6 }}>
+              <div>
+                Las notas se han creado en <span className="mono small">{notListed.folder}</span>, pero el catálogo no se ha recargado porque el vault tiene errores en otras
+                notas. Corrígelos en Obsidian y pulsa «Recompilar vault»; el recinto aparecerá en la lista.
+              </div>
+              {notListed.report.errors.slice(0, 5).map((i, n) => (
+                <div key={n}>
+                  <span className="mono small">{i.file}</span> — {i.message}
+                </div>
+              ))}
+              {notListed.report.errors.length > 5 ? <div className="small">…y {notListed.report.errors.length - 5} errores más (abajo, en «Última compilación»).</div> : null}
+            </div>
+          </Callout>
+        ) : null}
+
+        <div className="row">
+          <button type="submit" className="btn primary lg" disabled={!canSubmit}>
+            <Icon name="check" size={16} /> {pending ? 'Cargando el recinto…' : busy ? 'Creando…' : 'Crear recinto'}
+          </button>
+          <button type="button" className="btn" onClick={onClose}>
+            Cancelar
+          </button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 export function VenuesPage() {
   const s = useLive();
   const { run, busy } = useAction();
+  const [params, setParams] = useSearchParams();
+  const wantsNew = params.get('nuevo') === '1';
+  const [formOpen, setFormOpen] = useState(wantsNew);
   const venues = useMemo(() => Object.values(s.venues), [s.venues]);
   const v = s.vault;
+
+  useEffect(() => {
+    if (wantsNew) setFormOpen(true);
+  }, [wantsNew]);
+
+  const openForm = () => {
+    setFormOpen(true);
+    window.scrollTo({ top: 0 });
+  };
+  const closeForm = () => {
+    setFormOpen(false);
+    if (wantsNew)
+      setParams(
+        (p) => {
+          const next = new URLSearchParams(p);
+          next.delete('nuevo');
+          return next;
+        },
+        { replace: true },
+      );
+  };
+
   return (
     <div className="stack" style={{ gap: 16 }}>
       <div className="page-head">
@@ -26,8 +338,13 @@ export function VenuesPage() {
           <button type="button" className="btn" disabled={busy} onClick={() => void run(() => Api.compileVault(), (r) => (r.applied ? 'Vault recompilado' : (r.reason ?? 'Vault con errores')))}>
             <Icon name="refresh" size={14} /> Recompilar vault
           </button>
+          <button type="button" className="btn primary" onClick={openForm}>
+            <Icon name="plus" size={14} /> Nuevo recinto
+          </button>
         </div>
       </div>
+
+      {formOpen ? <VenueQuickForm onClose={closeForm} /> : null}
 
       {v ? (
         <Card title="Última compilación">
@@ -56,7 +373,18 @@ export function VenuesPage() {
 
       {venues.length === 0 ? (
         <Card>
-          <Empty title="Sin recintos">Crea una carpeta en «10 Recintos» con la plantilla Recinto, sus zonas y sus secciones.</Empty>
+          <Empty
+            title="Sin recintos"
+            action={
+              formOpen ? null : (
+                <button type="button" className="btn primary" onClick={openForm}>
+                  <Icon name="plus" size={14} /> Nuevo recinto
+                </button>
+              )
+            }
+          >
+            Pulsa «Nuevo recinto» o crea en Obsidian una carpeta en «10 Recintos» con la plantilla Recinto, sus zonas y sus secciones.
+          </Empty>
         </Card>
       ) : (
         <Card flush>

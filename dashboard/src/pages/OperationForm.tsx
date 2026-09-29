@@ -104,15 +104,18 @@ export function OperationFormPage() {
     const wanted = params.get('evento');
     const ev = (wanted ? s.events[wanted] : undefined) ?? events.find((e) => e.limits.verified) ?? events[0];
     if (ev) {
+      const manual = s.system?.providers.find((p) => p.id === ev.providerId)?.mode === 'MANUAL_ASSIST';
       setF((x) => ({
         ...x,
         eventId: ev.id,
         name: x.name || ev.name,
         t0: ev.onSaleAt && Date.parse(ev.onSaleAt) > Date.now() ? toLocalInput(ev.onSaleAt) : x.t0,
         requestedQty: String(Math.min(Number(x.requestedQty), ev.limits.perOperation || Number(x.requestedQty))),
+        // Las colas de las webs reales son largas: la ventana por defecto se amplía.
+        runWindowMinutes: manual && x.runWindowMinutes === '15' ? '60' : x.runWindowMinutes,
       }));
     }
-  }, [id, f.eventId, params, s.events, events]);
+  }, [id, f.eventId, params, s.events, s.system, events]);
 
   const provider = event ? s.system?.providers.find((p) => p.id === event.providerId) : undefined;
   const artifactSummary = event
@@ -129,6 +132,27 @@ export function OperationFormPage() {
     ];
   }, [artifact.data]);
   const accounts = useMemo(() => Object.values(s.accounts).filter((a) => !event || a.providerId === event.providerId), [s.accounts, event]);
+  const providerName = event ? (provider?.name ?? s.providerAuthorizations.find((p) => p.providerId === event.providerId)?.name ?? event.providerId) : null;
+
+  // Cambio de evento (solo al crear): los objetivos y las cuentas del evento anterior ya no valen.
+  const changeEvent = (eventId: string) =>
+    setF((x) => {
+      const prev = s.events[x.eventId];
+      const next = s.events[eventId];
+      const nextMode = next ? s.system?.providers.find((p) => p.id === next.providerId)?.mode : undefined;
+      const nameFollowsEvent = !x.name.trim() || (prev !== undefined && x.name === prev.name);
+      const qty = Number(x.requestedQty);
+      return {
+        ...x,
+        eventId,
+        targets: [],
+        accountIds: next ? x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId) : [],
+        name: nameFollowsEvent ? (next?.name ?? '') : x.name,
+        t0: next?.onSaleAt && Date.parse(next.onSaleAt) > Date.now() ? toLocalInput(next.onSaleAt) : x.t0,
+        requestedQty: next && Number.isFinite(qty) && next.limits.perOperation > 0 ? String(Math.min(qty, next.limits.perOperation)) : x.requestedQty,
+        runWindowMinutes: nextMode === 'MANUAL_ASSIST' && x.runWindowMinutes === '15' ? '60' : x.runWindowMinutes,
+      };
+    });
 
   const toggleAccount = (aid: string) =>
     setF((x) => ({ ...x, accountIds: x.accountIds.includes(aid) ? x.accountIds.filter((y) => y !== aid) : x.accountIds.length >= 10 ? x.accountIds : [...x.accountIds, aid] }));
@@ -209,7 +233,7 @@ export function OperationFormPage() {
           <div className="form-grid">
             <div className="field" style={{ gridColumn: 'span 2' }}>
               <label htmlFor="op-event">Evento (del vault)</label>
-              <select id="op-event" className="input" value={f.eventId} onChange={(e) => set('eventId', e.target.value)} disabled={Boolean(id)}>
+              <select id="op-event" className="input" value={f.eventId} onChange={(e) => changeEvent(e.target.value)} disabled={Boolean(id)}>
                 <option value="">Elige un evento…</option>
                 {events.map((e) => (
                   <option key={e.id} value={e.id}>
@@ -234,6 +258,14 @@ export function OperationFormPage() {
               </span>
             </div>
           ) : null}
+          {event && provider?.mode === 'MANUAL_ASSIST' ? (
+            <div style={{ marginTop: 12 }}>
+              <Callout icon="info">
+                <b>Asistencia manual en {providerName}:</b> al armar, cada cuenta recibe la tarea de iniciar sesión en la web oficial. En T0 cada persona recibe aquí y en
+                Telegram qué zona intentar, cuántas entradas y el precio máximo, con el enlace oficial. Nadie paga desde aquí: se paga en la web oficial.
+              </Callout>
+            </div>
+          ) : null}
         </div>
 
         <div className="form-section">
@@ -246,6 +278,7 @@ export function OperationFormPage() {
             <div className="field">
               <label htmlFor="op-win">Ventana (minutos)</label>
               <input id="op-win" className="input" type="number" min={1} value={f.runWindowMinutes} onChange={(e) => set('runWindowMinutes', e.target.value)} />
+              <span className="hint">Cuánto tiempo sigue activa la operación tras T0 (cuenta la cola virtual).</span>
             </div>
             <div className="field">
               <label htmlFor="op-freeze">Congelar antes de T0 (s)</label>
@@ -353,7 +386,9 @@ export function OperationFormPage() {
           <h3 className="sign">5 · Con qué cuentas (máx. 10)</h3>
           {accounts.length === 0 ? (
             <Callout tone="warning">
-              No hay cuentas de este proveedor. <Link to="/cuentas">Crea una</Link> o usa «Nueva demo».
+              {event ? `No hay cuentas de ${providerName ?? event.providerId}. ` : 'Todavía no hay cuentas. '}
+              <Link to="/cuentas">Crea una cuenta</Link> por persona
+              {provider?.mode === 'SIMULATED' ? ' o usa «Nueva demo» en el resumen para ensayar.' : '.'}
             </Callout>
           ) : (
             <div className="form-grid">

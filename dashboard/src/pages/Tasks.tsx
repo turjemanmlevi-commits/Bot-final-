@@ -18,6 +18,10 @@ function TaskCard({ task }: { task: HumanTask }) {
   const [seats, setSeats] = useState('');
   const [expiresMin, setExpiresMin] = useState('10');
   const left = task.deadlineAt ? Date.parse(task.deadlineAt) - now : null;
+  const providerId = account?.providerId ?? op?.providerId;
+  const providerName = providerId
+    ? (s.providerAuthorizations.find((p) => p.providerId === providerId)?.name ?? s.system?.providers.find((p) => p.id === providerId)?.name ?? providerId)
+    : null;
 
   const respondInCart = () => {
     const unitPrice = parseEuros(price);
@@ -52,8 +56,20 @@ function TaskCard({ task }: { task: HumanTask }) {
           </span>
         ) : null}
       </div>
+      {providerName ? (
+        <div className="small muted" style={{ marginTop: -4 }}>
+          Proveedor: <b>{providerName}</b>
+        </div>
+      ) : null}
       <div style={{ fontSize: 15, fontWeight: 600 }}>{task.title}</div>
       <div className="ink2">{task.instructions}</div>
+      {task.link ? (
+        <div className="row">
+          <a className="btn lg" href={task.link} target="_blank" rel="noreferrer">
+            <Icon name="external" size={16} /> Abrir la web oficial
+          </a>
+        </div>
+      ) : null}
       {task.target ? (
         <div className="task-target">
           <div>
@@ -97,8 +113,9 @@ function TaskCard({ task }: { task: HumanTask }) {
               <input id={`s-${task.id}`} className="input" placeholder="12, 13" value={seats} onChange={(e) => setSeats(e.target.value)} />
             </div>
             <div className="field">
-              <label htmlFor={`e-${task.id}`}>Caduca en (min)</label>
+              <label htmlFor={`e-${task.id}`}>Minutos que le quedan al carrito</label>
               <input id={`e-${task.id}`} className="input" type="number" min={0} value={expiresMin} onChange={(e) => setExpiresMin(e.target.value)} />
+              <span className="hint">Lo indica la web; sirve para avisarte antes de que caduque.</span>
             </div>
           </div>
           <div className="row">

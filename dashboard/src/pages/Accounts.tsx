@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router';
-import type { Account, AccountInput } from '@to/shared';
+import type { Account, AccountInput, ProviderMode } from '@to/shared';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { Callout, Card, Empty, Pill, QueuePill, SessionPill } from '../components/ui';
@@ -10,7 +10,7 @@ import { useLive } from '../lib/store';
 
 const EMPTY_FORM: AccountInput = {
   label: '',
-  providerId: 'sim',
+  providerId: '',
   holderRef: '',
   householdRef: null,
   paymentRef: null,
@@ -18,6 +18,14 @@ const EMPTY_FORM: AccountInput = {
   eligibility: ['*'],
   enabled: true,
   telegramChatId: null,
+};
+
+const MODE_ORDER: Record<ProviderMode, number> = { MANUAL_ASSIST: 0, AUTHORIZED_API: 1, SIMULATED: 2 };
+
+const MODE_SUFFIX: Record<ProviderMode, string> = {
+  MANUAL_ASSIST: 'asistencia manual',
+  AUTHORIZED_API: 'API autorizada',
+  SIMULATED: 'simulador (solo ensayos)',
 };
 
 function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => void }) {
@@ -38,7 +46,12 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
         }
       : EMPTY_FORM,
   );
-  const providers = s.system?.providers ?? [];
+  const providers = useMemo(
+    () => [...(s.system?.providers ?? [])].sort((a, b) => MODE_ORDER[a.mode] - MODE_ORDER[b.mode] || a.name.localeCompare(b.name, 'es')),
+    [s.system?.providers],
+  );
+  const chosen = providers.find((p) => p.id === f.providerId);
+  const officialUrl = s.providerAuthorizations.find((a) => a.providerId === f.providerId)?.url ?? null;
   const set = <K extends keyof AccountInput>(k: K, v: AccountInput[K]) => setF((x) => ({ ...x, [k]: v }));
   const submit = async () => {
     const body: AccountInput = {
@@ -55,7 +68,8 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
       <div className="stack">
         <Callout icon="lock">
           Solo cuentas <b>legítimas</b> de personas del grupo. Aquí no se guardan contraseñas ni datos personales: el titular, el hogar y el medio de pago son <b>alias</b> que
-          sirven para aplicar los límites del evento (por titular, por hogar o por medio de pago).
+          sirven para aplicar los límites del evento (por titular, por hogar o por medio de pago). Cada cuenta debe ser de la persona que va a usar la entrada (en el Real
+          Madrid, las entradas de socio son personales e intransferibles).
         </Callout>
         <div className="form-grid">
           <div className="field">
@@ -65,12 +79,29 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
           <div className="field">
             <label htmlFor="acc-provider">Proveedor</label>
             <select id="acc-provider" className="input" value={f.providerId} onChange={(e) => set('providerId', e.target.value)} disabled={Boolean(initial?.leasedBy)}>
+              <option value="">Elige dónde compra esta cuenta…</option>
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({p.mode === 'SIMULATED' ? 'simulado' : p.mode === 'MANUAL_ASSIST' ? 'manual' : 'API'})
+                  {p.name} — {MODE_SUFFIX[p.mode]}
                 </option>
               ))}
+              {f.providerId && !chosen ? <option value={f.providerId}>{f.providerId}</option> : null}
             </select>
+            {chosen?.mode === 'MANUAL_ASSIST' ? (
+              <span className="hint">
+                Asistencia manual: cada persona inicia sesión y compra en la web oficial; el sistema reparte las tareas y te avisa.
+                {officialUrl ? (
+                  <>
+                    {' '}
+                    <a href={officialUrl} target="_blank" rel="noreferrer" style={{ whiteSpace: 'nowrap' }}>
+                      Web oficial <Icon name="external" size={12} />
+                    </a>
+                  </>
+                ) : null}
+              </span>
+            ) : chosen?.mode === 'SIMULATED' ? (
+              <span className="hint">Simulador interno: solo para ensayar.</span>
+            ) : null}
           </div>
           <div className="field">
             <label htmlFor="acc-holder">Titular (alias)</label>
@@ -107,7 +138,7 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
           <div className="field">
             <label htmlFor="acc-tg">Chat de Telegram (opcional)</label>
             <input id="acc-tg" className="input mono" value={f.telegramChatId ?? ''} onChange={(e) => set('telegramChatId', e.target.value)} placeholder="123456789" />
-            <span className="hint">Esta persona recibirá sus tareas en su chat.</span>
+            <span className="hint">Número que da el bot con /start o /id (en grupos empieza por «-»). Opcional: esta persona recibirá solo sus tareas.</span>
           </div>
         </div>
         <label className="check">
@@ -115,7 +146,7 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
           <span>Activa</span>
         </label>
         <div className="row">
-          <button type="button" className="btn primary" disabled={busy || !f.label.trim() || !f.holderRef.trim()} onClick={() => void submit()}>
+          <button type="button" className="btn primary" disabled={busy || !f.providerId || !f.label.trim() || !f.holderRef.trim()} onClick={() => void submit()}>
             {initial ? 'Guardar cambios' : 'Crear cuenta'}
           </button>
           <button type="button" className="btn" onClick={onDone}>
@@ -135,6 +166,8 @@ export function AccountsPage() {
   const [editing, setEditing] = useState<Account | 'new' | null>(null);
   const accounts = useMemo(() => Object.values(s.accounts).sort((a, b) => a.providerId.localeCompare(b.providerId) || a.label.localeCompare(b.label)), [s.accounts]);
   const highlight = location.hash.slice(1);
+  const providerName = (pid: string) =>
+    s.providerAuthorizations.find((p) => p.providerId === pid)?.name ?? s.system?.providers.find((p) => p.id === pid)?.name ?? pid;
 
   useEffect(() => {
     if (highlight) document.getElementById(`acc-${highlight}`)?.scrollIntoView({ block: 'center' });
@@ -193,7 +226,7 @@ export function AccountsPage() {
                       <td>
                         <b>{a.label}</b> {a.enabled ? null : <span className="tag">desactivada</span>} {killed ? <span className="tag">parada</span> : null}
                         <div className="small muted">
-                          {a.providerId} · <span className="mono">{a.id}</span>
+                          {providerName(a.providerId)} · <span className="mono">{a.id}</span>
                         </div>
                       </td>
                       <td className="small">
