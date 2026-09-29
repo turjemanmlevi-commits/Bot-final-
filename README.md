@@ -16,6 +16,12 @@ Sala de control para que un grupo de personas consiga entradas coordinando **has
    irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex
    ```
 
+   ¿Sale `"irm" no se reconoce como un comando…`? Estás en **Símbolo del sistema** (cmd), no en PowerShell. Pega esta otra línea, que funciona en los dos:
+
+   ```bat
+   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex"
+   ```
+
 3. Si Windows pide permiso para instalar Node.js, pulsa **Sí**. Cuando pregunte `Instalar tambien Obsidian para ver el vault? (s/n)`, escribe `s` y Enter (o `n` si ya lo tienes).
 4. Se abre una **ventana negra** (el servidor). La primera vez tarda unos minutos; después se abre solo <http://localhost:8787>. **Deja esa ventana abierta** mientras uses el sistema.
 

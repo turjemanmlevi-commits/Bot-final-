@@ -16,6 +16,12 @@ Todo el proyecto —código, dashboard y este vault— está en GitHub. El objet
    irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex
    ```
 
+   ¿Sale `"irm" no se reconoce como un comando…`? Estás en **Símbolo del sistema** (cmd), no en PowerShell. Pega esta otra línea, que funciona en los dos:
+
+   ```bat
+   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex"
+   ```
+
 3. Si Windows pregunta si quieres permitir que se instale **Node.js**, pulsa **Sí**.
 4. Cuando pregunte `Instalar tambien Obsidian para ver el vault? (s/n)`, escribe `s` y Enter (o `n` si ya lo tienes).
 5. Se abre una **ventana negra**: es el servidor. La primera vez tarda unos minutos (instala y compila). Después se abre solo el navegador en <http://localhost:8787>.
