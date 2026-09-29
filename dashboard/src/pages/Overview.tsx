@@ -4,9 +4,9 @@ import { AlertRow, sortAlerts } from '../components/AlertList';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { OperationHero } from '../components/OperationHero';
-import { Callout, Card, CartPill, Empty, Stat } from '../components/ui';
+import { Callout, Card, CartPill, Empty, Pill, Stat } from '../components/ui';
 import { Api } from '../lib/api';
-import { formatDuration, formatMoney, fmtRel } from '../lib/format';
+import { formatDuration, formatMoney, fmtDateTime, fmtRel } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
@@ -79,6 +79,7 @@ export function OverviewPage() {
             en T0 el sistema asegura carritos → <b>pagas tú</b>.
           </Empty>
         </Card>
+        <RealPurchaseChecklist />
         <VaultCard />
       </div>
     );
@@ -110,6 +111,8 @@ export function OverviewPage() {
         <Stat label="Alertas críticas" value={critical} detail={`${openAlerts.length} abiertas en total`} />
         <Stat label="Tareas humanas" value={openTasks.length} detail={openTasks.length ? 'Te esperan en Tareas' : 'Nada pendiente'} />
       </div>
+
+      <RealPurchaseChecklist />
 
       {openTasks.length > 0 ? (
         <Callout tone="warning" icon="task">
@@ -180,6 +183,129 @@ export function OverviewPage() {
 
       <VaultCard />
     </div>
+  );
+}
+
+const REAL_ARMED = ['ARMED', 'FROZEN', 'RUNNING', 'PAUSED', 'RECOVERING', 'CART_SECURED'];
+
+interface CheckStep {
+  title: string;
+  done: boolean;
+  text: string;
+  to: string;
+  cta: string;
+}
+
+/** Lo mínimo para comprar entradas reales en asistencia manual, en orden. */
+function RealPurchaseChecklist() {
+  const s = useLive();
+  const now = useNow(5000);
+  const steps = useMemo<CheckStep[]>(() => {
+    const providers = s.system?.providers ?? [];
+    const modeOf = (pid: string) => providers.find((p) => p.id === pid)?.mode;
+    const isReal = (pid: string) => {
+      const mode = modeOf(pid);
+      return mode !== undefined && mode !== 'SIMULATED';
+    };
+
+    const tg = s.system?.telegram;
+    const tgDone = Boolean(tg?.enabled && tg.connected && tg.mainChatConfigured);
+    const tgText = !tg
+      ? 'Conectando con el servidor…'
+      : tgDone
+        ? `${tg.bot ? `Bot @${tg.bot.replace(/^@/, '')}` : 'Bot'} conectado y chat principal configurado.`
+        : !tg.enabled
+          ? 'Falta TELEGRAM_BOT_TOKEN en el archivo .env.'
+          : !tg.connected
+            ? tg.detail || 'El bot no responde: revisa el token.'
+            : 'Falta TELEGRAM_CHAT_ID: escribe /start al bot y copia el número en .env.';
+
+    const realAccounts = Object.values(s.accounts).filter(
+      (a) => a.enabled && a.verification === 'VERIFIED' && a.providerId !== 'manual' && modeOf(a.providerId) === 'MANUAL_ASSIST',
+    );
+
+    const readyEvents = Object.values(s.events)
+      .filter((e) => isReal(e.providerId) && e.limits.verified && e.limits.semantics !== 'UNKNOWN' && Date.parse(e.onSaleAt ?? e.startsAt) > now)
+      .sort((a, b) => (a.onSaleAt ?? a.startsAt).localeCompare(b.onSaleAt ?? b.startsAt));
+    const nextEvent = readyEvents[0];
+
+    const armedOps = Object.values(s.operations)
+      .filter((o) => isReal(o.providerId) && REAL_ARMED.includes(o.state))
+      .sort((a, b) => a.t0.localeCompare(b.t0));
+    const firstOp = armedOps[0];
+    const armedIds = new Set(armedOps.map((o) => o.id));
+    const leased = Object.values(s.accounts).filter((a) => a.leasedBy !== null && armedIds.has(a.leasedBy));
+    const readyCount = leased.filter((a) => a.session.state === 'READY').length;
+    const sessionsDone = leased.length > 0 && readyCount === leased.length;
+    const sessionsHint = 'Cada persona: inicia sesión en la web oficial y pulsa «Sesión lista» en Tareas.';
+
+    return [
+      { title: 'Telegram conectado', done: tgDone, text: tgText, to: '/ajustes', cta: 'Configurar' },
+      {
+        title: 'Cuentas reales',
+        done: realAccounts.length > 0,
+        text:
+          realAccounts.length > 0
+            ? `${realAccounts.length} cuenta${realAccounts.length === 1 ? '' : 's'} verificada${realAccounts.length === 1 ? '' : 's'} en webs oficiales.`
+            : 'Crea una cuenta verificada por persona, con su proveedor real (no el simulador).',
+        to: '/cuentas',
+        cta: 'Cuentas',
+      },
+      {
+        title: 'Evento con límites verificados',
+        done: nextEvent !== undefined,
+        text: nextEvent
+          ? `${nextEvent.name} · ${nextEvent.onSaleAt ? `venta ${fmtDateTime(nextEvent.onSaleAt)}` : `empieza ${fmtDateTime(nextEvent.startsAt)}`}.`
+          : 'Crea el evento con la hora de venta y los límites comprobados en la web oficial.',
+        to: '/eventos',
+        cta: 'Eventos',
+      },
+      {
+        title: 'Operación armada',
+        done: firstOp !== undefined,
+        text: firstOp ? `${firstOp.name} · T0 ${fmtRel(firstOp.t0, now)}.` : 'Crea la operación (zonas, cantidad, precio máximo y cuentas) y pulsa «Armar».',
+        to: firstOp ? `/operaciones/${firstOp.id}` : '/operaciones',
+        cta: 'Operaciones',
+      },
+      {
+        title: 'Sesiones listas',
+        done: sessionsDone,
+        text: leased.length > 0 ? `${readyCount}/${leased.length} cuentas con sesión lista.${sessionsDone ? '' : ` ${sessionsHint}`}` : sessionsHint,
+        to: '/tareas',
+        cta: 'Tareas',
+      },
+    ];
+  }, [s.system, s.accounts, s.events, s.operations, now]);
+  const doneCount = steps.filter((x) => x.done).length;
+
+  return (
+    <Card title="Compra real · lista de comprobación" actions={<span className="small muted mono">{doneCount}/{steps.length}</span>} flush>
+      <div className="table-wrap">
+        <table className="t">
+          <tbody>
+            {steps.map((st, i) => (
+              <tr key={st.title}>
+                <td style={{ width: 1, whiteSpace: 'nowrap' }}>
+                  <Pill tone={st.done ? 'good' : 'warning'}>{st.done ? 'Hecho' : 'Pendiente'}</Pill>
+                </td>
+                <td>
+                  <b>
+                    {i + 1}. {st.title}
+                  </b>
+                  <div className="small muted">{st.text}</div>
+                </td>
+                <td style={{ width: 1, textAlign: 'right' }}>
+                  <Link className="btn sm" to={st.to}>
+                    {st.cta}
+                  </Link>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="card-body small muted">Guía completa: nota «Comprar entradas reales (paso a paso)» del vault.</div>
+    </Card>
   );
 }
 

@@ -149,7 +149,7 @@ export function OperationFormPage() {
         accountIds: next ? x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId) : [],
         name: nameFollowsEvent ? (next?.name ?? '') : x.name,
         t0: next?.onSaleAt && Date.parse(next.onSaleAt) > Date.now() ? toLocalInput(next.onSaleAt) : x.t0,
-        requestedQty: next && Number.isFinite(qty) && next.limits.perOperation > 0 ? String(Math.min(qty, next.limits.perOperation)) : x.requestedQty,
+        requestedQty: next && Number.isFinite(qty) && qty > 0 && next.limits.perOperation > 0 ? String(Math.min(qty, next.limits.perOperation)) : x.requestedQty,
         runWindowMinutes: nextMode === 'MANUAL_ASSIST' && x.runWindowMinutes === '15' ? '60' : x.runWindowMinutes,
       };
     });
