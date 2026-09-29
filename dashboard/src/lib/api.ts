@@ -89,17 +89,42 @@ export class ApiError extends Error {
 
 async function api<T>(path: string, opts: { method?: string; body?: unknown; accept?: number[] } = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(path, {
-    method: opts.method ?? 'GET',
-    headers: {
-      ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
-      'x-actor': encodeURIComponent(getActor()),
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-  });
+  const method = opts.method ?? 'GET';
+  const send = () =>
+    fetch(path, {
+      method,
+      headers: {
+        ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}),
+        'x-actor': encodeURIComponent(getActor()),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+  let res: Response;
+  try {
+    res = await send();
+  } catch {
+    // Corte momentáneo con la sala (p. ej. una conexión que el servidor acababa de cerrar): se repite una vez
+    // si repetir no hace daño (consultas y cambios de configuración; no las altas con POST).
+    await new Promise((r) => setTimeout(r, 800));
+    try {
+      if (method === 'POST') throw new Error('no se repite');
+      res = await send();
+    } catch {
+      throw new ApiError(
+        0,
+        'NETWORK',
+        'No se pudo hablar con la sala de control (el servidor de la ventana negra no ha respondido). Comprueba que la ventana negra sigue abierta y sin «Seleccionar» en el título (pulsa Esc), recarga esta página (F5) y vuelve a probar. Si tienes un bloqueador de anuncios, desactívalo para localhost.',
+      );
+    }
+  }
   const text = await res.text();
-  const json: unknown = text ? JSON.parse(text) : null;
+  let json: unknown = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    throw new ApiError(res.status, 'BAD_RESPONSE', `La sala respondió algo inesperado (${res.status}). Cierra la ventana negra, vuelve a abrir «Sala de control» y prueba otra vez.`);
+  }
   if (!res.ok && !(opts.accept ?? []).includes(res.status)) {
     const err = (json as ApiErrorBody | null)?.error;
     throw new ApiError(res.status, err?.code ?? 'HTTP', err?.message ?? `${res.status} ${res.statusText}`);

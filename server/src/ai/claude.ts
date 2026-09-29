@@ -347,9 +347,12 @@ export class ClaudeControl {
       let model: { id: string; name: string };
       try {
         // Consulta gratuita: la lista de modelos de la cuenta (comprueba la clave y elige el modelo).
-        model = await this.pickModel(client);
+        // Con tiempo corto: la respuesta llega siempre en segundos, con el motivo si falla.
+        model = await this.pickModel(client.withOptions({ timeout: 20_000, maxRetries: 1 }));
       } catch (err) {
-        return this.result(false, (err instanceof AiError ? err : this.explain(err)).message);
+        const e = err instanceof AiError ? err : this.explain(err);
+        log.warn('Claude: la clave no se ha podido comprobar', { motivo: e.message, detalle: errorDetail(err) });
+        return this.result(false, e.message);
       }
       const warning = await this.persist({ ANTHROPIC_API_KEY: key });
       this.client = client;
@@ -699,7 +702,15 @@ export class ClaudeControl {
           ? new AiError('BAD_REQUEST', 'Claude no ha podido abrir la imagen del plano (la web no la deja descargar): se enseña tal cual y las zonas se eligen en la lista.')
           : new AiError('BAD_REQUEST', `Claude ha rechazado la consulta: ${m.slice(0, 200)}`);
     } else if (err instanceof Anthropic.APIConnectionError) {
-      out = new AiError('NETWORK', 'No se pudo conectar con Claude (api.anthropic.com): revisa la conexión a internet o si un antivirus o cortafuegos la bloquea.');
+      const code = errorDetail(err);
+      const hint = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER/i.test(code)
+        ? 'tu antivirus o un proxy está interceptando las conexiones seguras: desactiva su «análisis HTTPS/SSL» o añade una excepción para node.exe'
+        : /ENOTFOUND|EAI_AGAIN/i.test(code)
+          ? 'no se encuentra api.anthropic.com: revisa la conexión a internet'
+          : /timed? ?out|ETIMEDOUT|ConnectTimeout/i.test(code)
+            ? 'no responde a tiempo: revisa la conexión o si un cortafuegos o antivirus bloquea a Node.js'
+            : 'revisa la conexión a internet o si un antivirus o cortafuegos bloquea a Node.js';
+      out = new AiError('NETWORK', `No se pudo conectar con Claude (api.anthropic.com)${code ? ` [${code}]` : ''}: ${hint}.`);
     } else if (err instanceof Anthropic.APIError) {
       out = new AiError('NETWORK', `Claude no está respondiendo bien ahora mismo (error ${err.status ?? '?'}). Vuelve a intentarlo en un minuto.`);
     } else {
@@ -801,4 +812,16 @@ function sameSite(url: string, officials: Array<string | null | undefined>): boo
     const base = oh.split('.').slice(-2).join('.');
     return h === oh || h.endsWith(`.${base}`) || h === base;
   });
+}
+
+/** Código técnico de un fallo de red (ECONNRESET, SELF_SIGNED_CERT_IN_CHAIN…) para el mensaje y la ventana negra. */
+function errorDetail(err: unknown): string {
+  let e = err as { cause?: unknown; code?: unknown; message?: unknown } | undefined;
+  const parts: string[] = [];
+  for (let i = 0; e && i < 4; i++) {
+    if (typeof e.code === 'string') parts.push(e.code);
+    else if (i > 0 && typeof e.message === 'string') parts.push(e.message.slice(0, 80));
+    e = e.cause as typeof e;
+  }
+  return [...new Set(parts)].join(' · ');
 }
