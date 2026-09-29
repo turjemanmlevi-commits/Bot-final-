@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
-import { decodeCapture, FEED_LABEL, LIMIT_SEMANTICS_LABEL, parsePageCapture, type CatalogEvent, type EventWatch, type PageImport, type ProviderMode, type TopMatch } from '@to/shared';
+import {
+  decodeCapture,
+  FEED_LABEL,
+  LIMIT_SEMANTICS_LABEL,
+  parsePageCapture,
+  PREFERENCE_EMOJI,
+  type CatalogEvent,
+  type EventWatch,
+  type PageImport,
+  type ProviderMode,
+  type TopMatch,
+} from '@to/shared';
 import { EventForm } from '../components/EventForm';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Pill } from '../components/ui';
@@ -10,6 +21,17 @@ import { useNow, useToast } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
 /** Enlace sin «?…», «#…» ni barra final, para reconocer el mismo evento. */
+/** «realmadrid.com/entradas/partido-123» (sin https ni www, recortado). */
+function shortLink(url: string): string {
+  try {
+    const u = new URL(url);
+    const text = `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}`;
+    return text.length > 60 ? `${text.slice(0, 57)}…` : text;
+  } catch {
+    return url;
+  }
+}
+
 function sameLink(url: string): string {
   try {
     const u = new URL(url);
@@ -296,6 +318,39 @@ export function EventsPage() {
                       </dd>
                       <dt>Fuente</dt>
                       <dd className="small">{e.limits.source || '—'}</dd>
+                      <dt>Compra</dt>
+                      <dd className="small">
+                        {e.url ? (
+                          <a href={e.url} target="_blank" rel="noreferrer" title="Enlace oficial desde donde se compran las entradas">
+                            {shortLink(e.url)}
+                          </a>
+                        ) : (
+                          <span style={{ color: 'var(--warning-ink)' }}>sin enlace oficial: ponlo en «Editar» (o «Analizar con Claude»)</span>
+                        )}
+                      </dd>
+                      {e.saleZones.length > 0 ? (
+                        <>
+                          <dt>Estructura</dt>
+                          <dd className="small">
+                            {e.saleZones.length} zona{e.saleZones.length === 1 ? '' : 's'} en la web: {e.saleZones.slice(0, 5).map((z) => z.zone).join(', ')}
+                            {e.saleZones.length > 5 ? '…' : ''}
+                          </dd>
+                        </>
+                      ) : null}
+                      {e.preferredTargets.length > 0 ? (
+                        <>
+                          <dt>Dónde</dt>
+                          <dd className="small">
+                            {e.preferredTargets.map((t, i) => `${PREFERENCE_EMOJI[i] ?? ''} ${t}`).join(' · ')}
+                            {e.perAccountQty ? ` · ${e.perAccountQty} por cuenta` : ''}
+                          </dd>
+                        </>
+                      ) : e.perAccountQty ? (
+                        <>
+                          <dt>Por cuenta</dt>
+                          <dd className="small">{e.perAccountQty} entrada{e.perAccountQty === 1 ? '' : 's'}</dd>
+                        </>
+                      ) : null}
                       {e.closedSectionIds.length ? (
                         <>
                           <dt>Cerradas</dt>

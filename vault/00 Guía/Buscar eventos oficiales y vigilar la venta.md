@@ -28,10 +28,14 @@ Se pone una vez: **Ajustes → Claude (IA)** → pega tu clave de la API (platfo
 Cada vez:
 
 1. Al elegir **dónde se vende**, Claude mira esa web y las oficiales de sus eventos y enseña la lista de los próximos (el mes, 2 meses o 4 meses). Tarda 1–2 minutos: se ve el tiempo que lleva.
-2. Pulsa **Elegir** en el evento: Claude lee su página y **las condiciones de venta** (1–2 minutos más) y se rellena todo. El recuadro «🤖» dice qué ha encontrado y qué falta.
-3. **Cuántas entradas por persona**: si Claude cita la frase de la **web de venta oficial**, queda puesto y **verificado**. Si solo lo encuentra en otra web (una noticia), lo pone pero **sin verificar**: compruébalo en la web oficial y marca la casilla. Debajo, la sala calcula **cuántas podéis comprar en total** con vuestras cuentas.
-4. **Recinto**: si ya está en la sala se elige solo; si no, se **crea al momento** con las zonas que usa la web de venta (o una estructura orientativa).
-5. **Plano**: si Claude encuentra la **imagen del plano oficial** (tal cual se ve al comprar), sale en el paso 5 con un **«+» en cada zona** (Claude las sitúa mirando la imagen). Si no hay imagen, o la web no deja verla desde aquí, sale el **plano de la sala**.
+2. Pulsa **Elegir** en el evento: Claude **analiza el evento entero** (1–2 minutos más) y se rellena todo. El recuadro «🤖» dice qué ha encontrado y qué falta.
+3. **Enlace oficial de compra**: el enlace **directo** a la página donde se compran las entradas de ese evento en la web oficial, y **quién vende** (el club, la ticketera, la UEFA…). Nunca una reventa: si Claude solo encuentra una (Viagogo, StubHub…), la descarta y lo avisa. Es el botón «Abrir la web oficial» de cada tarea y de Telegram.
+4. **Cuántas entradas se pueden comprar**: por persona y **en cada fase de venta** (socios, preventa, general…, cada una con su «máx. N»). Si Claude cita la frase de la **web de venta oficial**, queda puesto y **verificado**; si solo lo encuentra en otra web (una noticia), lo pone pero **sin verificar**: compruébalo en la web oficial y marca la casilla. Al elegir una fase se pone su límite; si pones otro número a mano no se toca, y si es mayor que el de la fase sale un aviso. Debajo, la sala calcula **cuántas podéis comprar en total** con vuestras cuentas.
+5. **Recinto**: si ya está en la sala se elige solo; si no, se **crea al momento** con las zonas que usa la web de venta (o una estructura orientativa).
+6. **Cómo está estructurada la venta**: en el paso 5, una tabla con las zonas **tal y como las vende la web** (gradas, sectores, pista…), sus secciones, su precio y a qué zona de vuestro plano corresponde cada una. Si la web vende zonas que vuestro plano no tiene, **«➕ Añadir al recinto las zonas que faltan»** las crea (con sus secciones) y guarda los nombres de la web como **alias** de vuestras zonas, sin duplicar nada. Se guarda en la nota del evento (`saleZones`).
+7. **Plano**: si Claude encuentra la **imagen del plano oficial** (tal cual se ve al comprar), sale en el paso 5 con un **«+» en cada zona** (Claude las sitúa mirando la imagen). Si no hay imagen, o la web no deja verla desde aquí, sale el **plano de la sala**.
+
+**Venga de donde venga el evento, Claude lo analiza**: al traerlo con el botón «📥 Enviar a la sala» o de la lista oficial (A y B, más abajo) se pone a analizarlo solo y **completa lo que falte** sin pisar lo que ya es oficial o está comprobado. En un evento ya guardado, **Editar → 🤖 Analizar con Claude**.
 
 Claude no interviene en la compra: el día de la venta, el bot avisa **al segundo** con lo que ya está preparado.
 
@@ -41,7 +45,7 @@ En el paso **5** toca hasta **3 sitios** del plano, en orden: 🟢 **1ª prefere
 
 ### 📱 Desde Telegram: /evento
 
-En el **chat principal** del bot escribe **/evento**: eliges la web de venta con un botón → Claude busca y enseña los próximos eventos → tocas uno → Claude lee sus datos (fecha, apertura, límite por persona, precios, recinto) → **✅ Crear · abre Venta general…** (o la fase que sea) → llega la **imagen del plano oficial** y tocas hasta 3 zonas (🟢 1ª, 🟠 2ª, 🔵 3ª) → **Listo**. Es lo mismo que en el dashboard: el evento queda creado con su recinto, su vigilancia y dónde queréis las entradas. Mientras Claude busca, el bot sigue respondiendo a todo lo demás.
+En el **chat principal** del bot escribe **/evento**: eliges la web de venta con un botón → Claude busca y enseña los próximos eventos → tocas uno → Claude lo analiza (fecha, fases de venta con su límite, límite por persona, precios, recinto, **cómo está estructurada la venta** y el **enlace oficial de compra**) → **✅ Crear · abre Venta general…** (o la fase que sea) → llega la **imagen del plano oficial** y tocas hasta 3 zonas (🟢 1ª, 🟠 2ª, 🔵 3ª) → **Listo**. Si la web vende zonas que vuestro plano no tiene, sale **➕ Añadir al recinto** para poder elegirlas. Es lo mismo que en el dashboard: el evento queda creado con su recinto, su vigilancia y dónde queréis las entradas. Mientras Claude busca, el bot sigue respondiendo a todo lo demás.
 
 ### A · Sin claves: botón «📥 Enviar a la sala» (cualquier web oficial)
 

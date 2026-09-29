@@ -7,7 +7,7 @@
  * propiedades).
  */
 
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { formatPlanPoint, type EventNoteInput, type FeedId, type LayoutZone, type VenueQuickInput } from '@to/shared';
 import { isMap, parseDocument, stringify } from 'yaml';
@@ -102,6 +102,7 @@ function eventProps(input: EventNoteInput, ctx: EventWriteContext): Record<strin
     // Sin el campo (p. ej. al editar desde otra pantalla) se conservan los que hubiera.
     ...(input.preferredTargets !== undefined ? { preferredTargets: input.preferredTargets } : {}),
     ...(input.perAccountQty !== undefined ? { perAccountQty: input.perAccountQty } : {}),
+    ...(input.saleZones !== undefined ? { saleZones: input.saleZones } : {}),
     ...(input.planImage !== undefined ? { planImage: input.planImage } : {}),
     ...(input.planPoints !== undefined ? { planPoints: input.planPoints.map(formatPlanPoint) } : {}),
   };
@@ -118,6 +119,10 @@ function eventBody(input: EventNoteInput, providerNote: string): string {
   if (input.officialFeed && input.officialId) lines.push(`- Elegido de la fuente oficial (${OFFICIAL_LABEL[input.officialFeed]}): \`${input.officialId}\``);
   if (input.preferredTargets && input.preferredTargets.length > 0) lines.push(`- Dónde queremos sentarnos (en orden): ${input.preferredTargets.join(' → ')}`);
   if (input.perAccountQty) lines.push(`- Entradas por cuenta: ${input.perAccountQty} (todas las cuentas a la vez)`);
+  if (input.saleZones && input.saleZones.length > 0) {
+    lines.push('- Cómo está estructurada la venta (zona: secciones · precio → zona de nuestro plano):');
+    for (const z of input.saleZones) lines.push(`  - ${z}`);
+  }
   if (input.planImage) lines.push(`- Plano oficial: ${input.planImage}`);
   if (input.limitsSource) lines.push(`- Condiciones / límites: ${input.limitsSource}`);
   if (input.watchDaysBefore) {
@@ -166,6 +171,7 @@ export async function createEventNote(input: EventNoteInput, eventId: string, ct
     ...eventProps(input, ctx),
     preferredTargets: input.preferredTargets ?? [],
     perAccountQty: input.perAccountQty ?? null,
+    saleZones: input.saleZones ?? [],
     planImage: input.planImage ?? null,
     planPoints: (input.planPoints ?? []).map(formatPlanPoint),
     closedSections: [],
@@ -283,4 +289,104 @@ export async function createVenueNotes(input: VenueQuickInput, zones: LayoutZone
     await writeFile(abs, f.text, { encoding: 'utf8', flag: 'wx' });
   }
   return { folder: folderRel, files: files.length };
+}
+
+// ---------------------------------------------------------------------------
+// Recinto: zonas de la venta que no estaban y nombres de la web como alias
+// ---------------------------------------------------------------------------
+
+/** Nota de zona de un recinto (dentro de su carpeta «Zonas») cuyo nombre es `zone`, o null. */
+async function findZoneNote(folderAbs: string, zone: string): Promise<string | null> {
+  const dir = path.join(folderAbs, 'Zonas');
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return null;
+  }
+  const key = zone.trim().toLowerCase();
+  for (const n of names) {
+    if (!n.endsWith('.md')) continue;
+    const abs = path.join(dir, n);
+    if (path.basename(n, '.md').toLowerCase() === key) return abs;
+    try {
+      const { yaml } = splitFrontmatter(await readFile(abs, 'utf8'));
+      const doc = yaml ? parseDocument(yaml, { schema: 'core' }) : null;
+      const name = doc && isMap(doc.contents) ? doc.get('name') : null;
+      if (typeof name === 'string' && name.trim().toLowerCase() === key) return abs;
+    } catch {
+      // nota ilegible: se ignora
+    }
+  }
+  return null;
+}
+
+/**
+ * Añade a un recinto existente las zonas de la venta que no tenía (con sus
+ * secciones) y, a las que ya tenía, el nombre que usa la web como alias. No
+ * toca nada más de las notas. Devuelve cuántas zonas y alias se han añadido.
+ */
+export async function addVenueSaleZones(
+  vaultDir: string,
+  venueFile: string,
+  input: { zones: LayoutZone[]; aliases: Array<{ zone: string; alias: string }>; existingSections: string[] },
+  ctx: VenueWriteContext,
+): Promise<{ zones: number; aliases: number }> {
+  const venueAbs = path.resolve(vaultDir, venueFile);
+  const root = path.resolve(vaultDir);
+  if (!venueAbs.startsWith(root + path.sep)) throw new VaultWriteError('Ruta de recinto no válida', 'BAD_REQUEST');
+  const folderAbs = path.dirname(venueAbs);
+  const venueBase = path.basename(venueFile, '.md');
+  const today = todayIn(ctx.timeZone, ctx.now);
+  const takenSections = new Set(input.existingSections.map((x) => safeFileName(x).toLowerCase()));
+  let zones = 0;
+  for (const z of input.zones) {
+    if (await findZoneNote(folderAbs, z.name)) continue;
+    const zBase = safeFileName(z.name);
+    const zAbs = path.join(folderAbs, 'Zonas', `${zBase}.md`);
+    if (await exists(zAbs)) continue;
+    await mkdir(path.dirname(zAbs), { recursive: true });
+    await writeFile(
+      zAbs,
+      frontmatterText({ type: 'zone', venue: link(venueBase), name: z.name, aliases: [], source: 'Web de venta (leído por Claude)', verifiedAt: today, verifiedBy: ctx.actor, tags: ['zona'] }) +
+        `\n# ${z.name}\n\nZona añadida desde la estructura de la venta de un evento. Revísala con el plano oficial.\n`,
+      { encoding: 'utf8', flag: 'wx' },
+    );
+    for (const s of z.sections) {
+      // Una sección con el mismo nombre que otra del recinto lleva delante su zona.
+      let name = s.name;
+      if (takenSections.has(safeFileName(name).toLowerCase())) name = `${z.name} · ${s.name}`;
+      const sBase = safeFileName(name);
+      if (takenSections.has(sBase.toLowerCase())) continue;
+      takenSections.add(sBase.toLowerCase());
+      const sAbs = path.join(folderAbs, 'Secciones', `${sBase}.md`);
+      if (await exists(sAbs)) continue;
+      await mkdir(path.dirname(sAbs), { recursive: true });
+      await writeFile(
+        sAbs,
+        frontmatterText({ type: 'section', venue: link(venueBase), zone: link(zBase), name, kind: s.standing ? 'STANDING' : 'SEATED', aliases: [], tags: ['seccion'] }) +
+          `\n# ${name}\n\nZona [[${zBase}]] de [[${venueBase}]]. Añadida desde la estructura de la venta.\n`,
+        { encoding: 'utf8', flag: 'wx' },
+      );
+    }
+    zones++;
+  }
+  let aliases = 0;
+  for (const a of input.aliases) {
+    const zAbs = await findZoneNote(folderAbs, a.zone);
+    if (!zAbs) continue;
+    const text = await readFile(zAbs, 'utf8');
+    const { yaml, body } = splitFrontmatter(text);
+    if (yaml === null) continue;
+    const doc = parseDocument(yaml, { schema: 'core' });
+    if (doc.errors.length > 0 || !isMap(doc.contents)) continue;
+    const current = doc.get('aliases');
+    const list: string[] = Array.isArray(current) ? current.map(String) : current && typeof current === 'object' && 'toJSON' in current ? ((current as { toJSON(): unknown }).toJSON() as unknown[]).map(String) : [];
+    if ([a.zone, ...list].some((x) => x.trim().toLowerCase() === a.alias.trim().toLowerCase())) continue;
+    doc.set('aliases', [...list, a.alias]);
+    const eol = text.includes('\r\n') ? '\r\n' : '\n';
+    await writeFile(zAbs, (`---\n${doc.toString({ lineWidth: 0 }).trimEnd()}\n---\n` + body).replace(/\r?\n/g, eol), 'utf8');
+    aliases++;
+  }
+  return { zones, aliases };
 }

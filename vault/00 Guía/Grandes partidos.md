@@ -17,7 +17,7 @@ En el menú, **⭐ Grandes partidos**: los partidos más importantes de los pró
 **🎟 Preparar** abre *Nuevo evento* ya relleno:
 
 1. **Web de venta**: la del Real Madrid si juega en casa; si no, «otra web oficial» (la del club local, la UEFA o la RFEF).
-2. Claude lee el partido: fecha y hora, fases de venta, **cuántas entradas se pueden comprar por persona** (con la frase de las condiciones), precios, estadio y su plano oficial.
+2. Claude analiza el partido: fecha y hora, fases de venta (cada una con su límite), **cuántas entradas se pueden comprar por persona** (con la frase de las condiciones), precios, estadio, **cómo está estructurada la venta** (zonas y precios, y a qué zona del plano corresponde cada una), el **enlace oficial de compra** y su plano oficial.
 3. **Vigilancia desde 2 semanas antes de la venta**, siempre (no se puede bajar): recordatorios por Telegram al empezar, el día antes, 1 hora antes y al abrir.
 4. **1 entrada por cuenta**: al abrir la venta, **todas las cuentas van a la vez**, cada una a por la suya. Así, aunque alguna no lo consiga, las demás sí.
 5. **Dónde queréis las entradas**: toca en el plano hasta 3 sitios (🟢 1ª, 🟠 2ª, 🔵 3ª preferencia).

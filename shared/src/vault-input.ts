@@ -62,6 +62,8 @@ export const EventNoteInputSchema = z
     watchDaysBefore: z.number().int().min(0).max(60).nullable().optional(),
     /** Dónde queréis sentaros (zonas o secciones del recinto, en orden de preferencia). */
     preferredTargets: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+    /** Cómo está estructurada la venta (líneas «Zona: secciones · precio → zona nuestra»), de Claude. */
+    saleZones: z.array(z.string().trim().min(1).max(400)).max(60).optional(),
     /** Entradas por cuenta en la compra (1 en los grandes partidos; null = hasta el límite oficial). */
     perAccountQty: z.number().int().min(1).max(20).nullable().optional(),
     /** Imagen del plano oficial (tal cual se ve al comprar) y dónde está cada zona en ella. */
@@ -260,3 +262,20 @@ export function parsePlanPoint(raw: string): { zone: string; x: number; y: numbe
   if (!(x >= 0 && x <= 100 && y >= 0 && y <= 100)) return null;
   return { zone: (m[1] ?? '').trim(), x, y };
 }
+
+/** Estructura de la venta de un evento para completar su recinto (zonas que faltan y alias). */
+export const SaleZonesSchema = z.object({
+  zones: z
+    .array(
+      z.object({
+        zone: z.string().trim().min(1).max(120),
+        sections: z.array(z.string().trim().min(1).max(120)).max(60),
+        standing: z.boolean(),
+        price: z.string().trim().max(60).nullable().optional(),
+        venueZone: z.string().trim().max(120).nullable(),
+      }),
+    )
+    .min(1)
+    .max(60),
+});
+export type SaleZonesInput = z.infer<typeof SaleZonesSchema>;

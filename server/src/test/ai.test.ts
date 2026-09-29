@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Hono } from 'hono';
-import { aiEventDraft, aiLayoutText, type AiEventDetails, type AiEventsResult, type AiKeyResult, type AiStatus } from '@to/shared';
+import { aiEventDraft, aiLayoutText, parseSaleZone, type AiEventDetails, type AiEventsResult, type AiKeyResult, type AiStatus } from '@to/shared';
 import { createApp, type App } from '../app';
 import { EventAssistant } from '../ai/assistant';
 import { AiError, ClaudeControl } from '../ai/claude';
@@ -88,21 +88,26 @@ const BARCA = {
   sourceUrl: 'https://www.realmadrid.com/es-ES/entradas',
 };
 
-function detailsInput(p: { name?: string; limitSource: string; planImage: string | null }): Record<string, unknown> {
+function detailsInput(p: { name?: string; limitSource: string; planImage: string | null; url?: string }): Record<string, unknown> {
   return {
     name: p.name ?? BARCA.name,
     date: '2026-10-25',
     time: '16:15',
     venue: 'Estadio Santiago Bernabéu',
     city: 'Madrid',
-    url: BARCA.url,
+    url: p.url ?? BARCA.url,
+    seller: 'Real Madrid C. F.',
     sales: [
-      { name: 'Venta general', opensAt: '2026-10-22T10:00' },
-      { name: 'Venta socios', opensAt: '2026-10-20T10:00' },
+      { name: 'Venta general', opensAt: '2026-10-22T10:00', limit: 4 },
+      { name: 'Venta socios', opensAt: '2026-10-20T10:00', limit: 2 },
     ],
     limit: { perPerson: 2, scope: 'SOCIO', quote: 'Máximo 2 entradas por socio', sourceUrl: p.limitSource },
     price: { min: 60, max: 250, currency: 'EUR' },
-    layout: null,
+    layout: [
+      { zone: 'Lateral Este Grada Baja', sections: ['Sector 101', 'Sector 102'], standing: false, price: '120–250 €', venueZone: 'Lateral Este' },
+      { zone: 'Fondo Sur Grada Alta', sections: [], standing: false, price: '60–90 €', venueZone: 'fondo sur' },
+      { zone: 'Zona VIP Castellana', sections: ['Palco 1'], standing: false, price: null, venueZone: 'Inventada' },
+    ],
     planImage: p.planImage,
     status: 'UPCOMING',
     notes: 'Las entradas de socio son personales.',
@@ -252,8 +257,25 @@ describe('Claude (API de Anthropic)', () => {
     const d = await ai.eventDetails({ providerId: 'real-madrid', name: BARCA.name, startsAtLocal: '2026-10-25T16:15', venue: BARCA.venue, city: 'Madrid', url: BARCA.url });
     const req = fake.messageRequests().at(-1);
     assert.deepEqual(req?.body.output_config, { effort: 'high' });
-    assert.match(JSON.stringify(req?.body.messages), /ya lo tenemos: layout = null/, 'el recinto ya está en la sala: no se pide');
+    // La estructura se analiza siempre, también con el recinto ya en la sala, y con nuestras zonas para hacerlas corresponder.
+    assert.match(JSON.stringify(req?.body.messages), /Cómo está estructurada la venta de ESTE evento/);
+    assert.match(JSON.stringify(req?.body.messages), /Nuestro plano de este recinto tiene estas zonas: Fondo Norte, Fondo Sur, Lateral Este, Lateral Oeste/);
+    const tool = (req?.body.tools as Array<{ name: string; input_schema: { properties: { layout: { anyOf: Array<{ items?: { properties: { venueZone: { anyOf: Array<{ enum?: string[] }> } } } }> } } } }>).find(
+      (t) => t.name === 'entregar_evento',
+    );
+    assert.deepEqual(tool?.input_schema.properties.layout.anyOf[0]?.items?.properties.venueZone.anyOf[0]?.enum, ['Fondo Norte', 'Fondo Sur', 'Lateral Este', 'Lateral Oeste']);
     assert.match(JSON.stringify(req?.body.messages), /condiciones de venta de ESTE evento/);
+    assert.match(JSON.stringify(req?.body.messages), /Nunca una web de reventa/);
+    assert.equal(d.seller, 'Real Madrid C. F.');
+    assert.deepEqual(
+      d.layout?.map((z) => [z.zone, z.venueZone, z.price]),
+      [
+        ['Lateral Este Grada Baja', 'Lateral Este', '120–250 €'],
+        ['Fondo Sur Grada Alta', 'Fondo Sur', '60–90 €'],
+        ['Zona VIP Castellana', null, null],
+      ],
+      'la zona de nuestro plano se normaliza y una inventada no vale',
+    );
     assert.equal(d.limit.perPerson, 2);
     assert.equal(d.limit.official, true);
     assert.equal(d.limit.semantics, 'PER_HOLDER');
@@ -267,7 +289,15 @@ describe('Claude (API de Anthropic)', () => {
     const draft = aiEventDraft(d, { today: '2026-10-01', nowLocal: '2026-10-01T10:00' });
     assert.equal(draft.onSaleAt, '2026-10-22T10:00', 'la venta general próxima es la apertura por defecto');
     assert.equal(draft.limit?.verified, true);
-    assert.equal(draft.limit?.perAccount, 2);
+    assert.equal(draft.limit?.perAccount, 4, 'el límite de la fase elegida (venta general: 4)');
+    const socios = aiEventDraft(d, { saleName: 'Venta socios', today: '2026-10-01', nowLocal: '2026-10-01T10:00' });
+    assert.equal(socios.limit?.perAccount, 2, 'en la fase de socios, 2');
+    assert.deepEqual(draft.saleZones, [
+      'Lateral Este Grada Baja: Sector 101, Sector 102 · 120–250 € → Lateral Este',
+      'Fondo Sur Grada Alta · 60–90 € → Fondo Sur',
+      'Zona VIP Castellana: Palco 1',
+    ]);
+    assert.deepEqual(parseSaleZone(draft.saleZones[0] ?? ''), { zone: 'Lateral Este Grada Baja', sections: ['Sector 101', 'Sector 102'], standing: false, price: '120–250 €', venueZone: 'Lateral Este' });
     assert.match(draft.limit?.source ?? '', /Condiciones oficiales realmadrid\.com/);
     assert.match(draft.notes, /Fases de venta: Venta socios/);
 
@@ -278,6 +308,12 @@ describe('Claude (API de Anthropic)', () => {
     const nd = aiEventDraft(n, { today: '2026-10-01', nowLocal: '2026-10-01T10:00' });
     assert.equal(nd.limit?.verified, false);
     assert.match(nd.limit?.notes ?? '', /compruébalo/);
+
+    // Un enlace de reventa nunca se usa como enlace oficial de compra.
+    fake.script.push(deliver('entregar_evento', detailsInput({ name: 'Real Madrid - Inter', limitSource: 'https://www.realmadrid.com/x', planImage: null, url: 'https://www.viagogo.es/Entradas-Deportes/rm-inter' })));
+    const v = await ai.eventDetails({ providerId: 'real-madrid', name: 'Real Madrid - Inter', venue: 'Bernabéu', url: 'https://www.realmadrid.com/es-ES/entradas/rm-inter' });
+    assert.equal(v.url, 'https://www.realmadrid.com/es-ES/entradas/rm-inter', 'se queda el enlace oficial que ya había');
+    assert.match(v.urlWarning ?? '', /reventa/);
   });
 
   it('sitúa las zonas sobre la imagen del plano oficial', async () => {
@@ -349,13 +385,15 @@ describe('Claude (API de Anthropic)', () => {
       venue: 'Palacio Vistalegre',
       city: 'Madrid',
       url: 'https://www.vistalegre.example/concierto',
-      sales: [{ name: 'Venta general', opensAtLocal: '2026-10-05T10:00' }],
+      seller: 'Auditorio de prueba',
+      urlWarning: null,
+      sales: [{ name: 'Venta general', opensAtLocal: '2026-10-05T10:00', limit: null }],
       limit: { perPerson: 6, semantics: 'PER_HOLDER', quote: 'Máximo 6 entradas por pedido', sourceUrl: 'https://www.noticias.example/x', official: false },
       price: { min: 35, max: 90, currency: 'EUR' },
       layout: [
-        { zone: 'Pista', sections: [], standing: true },
-        { zone: 'Grada Baja', sections: ['101', '102', '101'], standing: false },
-        { zone: 'Grada Alta', sections: ['201', '202'], standing: false },
+        { zone: 'Pista', sections: [], standing: true, price: '45 €', venueZone: null },
+        { zone: 'Grada Baja', sections: ['101', '102', '101'], standing: false, price: null, venueZone: null },
+        { zone: 'Grada Alta', sections: ['201', '202'], standing: false, price: '35 €', venueZone: null },
       ],
       planImageUrl: 'https://www.vistalegre.example/plano.png',
       status: 'UPCOMING',
@@ -432,6 +470,19 @@ describe('Claude (API de Anthropic)', () => {
       await until(() => tg.messagesTo('700').some((t) => /Evento creado/.test(t)), 'evento creado');
       await until(() => tg.sent.some((s) => s.method === 'sendPhoto' && s.body.photo === PLAN), 'imagen del plano oficial');
       await until(() => keyboardFor(tg, /Dónde queréis las entradas/).length > 0, 'elegir dónde');
+      // La web vende una zona que el plano no tiene: se añade con un toque (y los nombres de la web, como alias).
+      assert.ok(tg.messagesTo('700').some((t) => /La web vende también <b>Zona VIP Castellana<\/b>/.test(t)));
+      const add = keyboardFor(tg, /Dónde queréis las entradas/).find((b) => /Añadir al recinto \(1 zona de la web\)/.test(b.text));
+      assert.ok(add?.callback_data, 'botón para añadir la zona que falta');
+      assert.ok(!keyboardFor(tg, /Dónde queréis las entradas/).some((b) => b.text === 'Zona VIP Castellana'));
+      tap('a1', add.callback_data);
+      await until(() => keyboardFor(tg, /Dónde queréis las entradas/).some((b) => b.text === 'Zona VIP Castellana'), 'zona añadida al plano');
+      assert.ok(tg.sent.some((s) => s.method === 'answerCallbackQuery' && s.body.callback_query_id === 'a1' && /Añadida 1 zona/.test(String(s.body.text))));
+      assert.ok(!keyboardFor(tg, /Dónde queréis las entradas/).some((b) => /Añadir al recinto/.test(b.text)), 'ya no falta ninguna');
+      const bernabeu = [...app.runtime.store.artifacts.values()].find((x) => x.venueId === 'estadio-santiago-bernabeu' && x.eventId === null);
+      assert.deepEqual(bernabeu?.zones.find((z) => z.name === 'Lateral Este')?.aliases, ['Lateral Este Grada Baja']);
+      assert.deepEqual(bernabeu?.zones.find((z) => z.name === 'Fondo Sur')?.aliases, ['Fondo Sur Grada Alta']);
+      assert.equal(bernabeu?.sections.find((x) => x.name === 'Palco 1')?.zoneId, bernabeu?.zones.find((z) => z.name === 'Zona VIP Castellana')?.id);
       const zones = keyboardFor(tg, /Dónde queréis las entradas/);
       const zone = (name: string) => zones.find((b) => b.text === name)?.callback_data;
       tap('z1', zone('Fondo Sur'));

@@ -10,8 +10,20 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import type { Account, Cart, EventNoteInput, EventNoteResult, HumanTask, OperationConfig, OperationDetail, SystemStatus, VenueQuickResult } from '@to/shared';
-import { parseVenueLayout } from '@to/shared';
+import type {
+  Account,
+  AiSaleZone,
+  Cart,
+  EventNoteInput,
+  EventNoteResult,
+  HumanTask,
+  OperationConfig,
+  OperationDetail,
+  SystemStatus,
+  VaultCompileReport,
+  VenueQuickResult,
+} from '@to/shared';
+import { aiSaleZonesText, parseVenueLayout } from '@to/shared';
 import type { Hono } from 'hono';
 import { createApp, type App } from '../app';
 import { createHttpApp } from '../http/app';
@@ -215,6 +227,62 @@ describe('compra real coordinada (API + asistencia manual)', () => {
     });
     assert.equal(ev.status, 201, JSON.stringify(ev.json));
     assert.equal(ev.json.event?.venueId, 'recinto-de-prueba-madrid');
+  });
+
+  it('guarda la estructura de la venta en el evento y completa el recinto (zonas nuevas y alias, sin duplicar)', async () => {
+    const venueId = 'recinto-de-prueba-madrid';
+    // Como la da Claude: una zona que ya está, una que la web llama distinto (→ alias) y dos que faltan.
+    const zones: AiSaleZone[] = [
+      { zone: 'Grada Baja', sections: ['101', '102'], standing: false, price: '60–90 €', venueZone: 'Grada Baja' },
+      { zone: 'Tribuna Alta', sections: ['201', '202'], standing: false, price: '40 €', venueZone: 'Grada Alta' },
+      { zone: 'Palcos VIP', sections: ['P1', 'P2'], standing: false, price: null, venueZone: null },
+      { zone: 'Front Stage', sections: [], standing: true, price: '120 €', venueZone: null },
+    ];
+    const ev = await call<EventNoteResult>('POST', '/api/vault/events', {
+      ...rmEvent,
+      name: 'Concierto con estructura',
+      venueId,
+      providerId: 'ticketmaster',
+      url: 'https://www.ticketmaster.es/event/estructura',
+      saleZones: aiSaleZonesText(zones),
+    });
+    assert.equal(ev.status, 201, JSON.stringify(ev.json));
+    assert.deepEqual(ev.json.event?.saleZones, zones, 'la estructura va y vuelve igual por la nota del evento');
+    const text = await readFile(path.join(dir, ev.json.file), 'utf8');
+    assert.match(text, /saleZones:\n\s+- "?Grada Baja: 101, 102 · 60–90 € → Grada Baja"?/);
+
+    const artifact = () => [...app.runtime.store.artifacts.values()].find((a) => a.venueId === venueId && a.eventId === null);
+    const before = artifact();
+    assert.deepEqual(before?.zones.map((z) => z.name).sort(), ['Grada Alta', 'Grada Baja', 'Pista']);
+
+    type Added = { zones: number; aliases: number; report: VaultCompileReport };
+    const add = await call<Added>('POST', `/api/vault/venues/${venueId}/sale-zones`, { zones });
+    assert.equal(add.status, 200, JSON.stringify(add.json));
+    assert.equal(add.json.zones, 2, 'Palcos VIP y Front Stage');
+    assert.equal(add.json.aliases, 1, 'Tribuna Alta → Grada Alta');
+    assert.equal(add.json.report.ok, true);
+    const after = artifact();
+    assert.deepEqual(after?.zones.map((z) => z.name).sort(), ['Front Stage', 'Grada Alta', 'Grada Baja', 'Palcos VIP', 'Pista']);
+    assert.deepEqual(after?.zones.find((z) => z.name === 'Grada Alta')?.aliases, ['Tribuna Alta']);
+    const zoneOf = (section: string) => after?.zones.find((z) => z.id === after.sections.find((x) => x.name === section)?.zoneId)?.name;
+    assert.equal(zoneOf('P1'), 'Palcos VIP');
+    assert.equal(zoneOf('P2'), 'Palcos VIP');
+    assert.equal(after?.sections.find((x) => x.name === 'Front Stage')?.kind, 'STANDING');
+    assert.deepEqual(after?.warnings.filter((w) => /ambiguo/i.test(w)), [], 'ningún alias apunta a dos zonas');
+
+    // Repetirlo no duplica nada, y una zona que ya es alias de otra (aunque Claude no la asocie) tampoco se crea.
+    const again = await call<Added>('POST', `/api/vault/venues/${venueId}/sale-zones`, { zones });
+    assert.deepEqual([again.json.zones, again.json.aliases], [0, 0]);
+    const byAlias = await call<Added>('POST', `/api/vault/venues/${venueId}/sale-zones`, {
+      zones: [{ zone: 'tribuna  alta', sections: [], standing: false, price: null, venueZone: null }],
+    });
+    assert.deepEqual([byAlias.json.zones, byAlias.json.aliases], [0, 0]);
+    assert.equal(artifact()?.zones.length, 5);
+
+    const missing = await call('POST', '/api/vault/venues/no-existe/sale-zones', { zones });
+    assert.equal(missing.status, 404);
+    const empty = await call('POST', `/api/vault/venues/${venueId}/sale-zones`, { zones: [] });
+    assert.equal(empty.status, 400);
   });
 
   it('coordina la compra: sesión, tarea con enlace oficial, carrito y pago humano', async () => {

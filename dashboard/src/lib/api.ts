@@ -34,6 +34,7 @@ import type {
   OperationConfig,
   OperationDetail,
   ReplayReport,
+  SaleZonesInput,
   TelegramConfigResult,
   TelegramTestResult,
   VaultCompileReport,
@@ -206,4 +207,7 @@ export const Api = {
   /** Dónde queréis las entradas (zonas en orden de preferencia). */
   setEventTargets: (eventId: string, targets: string[]) =>
     api<EventNoteResult>(`/api/vault/events/${encodeURIComponent(eventId)}/targets`, { method: 'PUT', body: { targets } }),
+  /** Añade al recinto las zonas de la venta que no tenía y, a las que sí, el nombre de la web como alias. */
+  addSaleZones: (venueId: string, zones: SaleZonesInput['zones']) =>
+    post<{ zones: number; aliases: number; report: VaultCompileReport }>(`/api/vault/venues/${encodeURIComponent(venueId)}/sale-zones`, { zones }),
 };

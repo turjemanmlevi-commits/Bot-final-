@@ -123,6 +123,7 @@ export class EventAssistant {
       preferredTargets: [],
       planImage: d.planImageUrl,
       planPoints: [],
+      saleZones: draft.saleZones,
     };
     const parsed = EventNoteInputSchema.safeParse(input);
     if (!parsed.success) {
@@ -186,5 +187,22 @@ export class EventAssistant {
   /** Guarda dónde queréis sentaros (zonas en orden). */
   async setSeats(eventId: string, targets: string[], actor: string): Promise<void> {
     await this.authoring.setPreferredTargets(eventId, targets, actor);
+  }
+
+  /** Zonas que vende la web y que el plano del recinto no tiene (por su nombre en la web). */
+  missingSaleZones(venueId: string, layout: AiEventDetails['layout']): string[] {
+    if (!layout || layout.length === 0) return [];
+    try {
+      return this.authoring.matchSaleZones(venueId, layout).missing.map((z) => z.zone);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Añade al recinto las zonas de la venta que le faltan (y los nombres de la web como alias). */
+  async addSaleZones(venueId: string, layout: AiEventDetails['layout'], actor: string): Promise<{ zones: number; aliases: number }> {
+    if (!layout || layout.length === 0) return { zones: 0, aliases: 0 };
+    const r = await this.authoring.addSaleZones(venueId, layout, actor);
+    return { zones: r.zones, aliases: r.aliases };
   }
 }

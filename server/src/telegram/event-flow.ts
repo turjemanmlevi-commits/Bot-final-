@@ -6,6 +6,7 @@
  *   3. Claude lee el evento         → fechas, apertura, límite, precios, recinto
  *   4. ✅ Crear (y qué venta abre)   → evento en la sala + recinto + vigilancia
  *   5. ¿Dónde queréis sentaros?     → zonas del recinto en orden → «Listo»
+ *      (si la web vende zonas que el plano no tiene: «➕ Añadir al recinto»)
  *
  * Solo el chat principal puede crear eventos. Las consultas a Claude tardan
  * 1–2 minutos: se hacen en segundo plano para que el bot siga respondiendo
@@ -57,6 +58,8 @@ interface Session {
   top: boolean;
   /** Web de venta de cada evento de la lista (en los grandes partidos cambia de uno a otro). */
   providerIds: Array<string | null>;
+  /** Zonas que vende la web y que el plano del recinto aún no tiene. */
+  missing: string[];
 }
 
 const PAGE = 8;
@@ -279,6 +282,25 @@ export class TelegramEventFlow {
         if (messageId !== null) await this.io.edit(chatId, messageId, this.seatsText(s), this.seatsKeyboard(s));
         return;
       }
+      case 'a': {
+        const created = s.created;
+        const layout = s.details?.layout ?? null;
+        if (!created || !layout) return this.io.answer(callbackId, 'Crea antes el evento.');
+        if (s.busy) return this.io.answer(callbackId, 'Un momento…');
+        s.busy = true;
+        try {
+          const r = await a.addSaleZones(created.venue.id, layout, actor);
+          created.venue.zones = a.zones(created.venue.id);
+          s.missing = a.missingSaleZones(created.venue.id, layout);
+          await this.io.answer(callbackId, r.zones > 0 ? `Añadida${r.zones === 1 ? '' : 's'} ${r.zones} zona${r.zones === 1 ? '' : 's'} ✅` : 'El recinto ya las tenía');
+          if (messageId !== null) await this.io.edit(chatId, messageId, this.seatsText(s), this.seatsKeyboard(s));
+        } catch (err) {
+          await this.io.answer(callbackId, cut((err as Error).message, 190));
+        } finally {
+          s.busy = false;
+        }
+        return;
+      }
       case 'k': {
         const created = s.created;
         if (!created) return this.io.answer(callbackId, 'Crea antes el evento.');
@@ -332,6 +354,7 @@ export class TelegramEventFlow {
       at: now,
       top: false,
       providerIds: [],
+      missing: [],
     };
     this.sessions.set(id, s);
     return s;
@@ -414,9 +437,11 @@ export class TelegramEventFlow {
       `🏟 ${venue}${d.vaultVenueId ? ' — ya está en la sala' : d.layout ? ` — nuevo: se crea con sus zonas (${d.layout.length})` : ' — nuevo: se crea con una estructura orientativa'}`,
     );
     if (d.planImageUrl) lines.push('🗺 Plano oficial encontrado: lo verás al elegir dónde queréis las entradas.');
+    if (d.url) lines.push(`🔗 Compra oficial${d.seller ? ` (${esc(d.seller)})` : ''}: ${esc(d.url)}`);
+    if (d.urlWarning) lines.push(`⚠️ ${esc(d.urlWarning)}`);
     if (d.sales.length > 0) {
       lines.push('🕐 <b>Venta</b>:');
-      for (const x of d.sales) lines.push(`   • ${esc(x.name)}: ${fmtLocal(x.opensAtLocal)}`);
+      for (const x of d.sales) lines.push(`   • ${esc(x.name)}: ${fmtLocal(x.opensAtLocal)}${x.limit ? ` · máx. ${x.limit} por persona` : ''}`);
     } else {
       lines.push('🕐 Apertura de la venta: aún no anunciada (la vigilancia te lo recordará).');
     }
@@ -429,6 +454,17 @@ export class TelegramEventFlow {
     }
     if (d.price && (d.price.min !== null || d.price.max !== null)) {
       lines.push(`💶 ${[d.price.min, d.price.max].filter((x) => x !== null).join(' – ')} ${esc(d.price.currency)}`);
+    }
+    if (d.layout && d.layout.length > 0) {
+      lines.push('🏟 <b>Cómo está estructurada la venta</b>:');
+      for (const z of d.layout.slice(0, 8)) {
+        lines.push(
+          `   • ${esc(z.zone)}${z.standing ? ' (de pie)' : ''}${z.sections.length > 0 ? `: ${esc(cut(z.sections.join(', '), 60))}` : ''}${z.price ? ` · ${esc(z.price)}` : ''}${
+            z.venueZone && z.venueZone !== z.zone ? ` → ${esc(z.venueZone)}` : ''
+          }`,
+        );
+      }
+      if (d.layout.length > 8) lines.push(`   … y ${d.layout.length - 8} zonas más (en el dashboard).`);
     }
     if (d.status) lines.push(`📣 ${AI_STATUS_LABEL[d.status]}`);
     if (d.notes) lines.push(`ℹ️ ${esc(cut(d.notes, 400))}`);
@@ -450,7 +486,9 @@ export class TelegramEventFlow {
     if (!c.limitsVerified) lines.push('⚠️ <b>Límite sin verificar</b>: confírmalo en el dashboard (Eventos → editar) antes de preparar la compra.');
     if (c.warnings.length > 0) lines.push(`ℹ️ ${esc(cut(c.warnings.join(' · '), 300))}`);
     await this.io.send(s.chatId, lines.join('\n'));
-    if (c.venue.zones.length === 0) return;
+    // La web vende zonas que el plano del recinto no tiene: se pueden añadir con un toque.
+    s.missing = c.venue.created ? [] : (this.assistant()?.missingSaleZones(c.venue.id, s.details?.layout ?? null) ?? []);
+    if (c.venue.zones.length === 0 && s.missing.length === 0) return;
     if (c.planImage) await this.io.photo(s.chatId, c.planImage, `🗺 Plano oficial de ${c.venue.name} (tal cual se ve al comprar)`);
     await this.io.send(s.chatId, this.seatsText(s), this.seatsKeyboard(s));
   }
@@ -460,6 +498,12 @@ export class TelegramEventFlow {
       '💺 <b>¿Dónde queréis las entradas?</b>',
       `Toca hasta ${MAX_PREFERENCES} zonas en orden: ${PREFERENCE_EMOJI.map((e, i) => `${e} ${i + 1}ª`).join(', ')} preferencia. Otra vez para quitarla. Después, «Listo».`,
     ];
+    if (s.missing.length > 0) {
+      lines.push(
+        '',
+        `➕ La web vende también <b>${esc(cut(s.missing.join(', '), 200))}</b>, que vuestro plano no tiene: toca «Añadir al recinto» para poder elegir${s.missing.length === 1 ? 'la' : 'las'}.`,
+      );
+    }
     if (s.seats.length > 0) lines.push('', ...s.seats.map((z, i) => `${PREFERENCE_EMOJI[i] ?? ''} ${i + 1}ª ${esc(z)}`));
     return lines.join('\n');
   }
@@ -474,6 +518,9 @@ export class TelegramEventFlow {
           return { text: cut(`${rank >= 0 ? `${PREFERENCE_EMOJI[rank] ?? ''} ${rank + 1}ª ` : ''}${z}`, 32), callback_data: `ev:${s.id}:z:${i + j}` };
         }),
       );
+    }
+    if (s.missing.length > 0) {
+      rows.push([{ text: cut(`➕ Añadir al recinto (${s.missing.length} zona${s.missing.length === 1 ? '' : 's'} de la web)`, 60), callback_data: `ev:${s.id}:a` }]);
     }
     rows.push([{ text: s.seats.length > 0 ? '✅ Listo' : 'Saltar (cualquier zona)', callback_data: `ev:${s.id}:k` }]);
     return rows;

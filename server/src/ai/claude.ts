@@ -107,93 +107,112 @@ const EVENTS_TOOL: Anthropic.Beta.BetaTool = {
   },
 };
 
-const DETAILS_TOOL: Anthropic.Beta.BetaTool = {
-  name: 'entregar_evento',
-  description: 'Entrega los datos del evento para preparar la compra. Llámala una sola vez, al terminar.',
-  strict: true,
-  input_schema: {
-    type: 'object',
-    additionalProperties: false,
-    required: ['name', 'date', 'time', 'venue', 'city', 'url', 'sales', 'limit', 'price', 'layout', 'planImage', 'status', 'notes', 'sources'],
-    properties: {
-      name: { type: 'string', description: 'Nombre exacto del evento en la web de venta' },
-      date: nullable('AAAA-MM-DD'),
-      time: nullable('HH:MM hora de España (null si no está publicada)'),
-      venue: nullable('Recinto'),
-      city: nullable('Ciudad'),
-      url: nullable('Página oficial de venta del evento'),
-      sales: {
-        type: 'array',
-        description: 'Fases de venta (socios, preventa, venta general…) con su apertura',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['name', 'opensAt'],
-          properties: {
-            name: { type: 'string', description: 'Nombre de la fase tal y como la llama la web' },
-            opensAt: { type: 'string', description: 'Apertura: AAAA-MM-DDTHH:MM hora de España' },
-          },
-        },
-      },
-      limit: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['perPerson', 'scope', 'quote', 'sourceUrl'],
-        properties: {
-          perPerson: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Máximo de entradas por persona/cuenta/pedido' },
-          scope: {
-            anyOf: [{ type: 'string', enum: ['CUENTA', 'PERSONA', 'PEDIDO', 'TARJETA', 'HOGAR', 'SOCIO'] }, { type: 'null' }],
-            description: 'Cómo cuenta el límite según las condiciones',
-          },
-          quote: nullable('Frase literal de las condiciones donde lo dice'),
-          sourceUrl: nullable('Enlace de esa frase'),
-        },
-      },
-      price: {
-        anyOf: [
-          {
+const DETAILS_TOOL_NAME = 'entregar_evento';
+
+/**
+ * Herramienta de los datos del evento. `zones`: las zonas de nuestro plano del
+ * recinto (si ya está en la sala), para que Claude diga a cuál corresponde cada
+ * zona de la venta.
+ */
+function detailsTool(zones: string[]): Anthropic.Beta.BetaTool {
+  return {
+    name: DETAILS_TOOL_NAME,
+    description: 'Entrega los datos del evento para preparar la compra. Llámala una sola vez, al terminar.',
+    strict: true,
+    input_schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['name', 'date', 'time', 'venue', 'city', 'url', 'seller', 'sales', 'limit', 'price', 'layout', 'planImage', 'status', 'notes', 'sources'],
+      properties: {
+        name: { type: 'string', description: 'Nombre exacto del evento en la web de venta' },
+        date: nullable('AAAA-MM-DD'),
+        time: nullable('HH:MM hora de España (null si no está publicada)'),
+        venue: nullable('Recinto'),
+        city: nullable('Ciudad'),
+        url: nullable('Enlace DIRECTO a la página de COMPRA de entradas de ESTE evento en la web de venta oficial (no una noticia, no una reventa)'),
+        seller: nullable('Quién vende oficialmente las entradas (club, ticketera, UEFA…)'),
+        sales: {
+          type: 'array',
+          description: 'Fases de venta (socios, preventa, venta general…) con su apertura y su límite por persona si lo dicen',
+          items: {
             type: 'object',
             additionalProperties: false,
-            required: ['min', 'max', 'currency'],
+            required: ['name', 'opensAt', 'limit'],
             properties: {
-              min: { anyOf: [{ type: 'number' }, { type: 'null' }] },
-              max: { anyOf: [{ type: 'number' }, { type: 'null' }] },
-              currency: { type: 'string' },
+              name: { type: 'string', description: 'Nombre de la fase tal y como la llama la web' },
+              opensAt: { type: 'string', description: 'Apertura: AAAA-MM-DDTHH:MM hora de España' },
+              limit: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Máximo de entradas por persona en ESTA fase (null si no lo dicen)' },
             },
           },
-          { type: 'null' },
-        ],
-      },
-      layout: {
-        anyOf: [
-          {
-            type: 'array',
-            description: 'Zonas del recinto (gradas, sectores) con sus secciones o niveles, con los nombres de la web de venta',
-            items: {
+        },
+        limit: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['perPerson', 'scope', 'quote', 'sourceUrl'],
+          properties: {
+            perPerson: { anyOf: [{ type: 'integer' }, { type: 'null' }], description: 'Máximo de entradas por persona/cuenta/pedido' },
+            scope: {
+              anyOf: [{ type: 'string', enum: ['CUENTA', 'PERSONA', 'PEDIDO', 'TARJETA', 'HOGAR', 'SOCIO'] }, { type: 'null' }],
+              description: 'Cómo cuenta el límite según las condiciones',
+            },
+            quote: nullable('Frase literal de las condiciones donde lo dice'),
+            sourceUrl: nullable('Enlace de esa frase'),
+          },
+        },
+        price: {
+          anyOf: [
+            {
               type: 'object',
               additionalProperties: false,
-              required: ['zone', 'sections', 'standing'],
+              required: ['min', 'max', 'currency'],
               properties: {
-                zone: { type: 'string' },
-                sections: { type: 'array', items: { type: 'string' } },
-                standing: { type: 'boolean', description: 'true si es de pie (pista, general)' },
+                min: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+                max: { anyOf: [{ type: 'number' }, { type: 'null' }] },
+                currency: { type: 'string' },
               },
             },
-          },
-          { type: 'null' },
-        ],
+            { type: 'null' },
+          ],
+        },
+        layout: {
+          anyOf: [
+            {
+              type: 'array',
+              description: 'Cómo está estructurada la venta de este evento: zonas (gradas, sectores, pista) con sus secciones o niveles y su precio, con los nombres de la web de venta',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['zone', 'sections', 'standing', 'price', 'venueZone'],
+                properties: {
+                  zone: { type: 'string' },
+                  sections: { type: 'array', items: { type: 'string' } },
+                  standing: { type: 'boolean', description: 'true si es de pie (pista, general)' },
+                  price: nullable('Precio de la zona tal y como lo enseña la web, p. ej. «60–150 €» (null si no se ve)'),
+                  venueZone:
+                    zones.length > 0
+                      ? { anyOf: [{ type: 'string', enum: zones }, { type: 'null' }], description: 'Zona de nuestro plano a la que corresponde (null si no está)' }
+                      : { type: 'null', description: 'Siempre null (el recinto no está en la sala)' },
+                },
+              },
+            },
+            { type: 'null' },
+          ],
+        },
+        planImage: nullable(
+          'Enlace DIRECTO (https) a la imagen del plano oficial de asientos tal cual se ve al comprar (png, jpg o webp; si no hay, svg), de la web de venta o del recinto. Null si no la encuentras.',
+        ),
+        status: {
+          anyOf: [{ type: 'string', enum: ['ON_SALE', 'UPCOMING', 'SOLD_OUT', 'CANCELLED', 'POSTPONED'] }, { type: 'null' }],
+        },
+        notes: { type: 'string', description: 'Avisos breves en español (o cadena vacía)' },
+        sources: { type: 'array', items: { type: 'string' }, description: 'Enlaces consultados que respaldan los datos' },
       },
-      planImage: nullable(
-        'Enlace DIRECTO (https) a la imagen del plano oficial de asientos tal cual se ve al comprar (png, jpg o webp; si no hay, svg), de la web de venta o del recinto. Null si no la encuentras.',
-      ),
-      status: {
-        anyOf: [{ type: 'string', enum: ['ON_SALE', 'UPCOMING', 'SOLD_OUT', 'CANCELLED', 'POSTPONED'] }, { type: 'null' }],
-      },
-      notes: { type: 'string', description: 'Avisos breves en español (o cadena vacía)' },
-      sources: { type: 'array', items: { type: 'string' }, description: 'Enlaces consultados que respaldan los datos' },
     },
-  },
-};
+  };
+}
+
+/** Webs de reventa: nunca valen como enlace oficial ni como fuente del límite. */
+const RESALE = /(^|\.)(viagogo|stubhub|ticketswap|seatpick|livefootballtickets|footballticketnet|ticombo|tixel|gigsberg|ticketbis|seatgeek|vividseats|tickpick|fanpass|sportsevents365|p1travel|stubhubinternational)\./i;
 
 const TOP_TOOL: Anthropic.Beta.BetaTool = {
   name: 'entregar_partidos',
@@ -473,42 +492,59 @@ export class ClaudeControl {
     const provider = this.provider(q.providerId);
     const venues = this.vaultVenues();
     const knownVenue = (q.venue ? bestVenueMatch(venues, q.venue, q.city ?? null) : null) ?? venueMentioned(venues, `${q.venue ?? ''} ${q.name}`);
+    // Zonas de nuestro plano del recinto: Claude dice a cuál corresponde cada zona de la venta.
+    const ourZones = knownVenue ? this.venueZones(knownVenue) : [];
     const key = JSON.stringify([q.providerId, q.name, q.startsAtLocal ?? '', q.venue ?? '', q.url ?? '']);
     const load = async (): Promise<AiEventDetails> => {
       const prompt = [
         `Web de venta: ${provider.name}${provider.url ? ` — ${provider.url}` : ''}`,
         `Evento: ${q.name}${q.startsAtLocal ? ` · ${q.startsAtLocal.replace('T', ' ')}` : ''}${q.venue ? ` · ${q.venue}` : ''}${q.city ? ` (${q.city})` : ''}`,
-        q.url ? `Página oficial del evento: ${q.url} (léela primero con web_fetch).` : 'Busca primero su página oficial de venta.',
-        'Averigua, con fuentes:',
-        '1. Nombre exacto, fecha y hora (España), recinto y ciudad, y el enlace de la página de venta.',
-        '2. Todas las fases de venta con su fecha y hora de apertura (socios, abonados, preventas, venta general…).',
-        '3. Cuántas entradas se pueden comprar por persona: busca en las condiciones de venta de ESTE evento (y si no, en las condiciones generales de la web de venta) el máximo por cuenta, persona, socio o pedido. Copia la frase literal y su enlace. Si no aparece en ningún sitio oficial, null (no lo supongas).',
-        '4. Precios (mínimo, máximo y moneda) y si está a la venta, agotado, cancelado o aplazado.',
-        knownVenue
-          ? '5. El recinto ya lo tenemos: layout = null.'
-          : '5. Cómo es el recinto por dentro para dibujar el plano: sus zonas (gradas, sectores, pista…) y dentro de cada una sus secciones o niveles, con los nombres que usa la web de venta. Si no lo encuentras en fuentes fiables, null.',
-        '6. La imagen del plano oficial de asientos tal cual se ve al comprar (enlace directo a la imagen, de la web de venta o del recinto). Si no hay, null.',
-        `Cuando acabes, llama a ${DETAILS_TOOL.name}.`,
+        q.url ? `Página del evento: ${q.url} (léela primero con web_fetch).` : 'Busca primero su página oficial de venta.',
+        'Analízalo todo, con fuentes, para preparar la compra:',
+        '1. Nombre exacto, fecha y hora (España), recinto y ciudad.',
+        '2. El enlace DIRECTO a la página de COMPRA de entradas de este evento en la web oficial que lo vende (club, ticketera oficial, UEFA, RFEF…) y quién la vende. Nunca una web de reventa (Viagogo, StubHub, Ticketswap…) ni una noticia.',
+        '3. Todas las fases de venta con su fecha y hora de apertura (socios, abonados, preventas, venta general…) y, si lo dicen, cuántas entradas por persona en cada fase.',
+        '4. Cuántas entradas se pueden comprar por persona: busca en las condiciones de venta de ESTE evento (y si no, en las condiciones generales de la web de venta) el máximo por cuenta, persona, socio o pedido. Copia la frase literal y su enlace. Si no aparece en ningún sitio oficial, null (no lo supongas).',
+        '5. Precios (mínimo, máximo y moneda) y si está a la venta, agotado, cancelado o aplazado.',
+        '6. Cómo está estructurada la venta de ESTE evento en la web: sus zonas (gradas, sectores, pista, VIP…) y dentro de cada una sus secciones o niveles, con los nombres exactos que usa la web, si es de pie y el precio de cada zona si se ve. Si no lo encuentras en fuentes fiables, null.',
+        ourZones.length > 0
+          ? `   Nuestro plano de este recinto tiene estas zonas: ${ourZones.join(', ')}. Para cada zona de la venta, pon en venueZone a cuál de las nuestras corresponde (null si no está en nuestro plano).`
+          : '   (El recinto no está en nuestra sala: venueZone = null.)',
+        '7. La imagen del plano oficial de asientos tal cual se ve al comprar (enlace directo a la imagen, de la web de venta o del recinto). Si no hay, null.',
+        `Cuando acabes, llama a ${DETAILS_TOOL_NAME}.`,
       ].join('\n');
-      const { input, cost } = await this.research(prompt, DETAILS_TOOL, { effort: 'high', searches: 6, fetches: 6 });
+      const { input, cost } = await this.research(prompt, detailsTool(ourZones), { effort: 'high', searches: 8, fetches: 8 });
       const r = input as Record<string, unknown>;
       const when = localFrom(r.date, r.time);
       const venue = str(r.venue, 160) ?? q.venue ?? null;
       const city = str(r.city, 80) ?? q.city ?? null;
-      const url = httpUrl(r.url) ?? httpUrl(q.url);
+      // El enlace de compra: nunca una reventa (si Claude trae una, se avisa y se usa el que ya teníamos).
+      let urlWarning: string | null = null;
+      let url = httpUrl(r.url);
+      if (url && isResale(url)) {
+        urlWarning = `Claude encontró un enlace de reventa (${hostOf(url)}): no se usa. Compra solo en la web oficial.`;
+        url = null;
+      }
+      url = url ?? (q.url && !isResale(q.url) ? httpUrl(q.url) : null);
       const sales = (Array.isArray(r.sales) ? r.sales : [])
         .map((x) => x as Record<string, unknown>)
-        .map((x) => ({ name: str(x.name, 80) ?? 'Venta', opensAtLocal: str(x.opensAt, 20) ?? '' }))
+        .map((x) => ({
+          name: str(x.name, 80) ?? 'Venta',
+          opensAtLocal: str(x.opensAt, 20) ?? '',
+          limit: typeof x.limit === 'number' && Number.isInteger(x.limit) && x.limit >= 1 && x.limit <= 50 ? x.limit : null,
+        }))
         .filter((x) => LOCAL_RE.test(x.opensAtLocal))
         .sort((a, b) => a.opensAtLocal.localeCompare(b.opensAtLocal));
       const lim = (r.limit ?? {}) as Record<string, unknown>;
       const perPerson = typeof lim.perPerson === 'number' && Number.isInteger(lim.perPerson) && lim.perPerson >= 1 && lim.perPerson <= 50 ? lim.perPerson : null;
       const scope = typeof lim.scope === 'string' ? lim.scope : null;
       const quote = str(lim.quote, 300);
-      const limitSource = httpUrl(lim.sourceUrl);
+      const limitSourceRaw = httpUrl(lim.sourceUrl);
+      const limitSource = limitSourceRaw && !isResale(limitSourceRaw) ? limitSourceRaw : null;
       // «Oficial» solo si la frase sale de la web de venta (o del club/recinto que vende).
       const official = Boolean(perPerson && quote && limitSource && sameSite(limitSource, [provider.url, url, q.url]));
       const price = r.price && typeof r.price === 'object' ? (r.price as Record<string, unknown>) : null;
+      const zoneByKey = new Map(ourZones.map((z) => [z.toLowerCase(), z]));
       const layout = Array.isArray(r.layout)
         ? r.layout
             .map((z) => z as Record<string, unknown>)
@@ -516,6 +552,8 @@ export class ClaudeControl {
               zone: str(z.zone, 80) ?? '',
               sections: (Array.isArray(z.sections) ? z.sections : []).map((s) => str(s, 80)).filter((s): s is string => s !== null).slice(0, 40),
               standing: z.standing === true,
+              price: str(z.price, 40),
+              venueZone: typeof z.venueZone === 'string' ? (zoneByKey.get(z.venueZone.trim().toLowerCase()) ?? null) : null,
             }))
             .filter((z) => z.zone !== '')
             .slice(0, 40)
@@ -528,6 +566,8 @@ export class ClaudeControl {
         venue,
         city,
         url,
+        seller: str(r.seller, 120),
+        urlWarning,
         sales,
         limit: { perPerson, semantics: perPerson && scope ? (SCOPE[scope] ?? 'PER_HOLDER') : perPerson ? 'PER_HOLDER' : null, quote, sourceUrl: limitSource, official },
         price: price
@@ -541,7 +581,10 @@ export class ClaudeControl {
         planImageUrl: imageUrl(r.planImage),
         status,
         notes: str(r.notes, 800) ?? '',
-        sources: (Array.isArray(r.sources) ? r.sources : []).map(httpUrl).filter((u): u is string => u !== null).slice(0, 12),
+        sources: (Array.isArray(r.sources) ? r.sources : [])
+          .map(httpUrl)
+          .filter((u): u is string => u !== null && !isResale(u))
+          .slice(0, 12),
         vaultVenueId: knownVenue ?? (venue ? bestVenueMatch(venues, venue, city) : null),
         cost,
         cached: false,
@@ -549,6 +592,12 @@ export class ClaudeControl {
     };
     if (q.fresh) return load();
     return this.cached(this.detailsCache, key, load);
+  }
+
+  /** Zonas del plano de un recinto de la sala (para que Claude haga corresponder las de la venta). */
+  private venueZones(venueId: string): string[] {
+    const artifact = [...this.opts.runtime.store.artifacts.values()].find((a) => a.venueId === venueId && a.eventId === null);
+    return artifact ? artifact.zones.map((z) => z.name).slice(0, 60) : [];
   }
 
   /**
@@ -917,4 +966,10 @@ function errorDetail(err: unknown): string {
     e = e.cause as typeof e;
   }
   return [...new Set(parts)].join(' · ');
+}
+
+/** ¿Es una web de reventa? (nunca vale como enlace oficial). */
+function isResale(url: string): boolean {
+  const h = hostOf(url);
+  return h !== null && RESALE.test(`${h}.`);
 }

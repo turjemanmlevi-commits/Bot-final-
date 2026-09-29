@@ -24,6 +24,7 @@ import {
   KillSwitchInputSchema,
   OperationConfigSchema,
   PreferredTargetsSchema,
+  SaleZonesSchema,
   SessionHumanSchema,
   TelegramMainChatSchema,
   TelegramTestSchema,
@@ -318,6 +319,12 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
   http.put('/api/vault/events/:id/targets', async (c) => {
     const b = await body(c, PreferredTargetsSchema);
     return c.json(await authoring.setPreferredTargets(c.req.param('id'), b.targets, actorOf(c)));
+  });
+
+  // La estructura de la venta de un evento completa su recinto (zonas que faltan y nombres de la web como alias).
+  http.post('/api/vault/venues/:id/sale-zones', async (c) => {
+    const b = await body(c, SaleZonesSchema);
+    return c.json(await authoring.addSaleZones(c.req.param('id'), b.zones, actorOf(c)));
   });
 
   http.post('/api/vault/venues', async (c) => {

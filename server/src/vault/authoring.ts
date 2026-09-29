@@ -5,10 +5,20 @@
  */
 
 import path from 'node:path';
-import { EventNoteInputSchema, formatPlanPoint, parseVenueLayout, type EventNoteInput, type EventNoteResult, type VenueQuickInput, type VenueQuickResult } from '@to/shared';
+import {
+  aiLayoutText,
+  EventNoteInputSchema,
+  formatPlanPoint,
+  parseVenueLayout,
+  type EventNoteInput,
+  type EventNoteResult,
+  type SaleZonesInput,
+  type VenueQuickInput,
+  type VenueQuickResult,
+} from '@to/shared';
 import type { App, CompileResult } from '../app';
-import { normalizeLabel, slugify } from '../util/normalize';
-import { createEventNote, createVenueNotes, patchEventNote, updateEventNote, type EventWriteContext } from './writer';
+import { compactLabel, normalizeLabel, slugify } from '../util/normalize';
+import { addVenueSaleZones, createEventNote, createVenueNotes, patchEventNote, updateEventNote, type EventWriteContext } from './writer';
 
 export class AuthoringError extends Error {
   constructor(
@@ -93,6 +103,59 @@ export class VaultAuthoring {
     await patchEventNote(this.vaultDir(), event.sourceFile, { planImage: image, planPoints: (parsed.data ?? []).map(formatPlanPoint) });
     this.app.runtime.ctx.journal.audit('vault.event_plan', { file: event.sourceFile, eventId, points: points.length }, { actor });
     return this.eventResult(event.sourceFile, false, await this.app.compileAndApply());
+  }
+
+  /**
+   * Qué zonas de la venta de un evento le faltan al recinto y qué nombres de la
+   * web serían alias nuevos. Una zona de la venta es «nuestra» si su nombre ya
+   * es el nombre o un alias de una zona, o si Claude la ha asociado a una: así
+   * nunca se duplica una zona ni se crea un alias que apunte a dos zonas.
+   */
+  matchSaleZones(venueId: string, sale: SaleZonesInput['zones']): { missing: SaleZonesInput['zones']; aliases: Array<{ zone: string; alias: string }> } {
+    const store = this.app.runtime.store;
+    if (!store.vaultReport?.venues.some((v) => v.venueId === venueId)) throw new AuthoringError(404, 'NOT_FOUND', `El recinto ${venueId} no está en la sala`);
+    const artifact = [...store.artifacts.values()].find((a) => a.venueId === venueId && a.eventId === null);
+    const zones = artifact?.zones ?? [];
+    const index = artifact?.zoneAliasIndex ?? {};
+    const byName = new Map(zones.map((z) => [normalizeLabel(z.name), z]));
+    const byKey = (label: string) => {
+      const id = index[normalizeLabel(label)] ?? index[compactLabel(label)];
+      return id ? zones.find((z) => z.id === id) : undefined;
+    };
+    const missing: SaleZonesInput['zones'] = [];
+    const aliases: Array<{ zone: string; alias: string }> = [];
+    for (const z of sale) {
+      const own = byKey(z.zone);
+      const ours = own ?? (z.venueZone ? byName.get(normalizeLabel(z.venueZone)) : undefined);
+      if (!ours) missing.push(z);
+      // El nombre de la web ya lleva a una zona: no hace falta alias (ni se crea uno ambiguo).
+      else if (!own) aliases.push({ zone: ours.name, alias: z.zone.trim().slice(0, 120) });
+    }
+    return { missing, aliases };
+  }
+
+  /**
+   * Completa un recinto con la estructura de la venta de un evento: las zonas
+   * que no tenía se crean (con sus secciones) y a las que ya tenía se les añade
+   * el nombre que usa la web como alias, para que el plano y las tareas hablen
+   * como la web de venta.
+   */
+  async addSaleZones(venueId: string, sale: SaleZonesInput['zones'], actor: string): Promise<{ zones: number; aliases: number; report: VenueQuickResult['report'] }> {
+    const { missing, aliases } = this.matchSaleZones(venueId, sale);
+    const store = this.app.runtime.store;
+    const venue = store.vaultReport?.venues.find((v) => v.venueId === venueId);
+    if (!venue) throw new AuthoringError(404, 'NOT_FOUND', `El recinto ${venueId} no está en la sala`);
+    const artifact = [...store.artifacts.values()].find((a) => a.venueId === venueId && a.eventId === null);
+    const layout = missing.length > 0 ? parseVenueLayout(aiLayoutText(missing.map((z) => ({ ...z, price: z.price ?? null, venueZone: null })))) : { zones: [], errors: [] };
+    const added = await addVenueSaleZones(
+      this.vaultDir(),
+      venue.sourceFile,
+      { zones: layout.zones, aliases, existingSections: (artifact?.sections ?? []).map((s) => s.name) },
+      { vaultDir: this.vaultDir(), timeZone: this.app.timeZone, actor },
+    );
+    this.app.runtime.ctx.journal.audit('vault.venue_sale_zones', { venueId, ...added }, { actor });
+    const result = await this.app.compileAndApply();
+    return { ...added, report: result.compiled.report };
   }
 
   /** Recinto con ese nombre (sin mayúsculas ni acentos) si ya está en la sala. */

@@ -110,9 +110,14 @@ export interface AiEventDetails {
   timeTBA: boolean;
   venue: string | null;
   city: string | null;
+  /** Enlace directo a la página de COMPRA del evento en la web oficial (nunca una reventa). */
   url: string | null;
-  /** Fases de venta (socios, preventa, general…) con su apertura. */
-  sales: Array<{ name: string; opensAtLocal: string }>;
+  /** Quién vende oficialmente (el club, la ticketera, la UEFA…). */
+  seller: string | null;
+  /** Aviso si Claude encontró un enlace que no vale (p. ej. una web de reventa). */
+  urlWarning: string | null;
+  /** Fases de venta (socios, preventa, general…) con su apertura y, si lo dicen, su límite por persona. */
+  sales: Array<{ name: string; opensAtLocal: string; limit: number | null }>;
   limit: {
     perPerson: number | null;
     semantics: LimitSemantics | null;
@@ -123,8 +128,12 @@ export interface AiEventDetails {
     official: boolean;
   };
   price: { min: number | null; max: number | null; currency: string } | null;
-  /** Zonas y secciones del recinto, con los nombres de la web de venta (para el plano). */
-  layout: Array<{ zone: string; sections: string[]; standing: boolean }> | null;
+  /**
+   * Cómo está estructurada la venta de ESTE evento: zonas y secciones con los
+   * nombres de la web de venta, su precio si se ve y, si el recinto ya está en
+   * la sala, a qué zona de nuestro plano corresponde cada una.
+   */
+  layout: AiSaleZone[] | null;
   /** Imagen del plano oficial (tal cual se ve al comprar), si Claude la ha encontrado. */
   planImageUrl: string | null;
   status: AiEventStatus;
@@ -133,6 +142,16 @@ export interface AiEventDetails {
   vaultVenueId: string | null;
   cost: AiCost;
   cached: boolean;
+}
+
+export interface AiSaleZone {
+  zone: string;
+  sections: string[];
+  standing: boolean;
+  /** Precio de la zona tal y como lo enseña la web («60–150 €»), o null. */
+  price: string | null;
+  /** Zona de nuestro plano a la que corresponde (recinto ya en la sala), o null si no está. */
+  venueZone: string | null;
 }
 
 export const AI_STATUS_LABEL: Record<Exclude<AiEventStatus, null>, string> = {
@@ -255,6 +274,8 @@ export interface AiEventDraft {
   /** Si no hay límite: de dónde mirarlo. */
   limitsSource: string;
   notes: string;
+  /** Estructura de la venta (líneas para la nota del evento). */
+  saleZones: string[];
 }
 
 function host(url: string | null): string | null {
@@ -273,8 +294,9 @@ function host(url: string | null): string | null {
  */
 export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null; today: string; nowLocal: string }): AiEventDraft {
   const sale = opts.saleName === undefined ? aiDefaultSale(d.sales, opts.nowLocal) : (d.sales.find((s) => s.name === opts.saleName) ?? null);
-  const n = d.limit.perPerson;
-  const quote = d.limit.quote ? `«${d.limit.quote}»` : `${n} por persona`;
+  // El límite de la fase elegida (socios, general…) manda sobre el general.
+  const n = sale?.limit ?? d.limit.perPerson;
+  const quote = sale?.limit && sale.limit !== d.limit.perPerson ? `${sale.limit} por persona en «${sale.name}»` : d.limit.quote ? `«${d.limit.quote}»` : `${n} por persona`;
   const from = host(d.limit.sourceUrl) ?? 'la web';
   const limit =
     n !== null
@@ -288,11 +310,15 @@ export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null
       : null;
   const notes: string[] = [`Datos reunidos por Claude el ${opts.today} (revísalos en la web oficial).`];
   if (d.timeTBA) notes.push('Hora del evento: por confirmar.');
-  if (d.sales.length > 0) notes.push(`Fases de venta: ${d.sales.map((s) => `${s.name} (${s.opensAtLocal.replace('T', ' ')})`).join('; ')}.`);
+  if (d.seller) notes.push(`Venta oficial: ${d.seller}${d.url ? ` — ${d.url}` : ''}.`);
+  if (d.sales.length > 0) {
+    notes.push(`Fases de venta: ${d.sales.map((s) => `${s.name} (${s.opensAtLocal.replace('T', ' ')}${s.limit ? `, máx. ${s.limit} por persona` : ''})`).join('; ')}.`);
+  }
   if (sale) notes.push(`Apertura elegida: ${sale.name}.`);
   if (d.price && (d.price.min !== null || d.price.max !== null)) {
     notes.push(`Precios: ${[d.price.min, d.price.max].filter((x) => x !== null).join('–')} ${d.price.currency}.`);
   }
+  if (d.layout && d.layout.length > 0) notes.push(`Estructura de la venta: ${aiSaleZonesText(d.layout).join(' | ')}.`);
   if (d.status) notes.push(`Estado: ${AI_STATUS_LABEL[d.status]}.`);
   if (d.notes) notes.push(d.notes);
   if (d.sources.length > 0) notes.push(`Fuentes: ${d.sources.join(' · ')}`);
@@ -305,5 +331,45 @@ export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null
     limit,
     limitsSource: d.url ? `Página oficial: ${d.url}`.slice(0, 500) : '',
     notes: notes.join('\n').slice(0, 5000),
+    saleZones: aiSaleZonesText(d.layout),
   };
+}
+
+/**
+ * La estructura de la venta en líneas para la nota del evento (se leen y se
+ * editan en Obsidian): «Lateral Este: Grada baja, Grada alta · 60–150 € → Lateral Este».
+ */
+export function aiSaleZonesText(layout: AiEventDetails['layout']): string[] {
+  if (!layout) return [];
+  return layout.slice(0, 60).map((z) => {
+    const name = layoutName(z.zone) + (z.standing ? ' (de pie)' : '');
+    const secs = z.sections.map(layoutName).filter(Boolean);
+    const price = z.price ? ` · ${z.price.replace(/[·→]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)}` : '';
+    const ours = z.venueZone ? ` → ${z.venueZone}` : '';
+    return `${name}${secs.length > 0 ? `: ${secs.join(', ')}` : ''}${price}${ours}`.slice(0, 400);
+  });
+}
+
+/** Una línea de la estructura de la venta (lo contrario de aiSaleZonesText). */
+export function parseSaleZone(line: string): { zone: string; sections: string[]; standing: boolean; price: string | null; venueZone: string | null } | null {
+  let rest = line.trim();
+  if (!rest) return null;
+  let venueZone: string | null = null;
+  const arrow = rest.lastIndexOf('→');
+  if (arrow >= 0) {
+    venueZone = rest.slice(arrow + 1).trim() || null;
+    rest = rest.slice(0, arrow).trim();
+  }
+  let price: string | null = null;
+  const dot = rest.indexOf(' · ');
+  if (dot >= 0) {
+    price = rest.slice(dot + 3).trim() || null;
+    rest = rest.slice(0, dot).trim();
+  }
+  const colon = rest.indexOf(':');
+  let zone = colon >= 0 ? rest.slice(0, colon).trim() : rest;
+  const sections = colon >= 0 ? rest.slice(colon + 1).split(',').map((x) => x.trim()).filter(Boolean) : [];
+  const standing = /\((?:de pie|pie|standing|general)\)\s*$/i.test(zone);
+  zone = zone.replace(/\s*\((?:de pie|pie|standing|general)\)\s*$/i, '').trim();
+  return zone ? { zone, sections, standing, price, venueZone } : null;
 }

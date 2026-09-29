@@ -898,6 +898,24 @@ table.t tr.clickable {
   cursor: pointer;
 }
 
+/* Tablas que en el móvil juntan columnas: .only-sm se ve solo en el móvil y .hide-sm se oculta en él. */
+table.t .only-sm {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  table.t .hide-sm {
+    display: none;
+  }
+  table.t .only-sm {
+    display: block;
+  }
+  table.t.compact-sm th,
+  table.t.compact-sm td {
+    padding: 8px;
+  }
+}
+
 /* --------------------------------------------------------------------------
    Formularios
    -------------------------------------------------------------------------- */

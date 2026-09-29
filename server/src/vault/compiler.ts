@@ -32,6 +32,7 @@ import {
   type VenueSection,
   type VenueZone,
   parsePlanPoint,
+  parseSaleZone,
 } from '@to/shared';
 import { hashOf, sha256 } from '../util/hash';
 import { compactLabel, normalizeLabel, slugify } from '../util/normalize';
@@ -608,7 +609,7 @@ class Compiler {
   }
 
   /** Evento elegido de una fuente oficial y vigilancia (propiedades opcionales). */
-  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap' | 'perAccountQty'> {
+  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap' | 'perAccountQty' | 'saleZones'> {
     const feedRaw = asString(note.data.officialFeed);
     const idRaw = asString(note.data.officialId) ?? (typeof note.data.officialId === 'number' ? String(note.data.officialId) : null);
     let officialFeed: FeedId | null = null;
@@ -630,6 +631,10 @@ class Compiler {
       preferredTargets: asStringList(note.data.preferredTargets).slice(0, 30),
       seatMap: this.seatMap(note),
       perAccountQty: this.perAccountQty(note),
+      saleZones: asStringList(note.data.saleZones)
+        .slice(0, 60)
+        .map(parseSaleZone)
+        .filter((z): z is NonNullable<typeof z> => z !== null),
     };
   }
 
