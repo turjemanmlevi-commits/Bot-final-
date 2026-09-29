@@ -108,6 +108,22 @@ export const TelegramTestSchema = z.object({
   chatId: z.string().trim().regex(/^-?\d{1,20}$/).nullable().optional(),
 });
 
+/** Token de @BotFather: número del bot, «:» y la clave (letras, números, «_» y «-»). */
+export const TELEGRAM_TOKEN_RE = /^\d{3,20}:[A-Za-z0-9_-]{20,100}$/;
+
+export const TelegramTokenSchema = z.object({
+  token: z.string().trim().regex(TELEGRAM_TOKEN_RE, 'no parece un token de @BotFather (123456789:AA…): cópialo entero'),
+});
+
+export const TelegramMainChatSchema = z.object({
+  /** Chat principal (privado o grupo); null lo quita. */
+  chatId: z
+    .string()
+    .trim()
+    .regex(/^-?\d{1,20}$/, 'el chat ID es un número (los de grupo empiezan por «-»)')
+    .nullable(),
+});
+
 export const DemoSeedSchema = z.object({
   startInSeconds: z.number().int().min(20).max(3600).optional(),
   scenarioId: z.string().min(1).optional(),

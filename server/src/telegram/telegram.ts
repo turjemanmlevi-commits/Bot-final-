@@ -2,15 +2,17 @@
  * Telegram (opcional). Envía alertas importantes y tareas humanas con botones,
  * y acepta comandos básicos.
  *
- * - Se activa con TELEGRAM_BOT_TOKEN. Con TELEGRAM_CHAT_ID además hay un chat
- *   principal (tú o un grupo) que recibe todo y puede usar /pausa y /parar_todo.
+ * - Se activa con el token del bot (Ajustes · Telegram en el dashboard, o
+ *   TELEGRAM_BOT_TOKEN en .env). El chat principal (tú o un grupo) recibe todo y
+ *   puede usar /pausa y /parar_todo.
  * - Cada cuenta puede tener su propio chat (telegramChatId): esa persona recibe
  *   sus tareas y puede responderlas, nada más.
  * - A cualquier otro chat que escriba al bot solo se le contesta con su chat ID,
  *   para que puedas configurarlo. No recibe nada ni puede mandar nada.
+ * - Al conectar, el bot se configura solo: menú de comandos y descripción.
  */
 
-import type { Alert, HumanTask, TelegramChatSeen, TelegramStatus } from '@to/shared';
+import type { Account, Alert, HumanTask, TelegramChatSeen, TelegramStatus } from '@to/shared';
 import { formatMoney, OPERATION_STATE_LABEL } from '@to/shared';
 import type { Notifier } from '../runtime/context';
 import type { Runtime } from '../runtime/runtime';
@@ -42,20 +44,102 @@ export interface TelegramOptions {
   timeZone?: string;
   /** Espera entre reintentos cuando Telegram no responde. */
   retryMs?: number;
+  /** Poner el menú de comandos y la descripción del bot al conectar (por defecto sí). */
+  setupProfile?: boolean;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const ICON: Record<Alert['severity'], string> = { INFO: 'ℹ️', WARNING: '⚠️', CRITICAL: '🚨' };
 const ALWAYS_SEND = new Set<Alert['kind']>(['CART_SECURED', 'CART_CONFIRMED']);
-const HELP =
-  '<b>Ticket Orchestrator</b>\n' +
-  '/estado — operaciones activas\n' +
-  '/tareas — tareas humanas abiertas (con botones)\n' +
-  '/pausa — pausa todo lo que está en marcha (solo chat principal)\n' +
-  '/parar_todo — kill switch global (solo chat principal)\n' +
-  '/id — muestra el chat ID de este chat';
+
+/** Cómo responder rápido (/ayuda, /start y bienvenida). */
+export const HELP =
+  '<b>Cómo ir rápido</b>\n' +
+  '1. Antes de la venta llega el <b>plan</b>: hora, zonas en orden, entradas y precio máximo.\n' +
+  '2. Inicia sesión en la web oficial y pulsa <b>✅ Sesión lista</b>.\n' +
+  '3. A la hora exacta llega <b>¡Abre la venta!</b> y tu tarea con el botón <b>🌐 Abrir la web oficial</b>.\n' +
+  '4. Con las entradas en el carrito pulsa <b>✅ N en carrito</b> y los minutos que le quedan. Si no hay por ese precio, <b>❌ No pude</b>: la siguiente zona llega al instante.\n' +
+  '5. Paga en la web oficial y pulsa <b>💳 Ya lo he pagado</b>.\n\n' +
+  '<b>Comandos</b>\n' +
+  '/tareas — tus tareas abiertas, con botones\n' +
+  '/estado — cómo va cada operación\n' +
+  '/pausa — pausar lo que está en marcha (chat principal)\n' +
+  '/parar_todo — parar todo al instante (chat principal)\n' +
+  '/id — número de este chat';
+
+/** Menú de comandos que se pone en el bot al conectar (setMyCommands). */
+export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
+  { command: 'tareas', description: 'Tus tareas abiertas, con botones' },
+  { command: 'estado', description: 'Cómo va cada operación' },
+  { command: 'ayuda', description: 'Cómo responder rápido' },
+  { command: 'pausa', description: 'Pausar lo que está en marcha (chat principal)' },
+  { command: 'parar_todo', description: 'Parar todo al instante (chat principal)' },
+  { command: 'id', description: 'Número de este chat' },
+];
+
+/** Texto que ve quien abre el bot por primera vez («¿Qué puede hacer este bot?»). */
+export const BOT_DESCRIPTION =
+  'Bot privado de la sala de control para comprar entradas en la web oficial (Real Madrid, Ticketmaster, entradas.com).\n\n' +
+  'Avisa en el segundo exacto en que abre la venta y dice a cada persona qué zona intentar, cuántas entradas y hasta qué precio. Se responde con un toque.\n\n' +
+  'Pulsa «Iniciar»: te dirá el número de este chat para darte de alta.';
+
+export const BOT_SHORT_DESCRIPTION = 'Avisos al segundo y tareas con botones para comprar entradas en la web oficial.';
+
 const MAX_SEEN = 10;
 const HINT_EVERY_MS = 30_000;
+
+interface TgResponse<T> {
+  ok: boolean;
+  result: T;
+  description?: string;
+  error_code?: number;
+}
+
+/** Llamada a la Bot API. El token nunca aparece en los mensajes de error. */
+async function callTelegram<T>(apiBase: string, token: string, method: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const redact = (m: string) => m.split(token).join('<token>');
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase}/bot${token}/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
+    });
+  } catch (err) {
+    throw new Error(redact((err as Error).message));
+  }
+  let json: TgResponse<T>;
+  try {
+    json = (await res.json()) as TgResponse<T>;
+  } catch {
+    throw new Error(`Telegram respondió ${res.status} sin JSON`);
+  }
+  if (!json.ok) {
+    if (json.error_code === 401 || json.error_code === 404) throw new Error('Token no válido: pega el token correcto en Ajustes · Telegram');
+    throw new Error(redact(json.description ?? `Telegram ${method} falló (${res.status})`));
+  }
+  return json.result;
+}
+
+/** Comprueba un token con getMe antes de guardarlo. */
+export async function probeTelegramToken(apiBase: string, token: string): Promise<{ ok: true; username: string } | { ok: false; message: string }> {
+  try {
+    const me = await callTelegram<{ username?: string; is_bot?: boolean }>(apiBase.replace(/\/+$/, ''), token, 'getMe', {}, 10_000);
+    if (!me.username) return { ok: false, message: 'Telegram no ha devuelto el nombre del bot: vuelve a intentarlo.' };
+    return { ok: true, username: me.username };
+  } catch (err) {
+    const message = (err as Error).message;
+    if (/Token no válido/.test(message)) {
+      return {
+        ok: false,
+        message: 'Telegram no reconoce ese token. Cópialo otra vez entero del mensaje de @BotFather (la línea larga debajo de «Use this token to access the HTTP API»).',
+      };
+    }
+    return { ok: false, message: `No se pudo conectar con Telegram (${message}). Comprueba la conexión a Internet y vuelve a probar.` };
+  }
+}
 
 function chatName(chat: TgChat): string {
   if (chat.title) return chat.title;
@@ -77,7 +161,11 @@ export class TelegramNotifier implements Notifier {
   /** Mensajes con botones de cada tarea (para quitarlos en todos los chats al cerrarse). */
   private readonly taskMessages = new Map<string, Array<{ chatId: string; messageId: number }>>();
   private readonly lastHint = new Map<string, number>();
-  private readonly chatId: string | null;
+  private chatId: string | null;
+  private profileDone = false;
+  private webhookCleared = false;
+  /** Primera comprobación del token (getMe) terminada. */
+  private checked: Promise<void> = Promise.resolve();
   private readonly apiBase: string;
   private readonly timeZone: string;
   private readonly retryMs: number;
@@ -91,8 +179,19 @@ export class TelegramNotifier implements Notifier {
 
   attach(runtime: Runtime): void {
     this.runtime = runtime;
-    void this.check();
+    this.checked = this.check();
     void this.poll();
+  }
+
+  /** Espera a la primera comprobación del bot (como mucho `ms`). */
+  async ready(ms = 5000): Promise<void> {
+    await Promise.race([this.checked, new Promise((r) => setTimeout(r, ms))]);
+  }
+
+  /** Cambia el chat principal al momento (lo elige el dashboard). */
+  setMainChat(chatId: string | null): void {
+    this.chatId = chatId;
+    this.refreshDetail();
   }
 
   stop(): void {
@@ -112,7 +211,9 @@ export class TelegramNotifier implements Notifier {
       detail: this.detail,
       bot: this.bot,
       mainChatConfigured: this.chatId !== null,
+      mainChatId: this.chatId,
       recentChats: [...this.seen.values()].map((c) => ({ ...c, known: known.has(c.chatId) })).sort((a, b) => b.at.localeCompare(a.at)),
+      configurable: false,
     };
   }
 
@@ -120,28 +221,11 @@ export class TelegramNotifier implements Notifier {
     if (!this.bot) return;
     this.detail = this.chatId
       ? `@${this.bot} · chat principal ${this.chatId}`
-      : `@${this.bot} conectado, pero falta TELEGRAM_CHAT_ID: escribe /start al bot para ver tu chat ID`;
+      : `@${this.bot} conectado. Falta el chat principal: abre el bot en Telegram, pulsa «Iniciar» y elígelo en Ajustes · Telegram`;
   }
 
-  private async api<T>(method: string, body: Record<string, unknown>, timeoutMs = 15_000, signal?: AbortSignal): Promise<T> {
-    const timeout = AbortSignal.timeout(timeoutMs);
-    const res = await fetch(`${this.apiBase}/bot${this.opts.token}/${method}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
-    });
-    let json: { ok: boolean; result: T; description?: string; error_code?: number };
-    try {
-      json = (await res.json()) as typeof json;
-    } catch {
-      throw new Error(`Telegram respondió ${res.status} sin JSON`);
-    }
-    if (!json.ok) {
-      if (json.error_code === 401) throw new Error('Token no válido: revisa TELEGRAM_BOT_TOKEN en .env');
-      throw new Error(json.description ?? `Telegram ${method} falló (${res.status})`);
-    }
-    return json.result;
+  private api<T>(method: string, body: Record<string, unknown>, timeoutMs = 15_000, signal?: AbortSignal): Promise<T> {
+    return callTelegram<T>(this.apiBase, this.opts.token, method, body, timeoutMs, signal);
   }
 
   private async check(): Promise<void> {
@@ -150,11 +234,29 @@ export class TelegramNotifier implements Notifier {
       this.bot = me.username;
       this.connected = true;
       this.refreshDetail();
-      log.info(this.chatId ? `Telegram conectado: @${me.username}` : `Telegram: @${me.username} conectado. Falta TELEGRAM_CHAT_ID: escribe /start al bot y te dirá tu chat ID.`);
+      log.info(
+        this.chatId
+          ? `Telegram conectado: @${me.username}`
+          : `Telegram: @${me.username} conectado. Falta el chat principal: abre el bot, pulsa «Iniciar» y elígelo en Ajustes · Telegram.`,
+      );
+      void this.setupProfile();
     } catch (err) {
       this.connected = false;
       this.detail = `Sin conexión: ${(err as Error).message}`;
       log.warn('Telegram: no se pudo comprobar el bot', { error: (err as Error).message });
+    }
+  }
+
+  /** Menú de comandos y descripción del bot, una vez por conexión. Si falla, el bot funciona igual. */
+  private async setupProfile(): Promise<void> {
+    if (this.profileDone || this.stopped || this.opts.setupProfile === false) return;
+    this.profileDone = true;
+    try {
+      await this.api('setMyCommands', { commands: BOT_COMMANDS });
+      await this.api('setMyDescription', { description: BOT_DESCRIPTION });
+      await this.api('setMyShortDescription', { short_description: BOT_SHORT_DESCRIPTION });
+    } catch (err) {
+      log.warn('Telegram: no se pudo poner el menú de comandos del bot (no afecta a los avisos)', { error: (err as Error).message });
     }
   }
 
@@ -177,26 +279,53 @@ export class TelegramNotifier implements Notifier {
     });
   }
 
-  async sendTest(chatId?: string | null): Promise<{ ok: boolean; message: string }> {
-    const target = chatId?.trim() || this.chatId;
-    if (!target) return { ok: false, message: 'No hay chat principal: añade TELEGRAM_CHAT_ID al archivo .env (escribe /start al bot para verlo) y reinicia.' };
+  /** Envía y espera la respuesta de Telegram, con el error explicado. */
+  private async deliver(target: string, text: string): Promise<{ ok: boolean; message: string }> {
     try {
-      await this.sendNow(
-        target,
-        '✅ <b>Prueba del Ticket Orchestrator</b>\nEste chat recibirá las alertas importantes y las tareas con botones. Escribe /ayuda para ver los comandos.',
-      );
+      await this.sendNow(target, text);
       this.connected = true;
       this.refreshDetail();
-      return { ok: true, message: `Mensaje de prueba enviado al chat ${target}.` };
+      return { ok: true, message: `Mensaje enviado al chat ${target}.` };
     } catch (err) {
       const message = (err as Error).message;
       return {
         ok: false,
-        message: /chat not found/i.test(message)
-          ? `Telegram no encuentra el chat ${target}: abre el bot en Telegram, pulsa Iniciar (/start) y vuelve a probar.`
+        message: /chat not found|bot was blocked|user is deactivated/i.test(message)
+          ? `Telegram no deja escribir al chat ${target}: abre el bot en Telegram, pulsa «Iniciar» (/start) y vuelve a probar.`
           : `No se pudo enviar: ${message}`,
       };
     }
+  }
+
+  async sendTest(chatId?: string | null): Promise<{ ok: boolean; message: string }> {
+    const target = chatId?.trim() || this.chatId;
+    if (!target) return { ok: false, message: 'No hay chat principal: abre el bot en Telegram, pulsa «Iniciar» y elige tu chat en Ajustes · Telegram.' };
+    const r = await this.deliver(
+      target,
+      '✅ <b>Prueba de la sala de control</b>\nEste chat recibirá las alertas importantes y las tareas con botones. Escribe /ayuda para ver cómo responder rápido.',
+    );
+    return r.ok ? { ok: true, message: `Mensaje de prueba enviado al chat ${target}.` } : r;
+  }
+
+  /** Bienvenida al chat que se acaba de elegir como principal. */
+  welcomeMain(chatId: string): Promise<{ ok: boolean; message: string }> {
+    return this.deliver(
+      chatId,
+      '✅ <b>Este es el chat principal de la sala de control</b>\n' +
+        'Aquí llega todo: el plan de cada compra, «¡Abre la venta!», las tareas de cada cuenta con botones, los avisos de carrito y «¡entradas aseguradas!».\n\n' +
+        HELP,
+    );
+  }
+
+  /** Una cuenta acaba de quedar vinculada a un chat: se le explica qué va a recibir. */
+  accountLinked(account: Account): void {
+    if (!account.telegramChatId) return;
+    this.send(
+      account.telegramChatId,
+      `✅ <b>Este chat es el de la cuenta «${esc(account.label)}»</b>\n` +
+        'Aquí te llegarán tu plan, el aviso «¡Abre la venta!» y tus tareas con botones. Ten la web oficial abierta con la sesión iniciada y responde con un toque.\n\n' +
+        HELP,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -344,6 +473,13 @@ export class TelegramNotifier implements Notifier {
       } catch (err) {
         if (this.stopped) break;
         const message = (err as Error).message;
+        if (/webhook/i.test(message) && !this.webhookCleared) {
+          // El bot tenía un webhook de otro programa: sin quitarlo no llegan los botones.
+          this.webhookCleared = true;
+          log.warn('Telegram: el bot tenía un webhook puesto; se quita para recibir los mensajes aquí');
+          await this.api('deleteWebhook', {}).catch(() => undefined);
+          continue;
+        }
         this.connected = false;
         this.detail = /Conflict/i.test(message)
           ? 'Otro programa está leyendo este bot (¿hay dos servidores abiertos?). Cierra el otro.'
@@ -362,11 +498,9 @@ export class TelegramNotifier implements Notifier {
     log.info(`Telegram: el chat ${id} (${chatName(chat)}) ha escrito al bot`);
     this.send(
       id,
-      `👋 Este bot es privado de un Ticket Orchestrator.\n\nEl chat ID de este chat es: <code>${id}</code>\n\n` +
-        '• Si gestionas el sistema: pon <code>TELEGRAM_CHAT_ID=' +
-        id +
-        '</code> en el archivo .env y reinicia.\n' +
-        '• Si tienes una cuenta en el grupo: pásale este número a quien lo gestiona para que lo ponga en tu cuenta (Cuentas → editar → Chat de Telegram).',
+      `👋 <b>Hola, soy el bot de la sala de control.</b>\nEl número de este chat es: <code>${id}</code>\n\n` +
+        '• Si gestionas la sala: en el dashboard, <b>Ajustes · Telegram</b>, pulsa «Usar como chat principal» junto a tu nombre.\n' +
+        '• Si vas a comprar con una cuenta: pásale este número a quien gestiona la sala (lo pone en Ajustes · Telegram o en Cuentas → Chat de Telegram). Cuando te dé de alta te llegará un mensaje aquí.',
     );
   }
 

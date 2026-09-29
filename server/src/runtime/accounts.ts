@@ -63,6 +63,7 @@ export class AccountService {
     };
     this.ctx.store.putAccount(account);
     this.ctx.journal.audit('account.created', { accountId: account.id, label: account.label, providerId: account.providerId }, { actor });
+    if (account.telegramChatId) this.ctx.notifier?.accountLinked?.(account);
     return account;
   }
 
@@ -92,6 +93,7 @@ export class AccountService {
     };
     this.ctx.store.putAccount(next);
     this.ctx.journal.audit('account.updated', { accountId: id, fields: Object.keys(patch) }, { actor });
+    if (next.telegramChatId && next.telegramChatId !== a.telegramChatId) this.ctx.notifier?.accountLinked?.(next);
     return next;
   }
 

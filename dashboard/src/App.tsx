@@ -235,7 +235,7 @@ function Shell() {
               <NavLink to="/ajustes" title={s.system.telegram.detail}>
                 <b>
                   {!s.system.telegram.enabled
-                    ? 'desactivado'
+                    ? 'sin configurar'
                     : !s.system.telegram.connected
                       ? 'sin conexión'
                       : s.system.telegram.mainChatConfigured

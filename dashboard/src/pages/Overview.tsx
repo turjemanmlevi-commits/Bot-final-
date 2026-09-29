@@ -238,10 +238,10 @@ function RealPurchaseChecklist() {
       : tgDone
         ? `${tg.bot ? `Bot @${tg.bot.replace(/^@/, '')}` : 'Bot'} conectado y chat principal configurado.`
         : !tg.enabled
-          ? 'Falta TELEGRAM_BOT_TOKEN en el archivo .env.'
+          ? 'Pega el token de tu bot en Ajustes · Telegram.'
           : !tg.connected
             ? tg.detail || 'El bot no responde: revisa el token.'
-            : 'Falta TELEGRAM_CHAT_ID: escribe /start al bot y copia el número en .env.';
+            : 'Abre el bot en Telegram, pulsa «Iniciar» y elige tu chat en Ajustes · Telegram.';
 
     const realAccounts = Object.values(s.accounts).filter(
       (a) => a.enabled && a.verification === 'VERIFIED' && a.providerId !== 'manual' && modeOf(a.providerId) === 'MANUAL_ASSIST',

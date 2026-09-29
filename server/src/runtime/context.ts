@@ -30,6 +30,8 @@ export interface Notifier {
   taskClosed?(task: import('@to/shared').HumanTask): void;
   /** Aviso a todo el grupo (chat principal + chats de esas cuentas), con enlace opcional. */
   announce?(text: string, accountIds: import('@to/shared').Id[], link?: string | null): void;
+  /** Una cuenta acaba de quedar vinculada a su chat de Telegram. */
+  accountLinked?(account: import('@to/shared').Account): void;
 }
 
 export interface RuntimeConfig {
@@ -81,6 +83,8 @@ export class Ctx {
   tasks!: HumanTaskService;
   runners!: RunnerManager;
   notifier: Notifier | null = null;
+  /** Estado de Telegram cuando se configura desde el dashboard (con o sin bot conectado). */
+  telegramStatus: (() => import('@to/shared').TelegramStatus) | null = null;
   readonly startedAt: number;
 
   constructor(

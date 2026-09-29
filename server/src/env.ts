@@ -5,7 +5,12 @@ import { fileURLToPath } from 'node:url';
 /** Raíz del repositorio (funciona se lance desde la raíz o desde server/). */
 export const REPO_ROOT = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
-const envFile = path.join(REPO_ROOT, '.env');
+/** Archivo de configuración (.env en la raíz; ENV_FILE para usar otro, p. ej. en ensayos). */
+export const ENV_FILE = process.env.ENV_FILE?.trim() ? path.resolve(process.env.ENV_FILE.trim()) : path.join(REPO_ROOT, '.env');
+/** Plantilla con la que se crea el .env si no existe. */
+export const ENV_TEMPLATE = path.join(REPO_ROOT, '.env.example');
+
+const envFile = ENV_FILE;
 if (existsSync(envFile)) {
   try {
     process.loadEnvFile(envFile);

@@ -7,7 +7,7 @@
 
 import { z } from 'zod';
 import type { CatalogEvent, VaultCompileReport, VaultIssue } from './api';
-import { LIMIT_SEMANTICS } from './domain';
+import { LIMIT_SEMANTICS, type TelegramStatus } from './domain';
 
 /** Fecha y hora local sin zona, como la escribe Obsidian: 2026-09-29T10:00 (se interpreta en VAULT_TZ). */
 export const LOCAL_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
@@ -89,6 +89,13 @@ export interface VenueQuickResult {
 export interface TelegramTestResult {
   ok: boolean;
   message: string;
+}
+
+/** Resultado de configurar Telegram desde el dashboard (token o chat principal). */
+export interface TelegramConfigResult {
+  ok: boolean;
+  message: string;
+  status: TelegramStatus;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import type {
   OperationConfig,
   OperationDetail,
   ReplayReport,
+  TelegramConfigResult,
   TelegramTestResult,
   VaultCompileReport,
   VenueArtifact,
@@ -137,4 +138,8 @@ export const Api = {
   createVenue: (input: VenueQuickInput) => post<VenueQuickResult>('/api/vault/venues', input),
   /** Envía un mensaje de prueba por Telegram (al chat principal si no se indica otro). */
   telegramTest: (chatId?: string | null) => post<TelegramTestResult>('/api/telegram/test', chatId ? { chatId } : {}),
+  /** Comprueba el token del bot con Telegram, lo guarda en .env y conecta sin reiniciar. */
+  telegramSetToken: (token: string) => api<TelegramConfigResult>('/api/telegram/token', { method: 'PUT', body: { token } }),
+  /** Elige (o quita, con null) el chat principal de Telegram. */
+  telegramSetMainChat: (chatId: string | null) => api<TelegramConfigResult>('/api/telegram/main-chat', { method: 'PUT', body: { chatId } }),
 };

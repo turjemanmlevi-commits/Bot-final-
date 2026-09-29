@@ -775,14 +775,17 @@ export class OperationService {
       killSwitches: [...ctx.store.killSwitches.values()],
       circuits: [...ctx.store.circuits.values()],
       journal: { healthy: j.healthy, pending: j.pending, lagMs: j.lagMs, lastCommitAt: j.lastCommitAt, driver: j.driver },
-      telegram: ctx.notifier?.status?.() ?? {
-        enabled: ctx.notifier?.enabled ?? false,
-        connected: ctx.notifier?.connected ?? false,
-        detail: ctx.notifier?.detail ?? 'Desactivado: falta TELEGRAM_BOT_TOKEN en .env',
-        bot: null,
-        mainChatConfigured: false,
-        recentChats: [],
-      },
+      telegram: ctx.telegramStatus?.() ??
+        ctx.notifier?.status?.() ?? {
+          enabled: ctx.notifier?.enabled ?? false,
+          connected: ctx.notifier?.connected ?? false,
+          detail: ctx.notifier?.detail ?? 'Sin configurar: pega el token de tu bot en Ajustes · Telegram.',
+          bot: null,
+          mainChatConfigured: false,
+          mainChatId: null,
+          recentChats: [],
+          configurable: false,
+        },
     };
   }
 }

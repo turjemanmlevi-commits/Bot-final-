@@ -50,140 +50,369 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-interface TestResult {
+interface Outcome {
   ok: boolean;
   message: string;
-  target: string;
   at: string;
 }
+
+/** El token dentro de lo pegado, aunque venga con el texto de @BotFather alrededor. */
+function extractToken(raw: string): string | null {
+  const m = /\d{3,20}:[A-Za-z0-9_-]{20,100}/.exec(raw);
+  return m ? m[0] : null;
+}
+
+const BOT_COMMANDS: Array<[string, string]> = [
+  ['/tareas', 'tus tareas abiertas, con botones'],
+  ['/estado', 'cómo va cada operación'],
+  ['/ayuda', 'cómo responder rápido'],
+  ['/pausa', 'pausar lo que está en marcha (chat principal)'],
+  ['/parar_todo', 'parar todo al instante (chat principal)'],
+  ['/id', 'número de este chat'],
+];
 
 // ---------------------------------------------------------------------------
 // Telegram
 // ---------------------------------------------------------------------------
+
+function StepHead({ n, done, title }: { n: number; done: boolean; title: string }) {
+  return (
+    <div className="row" style={{ gap: 10, flexWrap: 'nowrap' }}>
+      <span
+        aria-hidden
+        style={{
+          flex: '0 0 auto',
+          width: 28,
+          height: 28,
+          borderRadius: 14,
+          display: 'grid',
+          placeItems: 'center',
+          fontWeight: 800,
+          fontSize: 14,
+          background: done ? 'var(--good)' : 'var(--ink)',
+          color: done ? '#fff' : 'var(--surface)',
+        }}
+      >
+        {done ? <Icon name="check" size={15} /> : n}
+      </span>
+      <b style={{ fontSize: 15 }}>{title}</b>
+      {done ? <span className="sr-only">(hecho)</span> : null}
+    </div>
+  );
+}
 
 function TelegramCard() {
   const s = useLive();
   const toast = useToast();
   const tg = s.system?.telegram ?? null;
   const [busy, setBusy] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
+  const [changingToken, setChangingToken] = useState(false);
+  const [manualChat, setManualChat] = useState('');
+  const [changingChat, setChangingChat] = useState(false);
   const [other, setOther] = useState('');
-  const [last, setLast] = useState<TestResult | null>(null);
+  const [last, setLast] = useState<Outcome | null>(null);
 
-  const otherTrim = other.trim();
-  const otherValid = CHAT_ID_RE.test(otherTrim);
-  const enabled = Boolean(tg?.enabled);
   const bot = tg?.bot ? tg.bot.replace(/^@/, '') : null;
   const chats = tg?.recentChats ?? [];
+  const accounts = Object.values(s.accounts).sort((a, b) => a.label.localeCompare(b.label, 'es'));
+  const botDone = Boolean(tg?.enabled && tg.connected && bot);
+  const mainDone = Boolean(tg?.mainChatConfigured);
+  const mainName = tg?.mainChatId ? chats.find((c) => c.chatId === tg.mainChatId)?.name : undefined;
+  const manualTrim = manualChat.trim();
+  const manualValid = CHAT_ID_RE.test(manualTrim);
+  const otherTrim = other.trim();
+  const otherValid = CHAT_ID_RE.test(otherTrim);
 
-  const sendTest = async (chatId?: string) => {
-    if (chatId !== undefined && !CHAT_ID_RE.test(chatId)) {
-      toast('El chat ID debe ser un número (los de grupo empiezan por «-»).', 'error');
-      return;
-    }
-    const target = chatId === undefined ? 'Chat principal' : `Chat ${chatId}`;
+  const report = (ok: boolean, message: string) => {
+    setLast({ ok, message, at: new Date().toISOString() });
+    toast(message, ok ? 'info' : 'error');
+  };
+
+  const guard = async (fn: () => Promise<void>) => {
     setBusy(true);
     try {
-      const r = await Api.telegramTest(chatId);
-      setLast({ ok: r.ok, message: r.message, target, at: new Date().toISOString() });
-      toast(r.message, r.ok ? 'info' : 'error');
+      await fn();
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      setLast({ ok: false, message, target, at: new Date().toISOString() });
-      toast(message, 'error');
+      report(false, e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   };
+
+  const connect = () =>
+    guard(async () => {
+      const token = extractToken(tokenInput);
+      if (!token) {
+        report(false, 'Eso no parece un token de @BotFather. Copia entera la línea larga que va debajo de «Use this token to access the HTTP API».');
+        return;
+      }
+      const r = await Api.telegramSetToken(token);
+      report(r.ok, r.message);
+      if (r.ok) {
+        setTokenInput('');
+        setChangingToken(false);
+      }
+    });
+
+  const adoptMain = (chatId: string) =>
+    guard(async () => {
+      if (!CHAT_ID_RE.test(chatId)) {
+        report(false, 'El chat ID es un número (los de grupo empiezan por «-»).');
+        return;
+      }
+      const r = await Api.telegramSetMainChat(chatId);
+      report(r.ok, r.message);
+      setChangingChat(false);
+      setManualChat('');
+    });
+
+  const sendTest = (chatId?: string) =>
+    guard(async () => {
+      if (chatId !== undefined && !CHAT_ID_RE.test(chatId)) {
+        report(false, 'El chat ID debe ser un número (los de grupo empiezan por «-»).');
+        return;
+      }
+      const r = await Api.telegramTest(chatId);
+      report(r.ok, r.message);
+    });
+
+  const assign = (chatId: string, accountId: string) =>
+    guard(async () => {
+      const acc = s.accounts[accountId];
+      if (!acc) return;
+      await Api.updateAccount(accountId, { telegramChatId: chatId });
+      report(true, `Chat ${chatId} asignado a «${acc.label}»: recibirá sus tareas y le ha llegado un mensaje de bienvenida.`);
+    });
 
   const copy = async (text: string) => {
     const ok = await copyText(text);
     toast(ok ? 'Copiado' : 'No se pudo copiar: selecciónalo y cópialo a mano.', ok ? 'info' : 'error');
   };
 
+  const roleOf = (chatId: string): { text: string; tone: Tone } => {
+    if (chatId === tg?.mainChatId) return { text: 'chat principal', tone: 'good' };
+    const acc = accounts.filter((a) => a.telegramChatId === chatId);
+    if (acc.length > 0) return { text: `cuenta ${acc.map((a) => a.label).join(', ')}`, tone: 'good' };
+    return { text: 'nuevo', tone: 'neutral' };
+  };
+
+  if (!tg) {
+    return (
+      <Card title="Telegram">
+        <div className="muted">Cargando el estado de Telegram…</div>
+      </Card>
+    );
+  }
+
+  if (!tg.configurable) {
+    return (
+      <Card title="Telegram">
+        <div className="stack">
+          <div className="row">
+            {tg.enabled ? <Pill tone="good">Token configurado</Pill> : <Pill tone="critical">Sin token</Pill>}
+            {tg.mainChatConfigured ? <Pill tone="good">Chat principal configurado</Pill> : <Pill tone="warning">Falta el chat principal</Pill>}
+          </div>
+          <div className="small ink2">{tg.detail}</div>
+          <Callout tone="warning">
+            Este servidor no permite configurar Telegram desde aquí: pon <code>TELEGRAM_BOT_TOKEN</code> y <code>TELEGRAM_CHAT_ID</code> en el archivo <code>.env</code> y reinicia.
+          </Callout>
+        </div>
+      </Card>
+    );
+  }
+
+  const tokenForm = (
+    <div className="stack" style={{ gap: 8 }}>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+        <div className="field" style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <label htmlFor="tg-token">Token del bot (te lo da @BotFather)</label>
+          <input
+            id="tg-token"
+            className="input mono"
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !busy && tokenInput.trim()) void connect();
+            }}
+            placeholder="1234567890:AAE…"
+          />
+        </div>
+        <button type="button" className="btn primary" disabled={busy || !tokenInput.trim()} onClick={() => void connect()}>
+          <Icon name="link" size={15} /> Conectar
+        </button>
+        {changingToken ? (
+          <button type="button" className="btn" disabled={busy} onClick={() => setChangingToken(false)}>
+            Cancelar
+          </button>
+        ) : null}
+      </div>
+      <div className="small muted">
+        Es la línea larga que va debajo de «Use this token to access the HTTP API». Se comprueba con Telegram y se guarda solo en este ordenador (archivo <code>.env</code>, que
+        no se sube a ningún sitio). No hace falta reiniciar.
+      </div>
+    </div>
+  );
+
   return (
     <Card title="Telegram">
-      {!tg ? (
-        <div className="muted">Cargando el estado de Telegram…</div>
-      ) : (
-        <div className="stack" style={{ gap: 18 }}>
-          <div className="stack" style={{ gap: 8 }}>
-            <div className="row">
-              {tg.enabled ? <Pill tone="good">Token configurado</Pill> : <Pill tone="critical">Sin token</Pill>}
-              {tg.enabled ? tg.connected ? <Pill tone="good">Conectado</Pill> : <Pill tone="warning">Sin conexión</Pill> : null}
-              {tg.mainChatConfigured ? <Pill tone="good">Chat principal configurado</Pill> : <Pill tone="warning">Falta TELEGRAM_CHAT_ID</Pill>}
-              {bot ? (
-                <Pill icon="send">
-                  <span className="mono">@{bot}</span>
-                </Pill>
-              ) : null}
-              {bot ? (
-                <a className="btn sm ghost" href={`https://t.me/${encodeURIComponent(bot)}`} target="_blank" rel="noreferrer">
-                  <Icon name="external" size={13} /> Abrir el bot en Telegram
-                </a>
-              ) : null}
-            </div>
-            {tg.detail ? <div className="small ink2">{tg.detail}</div> : null}
-          </div>
-
-          <div className="stack" style={{ gap: 10 }}>
-            <div className="row" style={{ gap: 12, alignItems: 'flex-end' }}>
-              <button type="button" className="btn primary" disabled={!enabled || busy} onClick={() => void sendTest()}>
-                <Icon name="send" size={15} /> Enviar mensaje de prueba
-              </button>
-              <div className="field" style={{ width: 220 }}>
-                <label htmlFor="tg-other">Otro chat ID (opcional)</label>
-                <input
-                  id="tg-other"
-                  className="input mono"
-                  inputMode="numeric"
-                  value={other}
-                  onChange={(e) => setOther(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && enabled && !busy && otherValid) void sendTest(otherTrim);
-                  }}
-                  placeholder="-1001234567890"
-                  aria-invalid={otherTrim !== '' && !otherValid}
-                />
-              </div>
-              <button type="button" className="btn" disabled={!enabled || busy || !otherValid} onClick={() => void sendTest(otherTrim)}>
-                Probar ese chat
-              </button>
-            </div>
-            {otherTrim !== '' && !otherValid ? (
-              <div className="small" style={{ color: 'var(--critical-ink)' }}>
-                El chat ID es solo un número (hasta 20 cifras). Los de grupo empiezan por «-».
-              </div>
-            ) : null}
-            {!enabled ? (
-              <div className="small muted">Para enviar pruebas primero configura el token (pasos 1 a 3 de «Cómo configurarlo»).</div>
-            ) : !tg.mainChatConfigured ? (
-              <div className="small muted">Sin TELEGRAM_CHAT_ID la prueba principal no tiene destino: usa «Probar ese chat» o completa los pasos 4 y 5.</div>
-            ) : null}
-            {last ? (
-              <Callout tone={last.ok ? 'good' : 'critical'}>
-                <b>{last.target}</b> · {fmtTime(last.at)} — {last.message}
-              </Callout>
+      <div className="stack" style={{ gap: 20 }}>
+        <div className="stack" style={{ gap: 8 }}>
+          <div className="row">
+            {!tg.enabled ? <Pill tone="warning">Sin configurar</Pill> : tg.connected ? <Pill tone="good">Bot conectado</Pill> : <Pill tone="warning">Sin conexión</Pill>}
+            {tg.mainChatConfigured ? <Pill tone="good">Chat principal listo</Pill> : <Pill tone="warning">Falta el chat principal</Pill>}
+            {bot ? (
+              <Pill icon="send">
+                <span className="mono">@{bot}</span>
+              </Pill>
             ) : null}
           </div>
+          {tg.detail ? <div className="small ink2">{tg.detail}</div> : null}
+        </div>
 
-          <div className="stack" style={{ gap: 8 }}>
-            <h3 className="sign">Chats que han escrito al bot</h3>
-            {chats.length === 0 ? (
-              <div className="muted small">Cuando alguien escriba /start a tu bot aparecerá aquí con su chat ID.</div>
-            ) : (
-              <div className="table-wrap">
-                <table className="t">
-                  <thead>
-                    <tr>
-                      <th>Nombre</th>
-                      <th>Chat ID</th>
-                      <th>Estado</th>
-                      <th>Hora</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chats.map((c) => (
+        {/* 1 · Token */}
+        <div className="stack" style={{ gap: 10 }}>
+          <StepHead n={1} done={botDone} title="Conecta tu bot" />
+          {tg.enabled && !changingToken ? (
+            <div className="stack" style={{ gap: 8 }}>
+              {botDone ? (
+                <div className="row" style={{ gap: 10 }}>
+                  <span>
+                    Conectado como <b className="mono">@{bot}</b>. El menú de comandos y la descripción del bot se han puesto solos.
+                  </span>
+                  <button type="button" className="btn sm ghost" disabled={busy} onClick={() => setChangingToken(true)}>
+                    Cambiar token
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <Callout tone="warning">{tg.detail || 'Conectando con Telegram…'}</Callout>
+                  {tokenForm}
+                </>
+              )}
+            </div>
+          ) : (
+            tokenForm
+          )}
+        </div>
+
+        {/* 2 · Iniciar */}
+        <div className="stack" style={{ gap: 10 }}>
+          <StepHead n={2} done={mainDone || chats.length > 0} title="Abre el bot en Telegram y pulsa «Iniciar»" />
+          {bot ? (
+            <div className="row" style={{ gap: 10 }}>
+              <a className="btn" href={`https://t.me/${encodeURIComponent(bot)}`} target="_blank" rel="noreferrer">
+                <Icon name="external" size={14} /> Abrir @{bot}
+              </a>
+              <span className="small ink2">Pulsa «Iniciar» (o escribe /start). Tu nombre aparece abajo al momento.</span>
+            </div>
+          ) : (
+            <div className="small muted">Primero conecta el bot (paso 1).</div>
+          )}
+        </div>
+
+        {/* 3 · Chat principal */}
+        <div className="stack" style={{ gap: 10 }}>
+          <StepHead n={3} done={mainDone} title="Elige tu chat principal" />
+          {mainDone && !changingChat ? (
+            <div className="row" style={{ gap: 10 }}>
+              <span>
+                Chat principal: <b>{mainName ?? 'tu chat'}</b> <span className="mono small muted">({tg.mainChatId})</span>. Aquí llega todo y desde aquí se puede pausar o parar.
+              </span>
+              <button type="button" className="btn sm ghost" disabled={busy} onClick={() => setChangingChat(true)}>
+                Cambiar
+              </button>
+            </div>
+          ) : (
+            <div className="stack" style={{ gap: 10 }}>
+              {chats.length === 0 ? (
+                <div className="small muted">{tg.enabled ? 'Esperando a que alguien escriba /start al bot…' : 'Cuando el bot esté conectado, los chats que le escriban aparecerán aquí.'}</div>
+              ) : (
+                <div className="stack" style={{ gap: 8 }}>
+                  {chats.map((c) => (
+                    <div key={c.chatId} className="row" style={{ gap: 10 }}>
+                      <button type="button" className="btn primary sm" disabled={busy} onClick={() => void adoptMain(c.chatId)}>
+                        <Icon name="check" size={13} /> Usar como chat principal
+                      </button>
+                      <b>{c.name || '—'}</b>
+                      <span className="mono small muted">{c.chatId}</span>
+                      <span className="small muted">escribió a las {fmtTime(c.at)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ width: 240 }}>
+                  <label htmlFor="tg-main-manual">O escribe el chat ID (grupos: empieza por «-»)</label>
+                  <input
+                    id="tg-main-manual"
+                    className="input mono"
+                    inputMode="numeric"
+                    value={manualChat}
+                    onChange={(e) => setManualChat(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !busy && manualValid) void adoptMain(manualTrim);
+                    }}
+                    placeholder="123456789"
+                    aria-invalid={manualTrim !== '' && !manualValid}
+                  />
+                </div>
+                <button type="button" className="btn" disabled={busy || !manualValid} onClick={() => void adoptMain(manualTrim)}>
+                  Usar este chat
+                </button>
+                {changingChat ? (
+                  <button type="button" className="btn ghost" disabled={busy} onClick={() => setChangingChat(false)}>
+                    Cancelar
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 4 · Prueba */}
+        <div className="stack" style={{ gap: 10 }}>
+          <StepHead n={4} done={false} title="Prueba" />
+          <div className="row" style={{ gap: 10 }}>
+            <button type="button" className="btn primary" disabled={busy || !tg.enabled || !tg.mainChatConfigured} onClick={() => void sendTest()}>
+              <Icon name="send" size={15} /> Enviar mensaje de prueba
+            </button>
+            <span className="small ink2">Te llegará un mensaje al chat principal. Escribe /ayuda al bot para ver cómo responder rápido.</span>
+          </div>
+          {last ? (
+            <Callout tone={last.ok ? 'good' : 'critical'}>
+              {fmtTime(last.at)} — {last.message}
+            </Callout>
+          ) : null}
+        </div>
+
+        {/* Cada persona en su chat */}
+        <div className="stack" style={{ gap: 8 }}>
+          <h3 className="sign">Cada persona en su chat (opcional)</h3>
+          <div className="small ink2">
+            Cada persona que vaya a comprar abre el bot y pulsa «Iniciar». Aparece aquí: elige su cuenta y recibirá solo sus tareas (y podrá responderlas con un toque).
+          </div>
+          {chats.length === 0 ? (
+            <div className="muted small">Todavía no ha escrito nadie al bot.</div>
+          ) : (
+            <div className="table-wrap">
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>Nombre</th>
+                    <th>Chat ID</th>
+                    <th>Ahora</th>
+                    <th>Asignar a una cuenta</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {chats.map((c) => {
+                    const role = roleOf(c.chatId);
+                    return (
                       <tr key={c.chatId}>
                         <td>{c.name || '—'}</td>
                         <td>
@@ -194,64 +423,91 @@ function TelegramCard() {
                             </button>
                           </span>
                         </td>
-                        <td>{c.known ? <Pill tone="good">ya configurado</Pill> : <Pill>nuevo</Pill>}</td>
-                        <td className="mono small">{fmtTime(c.at)}</td>
+                        <td>
+                          <Pill tone={role.tone}>{role.text}</Pill>
+                        </td>
+                        <td>
+                          <select
+                            className="input"
+                            aria-label={`Asignar el chat ${c.chatId} a una cuenta`}
+                            value=""
+                            disabled={busy || accounts.length === 0}
+                            onChange={(e) => {
+                              if (e.target.value) void assign(c.chatId, e.target.value);
+                            }}
+                          >
+                            <option value="">{accounts.length === 0 ? 'Crea antes las cuentas' : 'Elegir cuenta…'}</option>
+                            {accounts.map((a) => (
+                              <option key={a.id} value={a.id} disabled={a.telegramChatId === c.chatId}>
+                                {a.label}
+                                {a.telegramChatId && a.telegramChatId !== c.chatId ? ' (tiene otro chat)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
                         <td style={{ textAlign: 'right' }}>
-                          <button type="button" className="btn sm" disabled={!enabled || busy} onClick={() => void sendTest(c.chatId)}>
+                          <button type="button" className="btn sm" disabled={busy || !tg.enabled} onClick={() => void sendTest(c.chatId)}>
                             <Icon name="send" size={13} /> Probar
                           </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="small muted">Solo en memoria: se borra al reiniciar el servidor.</div>
-          </div>
-
-          <div className="stack" style={{ gap: 10 }}>
-            <h3 className="sign">Cómo configurarlo (10 minutos)</h3>
-            <ol style={{ margin: 0, paddingLeft: 22, display: 'grid', gap: 8, fontSize: 13 }}>
-              <li>
-                En Telegram, abre <b>@BotFather</b>, envía <code>/newbot</code>, ponle un nombre y un usuario que termine en «bot». Copia el token que te da (parece{' '}
-                <code>123456789:AA…</code>).
-              </li>
-              <li>
-                En la carpeta del proyecto abre el archivo <code>.env</code> con el Bloc de notas (lo crea <code>INICIAR.bat</code> la primera vez; si no lo ves, activa
-                «Extensiones de nombre de archivo» en el Explorador) y escribe <code>TELEGRAM_BOT_TOKEN=&lt;tu token&gt;</code>. Guarda.
-              </li>
-              <li>
-                Cierra la ventana negra del servidor y vuelve a abrir <code>INICIAR.bat</code>.
-              </li>
-              <li>
-                En Telegram abre tu bot y pulsa <b>Iniciar</b>. Te contestará con tu chat ID (también aparece arriba, en «Chats que han escrito al bot»).
-              </li>
-              <li>
-                Añade <code>TELEGRAM_CHAT_ID=&lt;ese número&gt;</code> al <code>.env</code>, guarda y reinicia otra vez.
-              </li>
-              <li>Pulsa «Enviar mensaje de prueba»: debe llegarte un mensaje.</li>
-            </ol>
-            <div className="stack small ink2" style={{ gap: 8 }}>
-              <p style={{ margin: 0 }}>
-                <b>Grupo (opcional):</b> crea un grupo, añade el bot y escribe <code>/id</code> en el grupo. El ID de un grupo empieza por «-»; úsalo como{' '}
-                <code>TELEGRAM_CHAT_ID</code> y todo el grupo verá alertas y tareas.
-              </p>
-              <p style={{ margin: 0 }}>
-                <b>Cada persona en su chat:</b> cada persona escribe <code>/start</code> al bot, te pasa su número y lo pones en <Link to="/cuentas">Cuentas</Link> → editar →
-                «Chat de Telegram». Solo recibirá (y podrá responder) las tareas de su cuenta.
-              </p>
-              <p style={{ margin: 0 }}>
-                <b>Comandos:</b> <code>/estado</code>, <code>/tareas</code>, <code>/pausa</code> y <code>/parar_todo</code> (solo el chat principal), <code>/id</code>,{' '}
-                <code>/ayuda</code>.
-              </p>
-              <p style={{ margin: 0 }}>
-                <b>Seguridad:</b> el token es secreto. El archivo <code>.env</code> no se sube a GitHub. Si se filtra, en @BotFather usa <code>/revoke</code> y pon el nuevo.
-              </p>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+          )}
+          <div className="small muted">
+            La lista se guarda solo en memoria: tras reiniciar el servidor, quien no esté asignado vuelve a escribir /start. También se puede poner en{' '}
+            <Link to="/cuentas">Cuentas</Link> → editar → «Chat de Telegram».
+          </div>
+          <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+            <div className="field" style={{ width: 220 }}>
+              <label htmlFor="tg-other">Probar otro chat ID</label>
+              <input
+                id="tg-other"
+                className="input mono"
+                inputMode="numeric"
+                value={other}
+                onChange={(e) => setOther(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && tg.enabled && !busy && otherValid) void sendTest(otherTrim);
+                }}
+                placeholder="-1001234567890"
+                aria-invalid={otherTrim !== '' && !otherValid}
+              />
+            </div>
+            <button type="button" className="btn" disabled={!tg.enabled || busy || !otherValid} onClick={() => void sendTest(otherTrim)}>
+              Probar ese chat
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Ayuda */}
+        <div className="stack small ink2" style={{ gap: 8 }}>
+          <h3 className="sign">Cómo funciona</h3>
+          <p style={{ margin: 0 }}>
+            <b>Crear el bot:</b> en Telegram abre <b>@BotFather</b>, envía <code>/newbot</code>, ponle un nombre y un usuario que termine en «bot» y copia el token en el paso 1.
+          </p>
+          <p style={{ margin: 0 }}>
+            <b>Comandos del bot</b> (el menú se pone solo al conectar):{' '}
+            {BOT_COMMANDS.map(([cmd, text], i) => (
+              <span key={cmd}>
+                <code>{cmd}</code> {text}
+                {i < BOT_COMMANDS.length - 1 ? ' · ' : '.'}
+              </span>
+            ))}
+          </p>
+          <p style={{ margin: 0 }}>
+            <b>Grupo (opcional):</b> crea un grupo, añade el bot y escribe <code>/id</code> en el grupo; usa ese número (empieza por «-») como chat principal y todo el grupo verá
+            alertas y tareas.
+          </p>
+          <p style={{ margin: 0 }}>
+            <b>Seguridad:</b> el token es secreto; solo está en el archivo <code>.env</code> de este ordenador. Si se filtra, en @BotFather usa <code>/revoke</code> y pega aquí el
+            nuevo. Otros chats que escriban al bot solo reciben su número: no ven nada ni pueden tocar nada.
+          </p>
+        </div>
+      </div>
     </Card>
   );
 }

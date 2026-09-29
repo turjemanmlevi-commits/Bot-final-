@@ -910,6 +910,10 @@ export interface TelegramStatus {
   bot: string | null;
   /** Hay chat principal configurado (TELEGRAM_CHAT_ID). */
   mainChatConfigured: boolean;
+  /** Chat principal actual, o null. */
+  mainChatId: string | null;
   /** Últimos chats que han escrito al bot, para averiguar su chat ID. */
   recentChats: TelegramChatSeen[];
+  /** El token y el chat principal se pueden poner desde el dashboard (el servidor los guarda en .env). */
+  configurable: boolean;
 }

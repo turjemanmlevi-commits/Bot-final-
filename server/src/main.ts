@@ -7,10 +7,11 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { serve } from '@hono/node-server';
-import { env } from './env';
+import { ENV_FILE, ENV_TEMPLATE, env } from './env';
 import { APP_VERSION, createApp } from './app';
 import { createHttpApp } from './http/app';
 import { MemoryDriver, PgliteDriver, PostgresDriver, type JournalDriver } from './store/drivers';
+import { TelegramControl } from './telegram/control';
 import { TelegramNotifier } from './telegram/telegram';
 import { log } from './util/log';
 
@@ -54,10 +55,14 @@ async function main(): Promise<void> {
     }
     process.exit(1);
   }
-  notifier?.attach(app.runtime);
+  // Telegram se puede configurar (o cambiar) desde el dashboard sin reiniciar.
+  const telegram = new TelegramControl(
+    { runtime: app.runtime, apiBase: env.telegramApiBase, timeZone: env.timeZone, envFile: ENV_FILE, envTemplate: ENV_TEMPLATE },
+    { token: env.telegramToken, chatId: env.telegramChatId, notifier },
+  );
 
   const dist = existsSync(path.join(env.dashboardDist, 'index.html')) ? env.dashboardDist : null;
-  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken });
+  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram });
   const server = serve({ fetch: http.fetch, port: env.port, hostname: env.host }, (info) => {
     const url = `http://${env.host === '0.0.0.0' ? 'localhost' : env.host}:${info.port}`;
     console.log('');
@@ -68,7 +73,7 @@ async function main(): Promise<void> {
     console.log(`  Vault       ${env.vaultDir}${existsSync(env.vaultDir) ? '' : '  (NO EXISTE)'}`);
     console.log(`  Journal     ${env.journalDriver}${env.journalDriver === 'pglite' ? ` → ${path.join(env.dataDir, 'pglite')}` : ''}`);
     console.log(
-      `  Telegram    ${notifier ? (env.telegramChatId ? `activado (chat ${env.telegramChatId})` : 'token puesto, falta TELEGRAM_CHAT_ID: escribe /start al bot') : 'desactivado (ver «Configurar Telegram» en la guía)'}`,
+      `  Telegram    ${notifier ? (env.telegramChatId ? `activado (chat ${env.telegramChatId})` : 'bot conectado; falta el chat principal: ábrelo en Telegram, pulsa «Iniciar» y elígelo en Ajustes · Telegram') : 'sin configurar: pega el token de tu bot en el dashboard → Ajustes · Telegram'}`,
     );
     console.log('');
     console.log('  Demo: botón "Nueva demo" en el dashboard, o  npm run seed:demo');
@@ -89,7 +94,7 @@ async function main(): Promise<void> {
     if (closing) return;
     closing = true;
     log.info(`Cerrando (${signal})…`);
-    notifier?.stop();
+    telegram.stop();
     server.close();
     await app.stop().catch((err: Error) => log.error('Error al cerrar', { error: err.message }));
     process.exit(0);

@@ -71,6 +71,8 @@ async function withFieldLabels<T>(fn: () => Promise<T>): Promise<T> {
 function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => void }) {
   const s = useLive();
   const { run, busy } = useAction();
+  // Chats que han escrito al bot: se eligen en el campo «Chat de Telegram» sin copiar números.
+  const tgChats = s.system?.telegram.recentChats ?? [];
   const [f, setF] = useState<AccountInput>(
     initial
       ? {
@@ -180,8 +182,24 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
           </div>
           <div className="field">
             <label htmlFor="acc-tg">Chat de Telegram (opcional)</label>
-            <input id="acc-tg" className="input mono" value={f.telegramChatId ?? ''} onChange={(e) => set('telegramChatId', e.target.value)} placeholder="123456789" />
-            <span className="hint">Número que da el bot con /start o /id (en grupos empieza por «-»). Opcional: esta persona recibirá solo sus tareas.</span>
+            <input
+              id="acc-tg"
+              className="input mono"
+              list="acc-tg-chats"
+              value={f.telegramChatId ?? ''}
+              onChange={(e) => set('telegramChatId', e.target.value)}
+              placeholder="123456789"
+            />
+            <datalist id="acc-tg-chats">
+              {tgChats.map((c) => (
+                <option key={c.chatId} value={c.chatId}>
+                  {c.name}
+                </option>
+              ))}
+            </datalist>
+            <span className="hint">
+              Esta persona abre el bot y pulsa «Iniciar»; su chat sale en la lista de este campo (o en Ajustes · Telegram). Recibirá solo sus tareas.
+            </span>
           </div>
         </div>
         <label className="check">

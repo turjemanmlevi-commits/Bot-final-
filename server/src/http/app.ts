@@ -19,7 +19,9 @@ import {
   OperationConfigSchema,
   parseVenueLayout,
   SessionHumanSchema,
+  TelegramMainChatSchema,
   TelegramTestSchema,
+  TelegramTokenSchema,
   VenueQuickInputSchema,
   type ApiErrorBody,
   type EventNoteInput,
@@ -27,6 +29,7 @@ import {
   type LabelResolutionResult,
   type OperationConfig,
   type StreamMessage,
+  type TelegramConfigResult,
   type TelegramTestResult,
   type VenueQuickResult,
 } from '@to/shared';
@@ -39,6 +42,7 @@ import { CartError } from '../runtime/carts';
 import { seedDemo } from '../runtime/demo';
 import { OperationError } from '../runtime/operations';
 import { TaskError } from '../runtime/tasks';
+import type { TelegramControl } from '../telegram/control';
 import { log } from '../util/log';
 import { normalizeLabel, slugify } from '../util/normalize';
 import { createEventNote, createVenueNotes, updateEventNote, VaultWriteError, type EventWriteContext } from '../vault/writer';
@@ -46,11 +50,13 @@ import { createEventNote, createVenueNotes, updateEventNote, VaultWriteError, ty
 export interface HttpOptions {
   dashboardDist: string | null;
   operatorToken: string | null;
+  /** Configuración de Telegram desde el dashboard (token y chat principal). */
+  telegram?: TelegramControl | null;
 }
 
 class ApiError extends Error {
   constructor(
-    readonly status: 400 | 401 | 404 | 409 | 422 | 500,
+    readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 500,
     readonly code: string,
     message: string,
     readonly details?: unknown,
@@ -86,6 +92,30 @@ async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer
   return r.data;
 }
 
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * Cambios de configuración (el token del bot): solo desde el propio dashboard.
+ * Exige JSON (otra web no puede mandarlo sin permiso del navegador) y, si el
+ * navegador indica el origen, que sea esta misma página o localhost.
+ */
+function sameSite(c: Context): void {
+  const type = (c.req.header('content-type') ?? '').toLowerCase();
+  if (!type.startsWith('application/json')) throw new ApiError(400, 'BAD_CONTENT_TYPE', 'Se esperaba JSON');
+  const origin = c.req.header('origin');
+  if (!origin) return;
+  let url: URL | null = null;
+  try {
+    url = new URL(origin);
+  } catch {
+    url = null;
+  }
+  const host = c.req.header('host') ?? '';
+  if (!url || (url.host !== host && !LOOPBACK.has(url.hostname))) {
+    throw new ApiError(403, 'FORBIDDEN_ORIGIN', 'Esta petición viene de otra web: solo se puede configurar desde el dashboard.');
+  }
+}
+
 /** Nombres de campo legibles en los mensajes de error (los formularios los muestran tal cual). */
 const FIELD_LABEL: Record<string, string> = {
   label: 'Nombre visible',
@@ -93,6 +123,8 @@ const FIELD_LABEL: Record<string, string> = {
   householdRef: 'Hogar',
   paymentRef: 'Medio de pago',
   telegramChatId: 'Chat de Telegram',
+  token: 'Token del bot',
+  chatId: 'Chat',
   qty: 'Cantidad',
   unitPrice: 'Precio por entrada',
   minutes: 'Minutos',
@@ -306,7 +338,25 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     const n = ctx.notifier;
     const result: TelegramTestResult = n?.sendTest
       ? await n.sendTest(b.chatId ?? null)
-      : { ok: false, message: 'Telegram está desactivado: pon TELEGRAM_BOT_TOKEN en el archivo .env y reinicia (ver la guía «Configurar Telegram»).' };
+      : { ok: false, message: 'Telegram no está configurado: pega el token de tu bot en Ajustes · Telegram.' };
+    return c.json(result);
+  });
+
+  // Telegram desde el dashboard: token del bot y chat principal (se guardan en .env, sin reiniciar).
+  const telegramControl = () => {
+    if (!opts.telegram) throw new ApiError(409, 'TELEGRAM_UNAVAILABLE', 'Este servidor no permite configurar Telegram desde el dashboard: usa el archivo .env.');
+    return opts.telegram;
+  };
+  http.put('/api/telegram/token', async (c) => {
+    sameSite(c);
+    const b = await body(c, TelegramTokenSchema);
+    const result: TelegramConfigResult = await telegramControl().setToken(b.token, actorOf(c));
+    return c.json(result);
+  });
+  http.put('/api/telegram/main-chat', async (c) => {
+    sameSite(c);
+    const b = await body(c, TelegramMainChatSchema);
+    const result: TelegramConfigResult = await telegramControl().setMainChat(b.chatId, actorOf(c));
     return c.json(result);
   });
 
