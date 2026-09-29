@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
 import type { FeedId, FeedStatus, ProviderAuthorization, ProviderDescriptor, ProviderMode } from '@to/shared';
 import { Icon, type IconName } from '../components/Icon';
+import { SendToSalaButton } from '../components/SendToSala';
 import { Callout, Card, Pill, type Tone } from '../components/ui';
 import { Api } from '../lib/api';
 import { fmtDateTime, fmtTime } from '../lib/format';
@@ -827,10 +828,18 @@ function FeedsCard() {
         <div className="muted">Cargando…</div>
       ) : (
         <div className="stack" style={{ gap: 22 }}>
+          <div className="stack" style={{ gap: 8 }}>
+            <b style={{ fontSize: 16 }}>Sin claves: botón «📥 Enviar a la sala»</b>
+            <div className="small ink2">
+              Funciona con cualquier web oficial (Ticketmaster, entradas.com, realmadrid.com…): abres el evento en tu navegador, pulsas el botón y la sala se abre con el
+              evento relleno (nombre, fecha, recinto, enlace, apertura de la venta y límite, si la página los enseña). Solo lee lo que tú estás viendo, cuando lo pulsas.
+            </div>
+            <SendToSalaButton compact />
+          </div>
+          <div className="divider" />
           <div className="small ink2">
-            Con estas claves, al crear un evento eliges entre los próximos eventos del recinto (fecha, hora, apertura de la venta y límite de compra oficiales) en vez de
-            escribirlos, y la sala vigila el evento los días antes de la venta. Solo leen datos públicos: no entran en ninguna web de venta ni compran nada. entradas.com y la web
-            del Real Madrid no tienen una API pública oficial: sus eventos se escriben a mano (los partidos del Real Madrid sí salen con «Partidos»).
+            <b>Opcional, con clave gratuita:</b> la lista de próximos eventos de Ticketmaster (toda España) y de los partidos de LaLiga y Champions dentro de la sala, y la
+            vigilancia de cambios oficiales (hora de venta, preventas, límite, cancelación). Solo leen datos públicos: no entran en ninguna web de venta ni compran nada.
           </div>
           <FeedBlock feed="ticketmaster" status={feeds.ticketmaster} configurable={feeds.configurable} />
           <div className="divider" />

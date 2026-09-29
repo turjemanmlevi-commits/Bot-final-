@@ -30,7 +30,7 @@ Todas las acciones en la web las hace **una persona, con su propia cuenta**. `au
 
 ## Cómo preparar una compra en entradas.com
 
-1. **Evento** — Dashboard → *Eventos* → **Nuevo evento**. Proveedor *entradas.com*, pega el enlace oficial del evento (`https://www.entradas.com/event/...`) y la apertura de la venta. entradas.com (CTS Eventim) **no tiene una API pública oficial**, así que sus eventos no salen en la lista de «Elige el evento oficial»: se escriben a mano. Con **Vigilar desde** tendrás igualmente los recordatorios por Telegram (ver [[Buscar eventos oficiales y vigilar la venta]]).
+1. **Evento** — Dashboard → *Eventos* → **Nuevo evento**. Proveedor *entradas.com*, pega el enlace oficial del evento (`https://www.entradas.com/event/...`) y la apertura de la venta. entradas.com (CTS Eventim) **no tiene una API pública oficial**: sus eventos se traen con el marcador **📥 Enviar a la sala** desde la página del evento (nombre, fecha, recinto, precios y el límite si la página lo enseña). Con **Vigilar desde** tendrás los recordatorios por Telegram (ver [[Buscar eventos oficiales y vigilar la venta]]).
 2. **Límites** — Cópialos de la ficha del evento («máximo X entradas por pedido / por cliente») y anota de dónde salen. Si la venta no lo dice claro, deja los límites sin verificar: el sistema no te dejará armar hasta que lo confirmes (fail-closed).
 3. **Cuentas** — *Cuentas* → **Nueva cuenta**, proveedor *entradas.com*, una por persona del grupo.
 4. **Operación** — sigue [[Comprar entradas reales (paso a paso)]].

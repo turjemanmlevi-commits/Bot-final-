@@ -37,6 +37,8 @@ interface FdMatch {
 
 export interface FootballMatch {
   event: FeedEvent;
+  /** Competición (PD = LaLiga, CL = Champions). */
+  competition: string;
   /** Nombres del equipo local (para saber en qué estadio se juega). */
   homeNames: string[];
   venueName: string | null;
@@ -91,9 +93,11 @@ export function normalizeMatch(m: FdMatch, timeZone: string): FootballMatch | nu
     category: label,
     seatmapUrl: null,
     info: timeTBA ? 'La hora todavía no está fijada (LaLiga suele confirmarla unas dos semanas antes): si vigilas el evento, te aviso cuando salga.' : null,
+    vaultVenueId: null,
+    home: cleanText(m.homeTeam?.shortName, 60) ?? cleanText(m.homeTeam?.name, 80),
   };
   const homeNames = [m.homeTeam?.name, m.homeTeam?.shortName].filter((x): x is string => typeof x === 'string' && x.trim() !== '');
-  return { event, homeNames, venueName };
+  return { event, competition: code, homeNames, venueName };
 }
 
 /** ¿Se juega este partido en nuestro estadio? (por el club local o por el nombre del estadio) */

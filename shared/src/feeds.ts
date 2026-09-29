@@ -73,6 +73,10 @@ export interface FeedEvent {
   info: string | null;
   /** En los resultados de una búsqueda por nombre: ¿es en el recinto elegido? */
   atVenue?: boolean;
+  /** Recinto del vault donde es (null si no está en el vault: se puede crear al guardar). */
+  vaultVenueId: string | null;
+  /** Partidos: equipo local (el club que vende las entradas). */
+  home: string | null;
 }
 
 export interface FeedStatus {
@@ -103,6 +107,8 @@ export interface FeedEventsResult {
   events: FeedEvent[];
   /** Explicación cuando no hay resultados o falta algo (clave, club…). */
   message: string | null;
+  /** Había más eventos de los que se pueden traer de una vez: afina con el buscador. */
+  truncated: boolean;
 }
 
 /** Clave de una fuente: la «Consumer Key» de Ticketmaster o el token de football-data.org. */

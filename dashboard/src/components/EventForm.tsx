@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Link } from 'react-router';
 import {
   EventNoteInputSchema,
@@ -10,7 +10,9 @@ import {
   type FeedEvent,
   type FeedId,
   type FeedSale,
+  type ImportedEvent,
   type LimitSemantics,
+  type PageImport,
   type ProviderAuthorization,
   type ProviderMode,
   type VaultIssue,
@@ -20,7 +22,7 @@ import { fmtRel } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 import { Icon } from './Icon';
-import { fmtMadrid, OfficialEventPicker } from './OfficialEventPicker';
+import { EventSourcePanel, fmtMadrid } from './OfficialEventPicker';
 import { Callout, Card } from './ui';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,24 @@ interface FormState {
   officialSale: string | null;
   /** Días antes de la venta desde los que se vigila ('0' = no). */
   watchDaysBefore: string;
+  /** Recinto que no está en la sala: se crea al guardar (venueId = NEW_VENUE). */
+  newVenue: { name: string; city: string | null } | null;
+}
+
+/** Valor del selector de recinto para «recinto nuevo, se crea al guardar». */
+const NEW_VENUE = '__nuevo__';
+
+/** Estructura orientativa de un recinto nuevo según su nombre (se revisa después con el plano oficial). */
+function guessLayout(name: string): string {
+  const n = name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+  if (/estadi|stadium|camp nou|campo de futbol|coliseum/.test(n)) return 'Tribuna\nPreferencia\nFondo Norte\nFondo Sur';
+  if (/teatro|teatre|auditori|opera|gran casino|sala /.test(n)) return 'Patio de butacas\nAnfiteatro';
+  if (/arena|palacio|pabellon|palau|center|centre|multiusos|coliseo|toros|velodromo|wizink/.test(n)) return 'Pista (de pie)\nGrada baja\nGrada alta';
+  if (/festival|recinto|parque|parc|ferial|playa|explanada|ifema|fira/.test(n)) return 'General (de pie)';
+  return 'General';
 }
 
 /** Opciones de «Vigilar desde». */
@@ -215,6 +235,7 @@ function blank(providerId: string): FormState {
     officialId: '',
     officialSale: null,
     watchDaysBefore: '2',
+    newVenue: null,
   };
 }
 
@@ -240,6 +261,7 @@ function fromEvent(e: CatalogEvent): FormState {
     officialId: e.officialId ?? '',
     officialSale: e.officialSale ?? null,
     watchDaysBefore: String(e.watchDaysBefore ?? 0),
+    newVenue: null,
   };
 }
 
@@ -284,15 +306,104 @@ function FieldError({ msg }: { msg: string | undefined }) {
 
 const warnHint: CSSProperties = { color: 'var(--warning-ink)' };
 
+const IMPORT_STATUS: Record<NonNullable<ImportedEvent['status']>, string> = {
+  CANCELLED: 'La página dice que está CANCELADO.',
+  POSTPONED: 'La página dice que está APLAZADO.',
+  RESCHEDULED: 'La página dice que ha CAMBIADO DE FECHA: revisa la fecha.',
+  SOLD_OUT: 'La página dice que está AGOTADO.',
+};
+
+/** Qué se ha leído de la página oficial, qué falta, y elegir fecha (si hay varias) y fase de venta. */
+function ImportSummary({
+  info,
+  onChoose,
+  onDismiss,
+  newVenue,
+}: {
+  info: { page: PageImport; index: number; sale: string | null };
+  /** sale = undefined: la fase por defecto (la venta general próxima). */
+  onChoose: (index: number, sale: string | null | undefined) => void;
+  onDismiss: () => void;
+  newVenue: { name: string; city: string | null } | null;
+}) {
+  const ev = info.page.events[info.index];
+  if (!ev) return null;
+  const got: string[] = [];
+  const missing: string[] = [];
+  (ev.name ? got : missing).push('nombre');
+  (ev.startsAtLocal ? got : missing).push(ev.startsAtLocal && ev.timeTBA ? 'fecha (sin hora)' : 'fecha y hora');
+  (ev.venueId || newVenue ? got : missing).push('recinto');
+  (ev.url ? got : missing).push('enlace');
+  (ev.sales.length > 0 ? got : missing).push('apertura de la venta');
+  (ev.limit.perCustomer !== null ? got : missing).push('límite de compra');
+  if (ev.price) got.push('precio');
+  return (
+    <Callout tone={missing.length === 0 ? 'good' : 'warning'} icon="check">
+      <div className="stack" style={{ gap: 8 }}>
+        <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+          <b>📥 Recibido de {info.page.host || 'la web oficial'}</b>
+          <button type="button" className="btn sm ghost" onClick={onDismiss}>
+            Ocultar
+          </button>
+        </div>
+        <div className="small">
+          Rellenado: {got.join(', ')}.{' '}
+          {missing.length > 0 ? (
+            <b>
+              No aparece en la página: {missing.join(', ')}
+              {missing.includes('apertura de la venta') ? ' (si aún no está anunciada, ponla cuando salga: la vigilancia te lo recuerda)' : ''}. Complétalo abajo.
+            </b>
+          ) : (
+            'Revisa y guarda.'
+          )}
+        </div>
+        {ev.status ? <div className="small" style={{ color: 'var(--critical-ink)' }}>{IMPORT_STATUS[ev.status]}</div> : null}
+        {newVenue ? (
+          <div className="small">
+            Recinto nuevo: <b>{newVenue.name}</b>
+            {newVenue.city ? ` (${newVenue.city})` : ''}. No estaba en la sala: se crea al guardar.
+          </div>
+        ) : null}
+        {info.page.events.length > 1 ? (
+          <div className="field">
+            <label htmlFor="evf-import-date">Esta página tiene {info.page.events.length} fechas: ¿cuál?</label>
+            <select id="evf-import-date" className="input" value={info.index} onChange={(e) => onChoose(Number(e.target.value), undefined)}>
+              {info.page.events.map((x, i) => (
+                <option key={`${i}-${x.startsAtLocal}`} value={i}>
+                  {x.startsAtLocal ? x.startsAtLocal.replace('T', ' · ') : 'sin fecha'} — {x.venueName ?? x.name ?? ''}
+                  {x.city ? ` (${x.city})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
+        {ev.sales.length > 0 ? (
+          <div className="stack" style={{ gap: 4 }}>
+            <span className="small">¿Qué venta es la vuestra? Su hora será la apertura (T0):</span>
+            <div className="row" style={{ gap: 6 }}>
+              {ev.sales.map((x) => (
+                <button key={x.name} type="button" className={`btn sm ${info.sale === x.name ? 'primary' : ''}`} onClick={() => onChoose(info.index, x.name)}>
+                  {info.sale === x.name ? <Icon name="check" size={12} /> : null} {x.name} · {x.startsAtLocal.replace('T', ' ')}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </Callout>
+  );
+}
+
 // ---------------------------------------------------------------------------
 
-export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone: (eventId: string | null) => void }) {
+export function EventForm({ initial, imported, onDone }: { initial?: CatalogEvent; imported?: PageImport | null; onDone: (eventId: string | null) => void }) {
   const s = useLive();
   const now = useNow(30_000);
   const { run, busy } = useAction();
   const providers = useMemo(() => sortProviders(s.providerAuthorizations), [s.providerAuthorizations]);
   const venues = s.vault?.venues ?? [];
-  const [f, setF] = useState<FormState>(() => (initial ? fromEvent(initial) : blank(defaultProviderId(providers))));
+  // Un evento nuevo empieza por «Dónde se vende» (sin nada elegido).
+  const [f, setF] = useState<FormState>(() => (initial ? fromEvent(initial) : blank('')));
   const [errors, setErrors] = useState<Errors>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -301,13 +412,99 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
   const tz = useMemo(browserTimeZone, []);
   /** Último evento elegido de la fuente oficial (para enseñar de dónde sale cada dato). */
   const [picked, setPicked] = useState<{ event: FeedEvent; sale: FeedSale | null } | null>(null);
+  /** Página oficial enviada con «📥 Enviar a la sala» (y qué evento y fase de venta se usan). */
+  const [fromPage, setFromPage] = useState<{ page: PageImport; index: number; sale: string | null } | null>(null);
 
-  // El catálogo de proveedores puede llegar después de abrir el formulario.
+  /** Rellena el formulario con lo leído de la página oficial. */
+  const applyImported = (page: PageImport, index: number, saleName: string | null | undefined) => {
+    const ev = page.events[index];
+    if (!ev) return;
+    const nowLocal = madridLocal(Date.now());
+    const sale =
+      saleName === undefined
+        ? (ev.sales.find((x) => /general/i.test(x.name) && x.startsAtLocal >= nowLocal) ?? ev.sales.find((x) => x.startsAtLocal >= nowLocal) ?? ev.sales.at(-1) ?? null)
+        : (ev.sales.find((x) => x.name === saleName) ?? null);
+    setFromPage({ page, index, sale: sale?.name ?? null });
+    setPicked(null);
+    setErrors({});
+    setF((x) => {
+      const providerId = page.providerId ?? (providers.some((p) => p.providerId === 'manual') ? 'manual' : x.providerId);
+      const n = ev.limit.perCustomer;
+      const limits: Partial<FormState> =
+        n !== null
+          ? {
+              limitPerAccount: String(n),
+              limitPerGroup: String(n),
+              limitPerOperation: String(Math.max(n, toInt(x.limitPerOperation) || 0)),
+              limitSemantics: ev.limit.semantics ?? 'PER_HOLDER',
+              limitsVerified: true,
+              limitsSource: `Página oficial (${page.host}), ${madridToday()}: «${ev.limit.text ?? `${n} por cliente`}»${ev.url ? ` · ${ev.url}` : ''}`.slice(0, 500),
+            }
+          : { limitsVerified: false, limitsSource: ev.url ? `Página oficial: ${ev.url}`.slice(0, 500) : x.limitsSource };
+      const venue: Partial<FormState> = ev.venueId
+        ? { venueId: ev.venueId, newVenue: null }
+        : ev.venueName
+          ? { venueId: NEW_VENUE, newVenue: { name: ev.venueName.slice(0, 100), city: ev.city } }
+          : {};
+      return {
+        ...x,
+        providerId,
+        name: ev.name ? ev.name.slice(0, 120) : x.name,
+        url: ev.url ?? x.url,
+        startsAt: ev.startsAtLocal ?? x.startsAt,
+        onSaleAt: sale?.startsAtLocal ?? '',
+        currency: ev.price?.currency && /^[A-Z]{3}$/.test(ev.price.currency) ? ev.price.currency : x.currency,
+        ...limits,
+        ...venue,
+        watchDaysBefore: x.watchDaysBefore === '0' ? '2' : x.watchDaysBefore,
+      };
+    });
+  };
+
+  /**
+   * Con la clave de Ticketmaster (o el token de los partidos), el evento traído de
+   * la página se busca también en la fuente oficial: si está, queda vinculado y la
+   * vigilancia avisará de los cambios (no solo recordatorios).
+   */
+  const linkRun = useRef(0);
+  const tryLinkOfficial = async (ev: ImportedEvent, providerId: string | null) => {
+    const run = ++linkRun.current;
+    const start = ev.startsAtLocal ? madridEpoch(ev.startsAtLocal) : null;
+    if (!ev.name || start === null) return;
+    const feeds = s.system?.feeds;
+    const days = Math.min(400, Math.max(1, Math.ceil((start - Date.now()) / 86_400_000) + 1));
+    let found: FeedEvent | undefined;
+    try {
+      if (providerId === 'ticketmaster' && feeds?.ticketmaster.configured) {
+        const r = await Api.feedEvents({ feed: 'ticketmaster', days, q: ev.name.slice(0, 60) });
+        found = r.events.find((e) => e.startsAt !== null && Math.abs(Date.parse(e.startsAt) - start) <= 10 * 60_000);
+      } else if (providerId === 'real-madrid' && feeds?.football.configured) {
+        const r = await Api.feedEvents({ feed: 'football', days, club: 'Real Madrid' });
+        found = r.events.find((e) => e.startsAtLocal !== null && e.startsAtLocal.slice(0, 10) === ev.startsAtLocal?.slice(0, 10));
+      }
+    } catch {
+      return; // sin vínculo: la vigilancia manda recordatorios igualmente
+    }
+    if (!found || run !== linkRun.current) return;
+    const match = found;
+    setF((x) => ({
+      ...x,
+      officialFeed: match.feed,
+      officialId: match.id,
+      officialSale: match.sales.find((sale) => sale.startsAtLocal !== null && sale.startsAtLocal === x.onSaleAt)?.name ?? null,
+    }));
+  };
+
+  // Lo que llega de «📥 Enviar a la sala» se aplica al abrir el formulario.
+  const appliedImport = useRef<PageImport | null>(null);
   useEffect(() => {
-    if (initial || f.providerId !== '') return;
-    const def = defaultProviderId(providers);
-    if (def) setF((x) => (x.providerId === '' ? { ...x, providerId: def } : x));
-  }, [initial, f.providerId, providers]);
+    if (!imported || appliedImport.current === imported) return;
+    appliedImport.current = imported;
+    applyImported(imported, 0, undefined);
+    const first = imported.events[0];
+    if (first) void tryLinkOfficial(first, imported.providerId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imported]);
 
   const createdEvent = created
     ? (Object.values(s.events).find((e) => e.sourceFile === created.file) ?? (created.id ? s.events[created.id] : undefined))
@@ -336,6 +533,7 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
   /** Rellena el formulario con los datos oficiales del evento elegido. */
   const pickOfficial = (e: FeedEvent, sale: FeedSale | null) => {
     setPicked({ event: e, sale });
+    setFromPage(null);
     setErrors({});
     setF((x) => {
       const n = e.limit.perCustomer;
@@ -354,13 +552,20 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
       // Los partidos los vende el club en su web: Real Madrid → su proveedor; el resto → «Otra web oficial».
       let providerId = x.providerId;
       if (e.feed === 'football' && (providerId === '' || providerId === 'ticketmaster' || providers.find((p) => p.providerId === providerId)?.mode === 'SIMULATED')) {
-        const isRM = (s.vault?.venues.find((v) => v.venueId === x.venueId)?.clubs ?? []).some((c) => /real madrid/i.test(c));
+        const isRM = (s.vault?.venues.find((v) => v.venueId === (e.vaultVenueId ?? x.venueId))?.clubs ?? []).some((c) => /real madrid/i.test(c)) || /real madrid/i.test(e.home ?? '');
         const wanted = isRM ? 'real-madrid' : 'manual';
         if (providers.some((p) => p.providerId === wanted)) providerId = wanted;
       }
       const providerUrl = providers.find((p) => p.providerId === providerId)?.url ?? '';
+      // Recinto: el de la sala que le corresponde o, si no está, uno nuevo que se crea al guardar.
+      const venue: Partial<FormState> = e.vaultVenueId
+        ? { venueId: e.vaultVenueId, newVenue: null }
+        : e.venue?.name
+          ? { venueId: NEW_VENUE, newVenue: { name: e.venue.name.slice(0, 100), city: e.venue.city } }
+          : {};
       return {
         ...x,
+        ...venue,
         providerId,
         name: e.name.slice(0, 120),
         url: e.url ?? (x.url || providerUrl),
@@ -420,12 +625,41 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
     return { body: r.success && Object.keys(errs).length === 0 ? r.data : null, errs };
   };
 
+  /** Crea el recinto nuevo (o usa el que ya exista con ese nombre) y devuelve su id. */
+  const createPendingVenue = async (): Promise<string | null> => {
+    const nv = f.newVenue;
+    if (!nv) return null;
+    const existing = venues.find((v) => v.name.trim().toLowerCase() === nv.name.trim().toLowerCase());
+    if (existing) return existing.venueId;
+    try {
+      const r = await Api.createVenue({
+        name: nv.name,
+        city: nv.city ?? undefined,
+        source: `Creado al elegir el evento${f.url ? ` (${f.url})` : ''}. Estructura orientativa: revísala con el plano oficial`.slice(0, 300),
+        layout: guessLayout(nv.name),
+      });
+      return r.venueId;
+    } catch (e) {
+      setServerError(`No se pudo crear el recinto «${nv.name}»: ${e instanceof Error ? e.message : String(e)}. Elige otro recinto en la lista.`);
+      return null;
+    }
+  };
+
   const submit = async () => {
     setServerError(null);
     setOutcome(null);
     const { body, errs } = validate();
     setErrors(errs);
     if (!body || lockedCreate) return;
+    if (body.venueId === NEW_VENUE) {
+      const venueId = await createPendingVenue();
+      if (!venueId) {
+        setErrors((e) => ({ ...e, venueId: 'No se pudo crear el recinto: elige uno de la lista' }));
+        return;
+      }
+      body.venueId = venueId;
+      setF((x) => ({ ...x, venueId, newVenue: null }));
+    }
     const saveTarget = target;
     const hadEvents = Object.keys(s.events).length > 0;
     const notReloaded = (r: { event: CatalogEvent | null; report: { ok: boolean } }) => r.event === null || (!r.report.ok && hadEvents);
@@ -486,10 +720,59 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
       ) : null}
 
       <div className="form-section">
-        <h3 className="sign">1 · Evento</h3>
+        <h3 className="sign">1 · Dónde se vende</h3>
+        <div className="stack">
+          <div className="field" style={{ maxWidth: 520 }}>
+            <label htmlFor="evf-provider">Web de venta</label>
+            <select
+              id="evf-provider"
+              className="input"
+              value={f.providerId}
+              onChange={(e) => {
+                set('providerId', e.target.value);
+                if (f.officialFeed === 'ticketmaster' && e.target.value !== 'ticketmaster') unlinkOfficial();
+              }}
+              aria-invalid={Boolean(errors.providerId)}
+              style={bad('providerId')}
+            >
+              {f.providerId === '' ? <option value="">Elige dónde se vende…</option> : null}
+              {providers.map((p) => (
+                <option key={p.providerId} value={p.providerId}>
+                  {p.name} · {MODE_LABEL[p.mode]}
+                </option>
+              ))}
+              {f.providerId && !provider ? <option value={f.providerId}>{f.providerId} (no está en el vault)</option> : null}
+            </select>
+            <FieldError msg={errors.providerId} />
+            {f.providerId === '' ? <span className="hint">Empieza por aquí: después eliges el evento y se rellena todo lo demás (recinto incluido).</span> : null}
+          </div>
+          {fromPage ? (
+            <ImportSummary
+              info={fromPage}
+              onChoose={(index, sale) => {
+                applyImported(fromPage.page, index, sale);
+                const ev = fromPage.page.events[index];
+                if (ev && index !== fromPage.index) void tryLinkOfficial(ev, fromPage.page.providerId);
+              }}
+              onDismiss={() => setFromPage(null)}
+              newVenue={f.venueId === NEW_VENUE ? f.newVenue : null}
+            />
+          ) : null}
+          <EventSourcePanel
+            key={f.providerId}
+            provider={provider ?? null}
+            linked={f.officialFeed ? { feed: f.officialFeed, id: f.officialId, name: picked?.event.name ?? (initial?.officialId === f.officialId ? initial.name : null), sale: f.officialSale } : null}
+            onPick={pickOfficial}
+            onUnlink={unlinkOfficial}
+          />
+        </div>
+      </div>
+
+      <div className="form-section">
+        <h3 className="sign">2 · Evento</h3>
         <div className="stack">
           <div className="form-grid">
-            <div className="field">
+            <div className="field" style={{ gridColumn: 'span 2' }}>
               <label htmlFor="evf-venue">Recinto</label>
               <select
                 id="evf-venue"
@@ -498,56 +781,35 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
                 onChange={(e) => {
                   set('venueId', e.target.value);
                   // El evento oficial vinculado era de otro recinto.
-                  if (f.officialFeed) unlinkOfficial();
+                  if (f.officialFeed && e.target.value !== f.venueId) unlinkOfficial();
                 }}
                 aria-invalid={Boolean(errors.venueId)}
                 style={bad('venueId')}
               >
-                <option value="">Elige el recinto…</option>
+                <option value="">{f.providerId ? 'Se elige solo al escoger el evento (o elígelo aquí)…' : 'Elige el recinto…'}</option>
+                {f.newVenue ? (
+                  <option value={NEW_VENUE}>
+                    ➕ {f.newVenue.name}
+                    {f.newVenue.city ? ` (${f.newVenue.city})` : ''} — recinto nuevo, se crea al guardar
+                  </option>
+                ) : null}
                 {venues.map((v) => (
                   <option key={v.venueId} value={v.venueId}>
                     {v.name}
                   </option>
                 ))}
-                {f.venueId && !venues.some((v) => v.venueId === f.venueId) ? <option value={f.venueId}>{f.venueId} (no está en el vault)</option> : null}
+                {f.venueId && f.venueId !== NEW_VENUE && !venues.some((v) => v.venueId === f.venueId) ? <option value={f.venueId}>{f.venueId} (no está en el vault)</option> : null}
               </select>
               <FieldError msg={errors.venueId} />
               <span className="hint">
-                ¿No está? <Link to="/recintos?nuevo=1">Créalo en Recintos → Nuevo recinto</Link>
+                {f.venueId === NEW_VENUE
+                  ? 'No estaba en la sala: al guardar se crea con una estructura orientativa (revísala después en Recintos).'
+                  : picked || fromPage
+                    ? 'Elegido automáticamente según el evento.'
+                    : null}{' '}
+                <Link to="/recintos?nuevo=1">Crear un recinto a mano</Link>
               </span>
             </div>
-            <div className="field">
-              <label htmlFor="evf-provider">Dónde se vende</label>
-              <select
-                id="evf-provider"
-                className="input"
-                value={f.providerId}
-                onChange={(e) => {
-                  set('providerId', e.target.value);
-                  if (f.officialFeed === 'ticketmaster' && e.target.value !== 'ticketmaster') unlinkOfficial();
-                }}
-                aria-invalid={Boolean(errors.providerId)}
-                style={bad('providerId')}
-              >
-                {f.providerId === '' ? <option value="">Elige dónde se vende…</option> : null}
-                {providers.map((p) => (
-                  <option key={p.providerId} value={p.providerId}>
-                    {p.name} · {MODE_LABEL[p.mode]}
-                  </option>
-                ))}
-                {f.providerId && !provider ? <option value={f.providerId}>{f.providerId} (no está en el vault)</option> : null}
-              </select>
-              <FieldError msg={errors.providerId} />
-            </div>
-          </div>
-          <OfficialEventPicker
-            venueId={f.venueId}
-            providerId={f.providerId}
-            linked={f.officialFeed ? { feed: f.officialFeed, id: f.officialId, name: picked?.event.name ?? (initial?.officialId === f.officialId ? initial.name : null), sale: f.officialSale } : null}
-            onPick={pickOfficial}
-            onUnlink={unlinkOfficial}
-          />
-          <div className="form-grid">
             <div className="field" style={{ gridColumn: 'span 2' }}>
               <label htmlFor="evf-name">Nombre del evento</label>
               <input
@@ -621,7 +883,7 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
       </div>
 
       <div className="form-section">
-        <h3 className="sign">2 · Fechas</h3>
+        <h3 className="sign">3 · Fechas</h3>
         <div className="stack">
           <div className="form-grid">
             <div className="field">
@@ -706,7 +968,7 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
       </div>
 
       <div className="form-section">
-        <h3 className="sign">3 · Límites de compra</h3>
+        <h3 className="sign">4 · Límites de compra</h3>
         <div className="stack">
           <div className="small ink2">Cópialos de las condiciones oficiales. Sin límites verificados no se puede armar ninguna operación (fail-closed).</div>
           {picked?.event.feed === 'ticketmaster' && picked.event.limit.perCustomer !== null ? (
@@ -844,7 +1106,7 @@ export function EventForm({ initial, onDone }: { initial?: CatalogEvent; onDone:
       </div>
 
       <div className="form-section">
-        <h3 className="sign">4 · Notas</h3>
+        <h3 className="sign">5 · Notas</h3>
         {creating ? (
           <div className="field">
             <label htmlFor="evf-notes">Notas (opcional)</label>

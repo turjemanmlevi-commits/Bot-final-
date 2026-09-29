@@ -406,7 +406,7 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     const result: FeedKeyResult = await feedControl().setKey(feed, key, actorOf(c));
     return c.json(result);
   });
-  // Próximos eventos del recinto (o por nombre): ?feed=ticketmaster&venueId=…&days=14&by=event|sale&q=…
+  // Próximos eventos: ?feed=ticketmaster|football&days=14&by=event|sale[&venueId=…][&q=…][&club=…] (sin recinto: toda España)
   http.get('/api/feeds/events', async (c) => {
     const feed = feedParam(c.req.query('feed'));
     const days = Number(c.req.query('days') ?? 14);
@@ -414,7 +414,8 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     const by = c.req.query('by') === 'sale' ? 'sale' : 'event';
     const q = (c.req.query('q') ?? '').trim().slice(0, 100) || null;
     const venueId = (c.req.query('venueId') ?? '').trim() || null;
-    return c.json(await feedControl().upcoming({ feed, venueId, days, by, q }));
+    const club = (c.req.query('club') ?? '').trim().slice(0, 80) || null;
+    return c.json(await feedControl().upcoming({ feed, venueId, days, by, q, club }));
   });
   http.get('/api/feeds/:feed/events/:id', async (c) => {
     const feed = feedParam(c.req.param('feed'));

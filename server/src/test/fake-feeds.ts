@@ -37,7 +37,7 @@ export interface RawTmEvent {
   ticketLimit?: { info?: string };
   priceRanges?: Array<{ type: string; currency: string; min: number; max: number }>;
   pleaseNote?: string;
-  classifications?: Array<{ primary: boolean; segment: { name: string }; genre: { name: string } }>;
+  classifications?: Array<{ primary: boolean; segment: { name: string }; genre: { name: string }; type?: { name: string }; subType?: { name: string } }>;
   _embedded?: { venues: Array<{ id: string; name: string; city: { name: string }; timezone?: string }> };
 }
 
@@ -66,7 +66,11 @@ export class FakeTicketmaster {
     if (params.apikey !== this.key) {
       return json(res, 401, { fault: { faultstring: 'Invalid ApiKey', detail: { errorcode: 'oauth.v2.InvalidApiKey' } } });
     }
-    for (const k of ['startDateTime', 'endDateTime']) {
+    const SORTS = ['name,asc', 'name,desc', 'date,asc', 'date,desc', 'relevance,asc', 'relevance,desc', 'onSaleStartDate,asc', 'id,asc', 'venueName,asc', 'venueName,desc', 'random'];
+    if (params.sort !== undefined && !SORTS.includes(params.sort)) {
+      return json(res, 400, { errors: [{ code: 'DIS1016', detail: `Invalid sort: ${params.sort}`, status: '400' }] });
+    }
+    for (const k of ['startDateTime', 'endDateTime', 'onsaleStartDateTime']) {
       if (params[k] !== undefined && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(params[k] as string)) {
         return json(res, 400, { errors: [{ code: 'DIS1015', detail: `Query param with date must be of valid format YYYY-MM-DDTHH:mm:ssZ {example: 2020-08-01T14:00:00Z }`, status: '400' }] });
       }
@@ -84,15 +88,20 @@ export class FakeTicketmaster {
     if (url.pathname === '/discovery/v2/events.json') {
       const from = params.startDateTime ? Date.parse(params.startDateTime) : -Infinity;
       const to = params.endDateTime ? Date.parse(params.endDateTime) : Infinity;
+      const onsaleFrom = params.onsaleStartDateTime ? Date.parse(params.onsaleStartDateTime) : null;
+      const saleStart = (e: RawTmEvent) => (e.sales?.public?.startDateTime ? Date.parse(e.sales.public.startDateTime) : NaN);
       const list = this.events
-        .filter((e) => localeOk)
+        .filter(() => localeOk)
         .filter((e) => !params.venueId || e._embedded?.venues.some((v) => v.id === params.venueId))
         .filter((e) => !params.keyword || norm(e.name).includes(norm(params.keyword as string)))
         .filter((e) => {
           const t = e.dates.start.dateTime ? Date.parse(e.dates.start.dateTime) : NaN;
           return Number.isNaN(t) ? false : t >= from && t <= to;
         })
-        .sort((a, b) => (a.dates.start.dateTime ?? '').localeCompare(b.dates.start.dateTime ?? ''));
+        .filter((e) => onsaleFrom === null || saleStart(e) >= onsaleFrom)
+        .sort((a, b) =>
+          params.sort === 'onSaleStartDate,asc' ? saleStart(a) - saleStart(b) : (a.dates.start.dateTime ?? '').localeCompare(b.dates.start.dateTime ?? ''),
+        );
       const size = Number(params.size ?? 20);
       const page = Number(params.page ?? 0);
       const slice = list.slice(page * size, page * size + size);

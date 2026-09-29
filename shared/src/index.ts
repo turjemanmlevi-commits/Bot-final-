@@ -5,3 +5,5 @@ export * from './format';
 export * from './rules';
 export * from './vault-input';
 export * from './feeds';
+export * from './matching';
+export * from './page-import';

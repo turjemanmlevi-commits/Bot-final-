@@ -10,7 +10,7 @@
  * escriben direcciones en los logs y los errores se redactan sin ella.
  */
 
-import type { FeedEvent, FeedEventStatus, FeedSale, LimitSemantics } from '@to/shared';
+import { parseTicketLimit, type FeedEvent, type FeedEventStatus, type FeedSale } from '@to/shared';
 import { iso, parseVaultDate } from '../util/time';
 import { apiDateTime, cleanText, FeedError, httpUrl, localDateTime, nameTokens, networkError, sameCity, Throttle, validMs, venueNameScore } from './common';
 
@@ -52,7 +52,7 @@ interface TmRawEvent {
   ticketLimit?: { info?: string; infos?: Record<string, string> };
   priceRanges?: Array<{ type?: string; currency?: string; min?: number; max?: number }>;
   seatmap?: { staticUrl?: string };
-  classifications?: Array<{ primary?: boolean; segment?: { name?: string }; genre?: { name?: string } }>;
+  classifications?: Array<{ primary?: boolean; segment?: { name?: string }; genre?: { name?: string }; type?: { name?: string }; subType?: { name?: string } }>;
   _embedded?: { venues?: TmRawVenue[] };
 }
 
@@ -72,51 +72,8 @@ export interface TmVenue {
 // Límite de compra
 // ---------------------------------------------------------------------------
 
-export interface ParsedLimit {
-  perCustomer: number | null;
-  semantics: LimitSemantics | null;
-  /** Frase donde lo dice (para enseñarla tal cual). */
-  excerpt: string | null;
-}
-
-const LIMIT_PATTERNS: RegExp[] = [
-  // «Hay un límite de 6 entradas por cliente», «Máximo 4 entradas», «hasta 2 tickets»
-  /(?:limite|limit|maximo|max\.?|hasta un maximo de|hasta|a maximum of|up to)\D{0,30}?\b(\d{1,2})\s*(?:entradas?|tickets?|localidades|boletos|abonos)\b/,
-  // «6 ticket limit», «4 entradas por persona», «4 tickets per customer»
-  /\b(\d{1,2})\s*(?:entradas?|tickets?|localidades|boletos)\s*(?:limit|como maximo|maximo|max|por|per)\b/,
-  // «Ticket limit: 8 per customer», «Límite: 4 por persona»
-  /(?:limite|limit)\D{0,30}?\b(\d{1,2})\s*(?:por|per)\b/,
-];
-
-/**
- * Lee el límite de compra de un texto oficial («There is an overall 6 ticket
- * limit», «Hay un límite de 4 entradas por cliente»…). Ticketmaster cuenta el
- * límite por cliente (nombre, cuenta y tarjeta): por defecto, por titular.
- */
-export function parseTicketLimit(raw: string | null | undefined, opts: { strict?: boolean } = {}): ParsedLimit {
-  const none: ParsedLimit = { perCustomer: null, semantics: null, excerpt: null };
-  if (!raw) return none;
-  const text = raw.normalize('NFC');
-  const plain = text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
-  // En textos que no son el límite oficial («2 entradas por 60 €») solo cuentan las frases con «límite», «máximo»…
-  const patterns = opts.strict ? [LIMIT_PATTERNS[0], LIMIT_PATTERNS[2]] : LIMIT_PATTERNS;
-  for (const re of patterns) {
-    if (!re) continue;
-    const m = re.exec(plain);
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (!Number.isInteger(n) || n < 1 || n > 50) continue;
-    let semantics: LimitSemantics = 'PER_HOLDER';
-    if (/por (?:tarjeta|medio de pago)|per (?:credit )?card|per payment/.test(plain)) semantics = 'PER_PAYMENT_METHOD';
-    else if (/por (?:hogar|domicilio|direccion)|per (?:household|address)/.test(plain)) semantics = 'PER_HOUSEHOLD';
-    // La frase donde está (el texto normalizado tiene la misma longitud que el original).
-    const start = Math.max(plain.lastIndexOf('.', m.index) + 1, 0);
-    const endDot = plain.indexOf('.', m.index + m[0].length);
-    const end = endDot < 0 ? text.length : endDot + 1;
-    return { perCustomer: n, semantics, excerpt: cleanText(text.slice(start, end), 240) };
-  }
-  return none;
-}
+/** El límite de compra se lee igual en el servidor y en el dashboard. */
+export { parseTicketLimit, type ParsedLimit } from '@to/shared';
 
 function limitText(raw: TmRawEvent['ticketLimit']): string | null {
   if (!raw) return null;
@@ -168,6 +125,12 @@ function sale(kind: FeedSale['kind'], name: string, start: string | undefined, e
   const s = validMs(start);
   const e = validMs(end);
   return { kind, name, startsAt: s === null ? null : iso(s), startsAtLocal: s === null ? null : localDateTime(s, timeZone), endsAt: e === null ? null : iso(e) };
+}
+
+/** Aparcamientos y extras que Ticketmaster publica como «eventos» aparte: no son entradas. */
+export function isUpsell(raw: TmRawEvent): boolean {
+  if (/\b(parking|aparcamiento|estacionamiento)\b/i.test(raw.name ?? '')) return true;
+  return (raw.classifications ?? []).some((c) => /^(upsell|parking)$/i.test(c.type?.name ?? '') || /^(upsell|parking)$/i.test(c.subType?.name ?? ''));
 }
 
 /** Evento de la Discovery API → formato común (fechas en la zona del vault). */
@@ -228,6 +191,8 @@ export function normalizeTmEvent(raw: TmRawEvent, timeZone: string): FeedEvent |
     category: category(raw),
     seatmapUrl: httpUrl(raw.seatmap?.staticUrl),
     info: notes === '' ? null : cleanText(notes, 600),
+    vaultVenueId: null,
+    home: null,
   };
 }
 
@@ -312,20 +277,35 @@ export class TicketmasterClient {
       .map((v) => ({ id: v.id, name: v.name, city: v.city?.name ?? null, aliases: (v.aliases ?? []).filter((a) => typeof a === 'string') }));
   }
 
-  /** Eventos en España que empiezan entre `from` y `to`, por fecha. */
-  async events(q: { venueId?: string; keyword?: string; from: number; to: number; size?: number; page?: number }): Promise<{ events: FeedEvent[]; totalPages: number }> {
+  /**
+   * Eventos en España: los que empiezan entre `from` y `to` (por fecha) o, con
+   * `onsaleFrom`, los que abren la venta general desde ese momento (por hora de apertura).
+   */
+  async events(q: {
+    venueId?: string;
+    keyword?: string;
+    from?: number;
+    to?: number;
+    onsaleFrom?: number;
+    size?: number;
+    page?: number;
+  }): Promise<{ events: FeedEvent[]; totalPages: number }> {
     const params: Record<string, string> = {
       countryCode: 'ES',
-      startDateTime: apiDateTime(q.from),
-      endDateTime: apiDateTime(q.to),
-      sort: 'date,asc',
+      sort: q.onsaleFrom !== undefined ? 'onSaleStartDate,asc' : 'date,asc',
       size: String(q.size ?? 100),
       page: String(q.page ?? 0),
     };
+    if (q.from !== undefined) params.startDateTime = apiDateTime(q.from);
+    if (q.to !== undefined) params.endDateTime = apiDateTime(q.to);
+    if (q.onsaleFrom !== undefined) params.onsaleStartDateTime = apiDateTime(q.onsaleFrom);
     if (q.venueId) params.venueId = q.venueId;
     if (q.keyword) params.keyword = q.keyword;
     const json = await this.get<TmPage<'events', TmRawEvent>>('events.json', params);
-    const events = (json?._embedded?.events ?? []).map((e) => normalizeTmEvent(e, this.opts.timeZone)).filter((e): e is FeedEvent => e !== null);
+    const events = (json?._embedded?.events ?? [])
+      .filter((e) => !isUpsell(e))
+      .map((e) => normalizeTmEvent(e, this.opts.timeZone))
+      .filter((e): e is FeedEvent => e !== null);
     return { events, totalPages: json?.page?.totalPages ?? 1 };
   }
 

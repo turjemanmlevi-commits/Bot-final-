@@ -67,8 +67,8 @@ Pulsa **Crear recinto**: el sistema escribe las notas en `10 Recintos/<recinto>/
 
 **Eventos → Nuevo evento**:
 
-> [!tip] Más rápido: elígelo de la lista oficial
-> Con las claves gratuitas de **Ajustes · Fuentes de eventos**, al elegir el **recinto** y **dónde se vende** salen los **próximos eventos** de ese recinto en Ticketmaster (o los próximos **partidos** del club si es un estadio de LaLiga, como el Bernabéu). **Usar este evento** rellena el nombre, el enlace, la fecha, la **apertura de la venta** (o de la preventa) y el **límite** oficial, y con **Vigilar desde: 2 días antes** la sala te avisa por Telegram si algo cambia. Ver [[Buscar eventos oficiales y vigilar la venta]]. Sin claves (o en entradas.com), se escribe a mano:
+> [!tip] Sin escribir nada: primero dónde se vende, después el evento
+> Elige **Dónde se vende** y trae el evento: ábrelo en la web oficial y pulsa el marcador **📥 Enviar a la sala** (sin claves, cualquier web), o elígelo de la **lista oficial** (con la clave gratuita de Ticketmaster o de los partidos). Se rellenan solos el **recinto**, el nombre, el enlace, la fecha, la **apertura de la venta** (elige tu fase) y el **límite** si la web lo publica, y con **Vigilar desde: 2 días antes** la sala te avisa por Telegram. Ver [[Buscar eventos oficiales y vigilar la venta]]. Lo que la página no diga, se completa a mano:
 
 1. **Nombre del evento**, **Recinto** y **Dónde se vende** (Real Madrid, Ticketmaster o entradas.com).
 2. **Enlace oficial del evento**: la página del evento en la web oficial. Es el botón «Abrir la web oficial» de cada tarea (el sistema nunca la visita).

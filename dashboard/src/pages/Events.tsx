@@ -1,12 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useSearchParams } from 'react-router';
-import { FEED_LABEL, LIMIT_SEMANTICS_LABEL, type CatalogEvent, type EventWatch, type ProviderMode } from '@to/shared';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { decodeCapture, FEED_LABEL, LIMIT_SEMANTICS_LABEL, parsePageCapture, type CatalogEvent, type EventWatch, type PageImport, type ProviderMode } from '@to/shared';
 import { EventForm } from '../components/EventForm';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Pill } from '../components/ui';
 import { fmtDateTime, fmtRel, fmtTime } from '../lib/format';
-import { useNow } from '../lib/hooks';
+import { useNow, useToast } from '../lib/hooks';
 import { useLive } from '../lib/store';
+
+/** Enlace sin «?…», «#…» ni barra final, para reconocer el mismo evento. */
+function sameLink(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname.replace(/\/+$/, '')}`.toLowerCase();
+  } catch {
+    return url.trim().toLowerCase();
+  }
+}
 
 const MODE_TAG: Record<ProviderMode, string> = {
   MANUAL_ASSIST: 'asistencia manual',
@@ -77,6 +87,13 @@ export function EventsPage() {
   const venueName = (venueId: string) =>
     Object.values(s.venues).find((v) => v.venueId === venueId && v.eventId === null)?.name ?? s.vault?.venues.find((v) => v.venueId === venueId)?.name ?? venueId;
 
+  const navigate = useNavigate();
+  const toast = useToast();
+  /** Página oficial enviada con «📥 Enviar a la sala» (abre el formulario relleno). */
+  const [importing, setImporting] = useState<{ page: PageImport; seq: number } | null>(null);
+  const importSeq = useRef(0);
+  const handledHash = useRef('');
+
   const highlight = (id: string) => {
     flashSeq.current += 1;
     setFlash({ id, seq: flashSeq.current });
@@ -84,13 +101,40 @@ export function EventsPage() {
 
   const open = (target: CatalogEvent | 'new') => {
     setFlash(null);
+    setImporting(null);
     setEditing(target);
   };
 
   const done = (id: string | null) => {
     setEditing(null);
+    setImporting(null);
     if (id) highlight(id);
   };
+
+  // /eventos#importar=… llega del marcador «📥 Enviar a la sala»: el formulario se abre relleno.
+  useEffect(() => {
+    const hash = location.hash;
+    if (!hash.startsWith('#importar=') || handledHash.current === hash || !s.vault) return;
+    handledHash.current = hash;
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true });
+    const capture = decodeCapture(hash);
+    if (!capture) {
+      toast('No se ha podido leer lo que ha enviado el marcador: vuelve a pulsarlo en la página del evento.', 'error');
+      return;
+    }
+    const page = parsePageCapture(capture, {
+      timeZone: 'Europe/Madrid',
+      venues: s.vault.venues.map((v) => ({ venueId: v.venueId, name: v.name, city: v.city ?? null, aliases: v.aliases ?? [], clubs: v.clubs ?? [] })),
+      providers: s.providerAuthorizations.map((p) => ({ providerId: p.providerId, url: p.url })),
+    });
+    // ¿Ya existe este evento (mismo enlace oficial)? Entonces se actualiza ese en vez de crear otro.
+    const key = sameLink(page.events[0]?.url ?? page.pageUrl);
+    const existing = Object.values(s.events).find((e) => e.url !== null && sameLink(e.url) === key);
+    importSeq.current += 1;
+    setFlash(null);
+    setEditing(existing ?? 'new');
+    setImporting({ page, seq: importSeq.current });
+  }, [location.hash, location.pathname, location.search, navigate, s.vault, s.events, s.providerAuthorizations, toast]);
 
   // /eventos?nuevo=1 abre el formulario de alta.
   useEffect(() => {
@@ -103,6 +147,7 @@ export function EventsPage() {
 
   // /eventos#<id> resalta ese evento.
   useEffect(() => {
+    if (location.hash.startsWith('#importar=')) return;
     const id = decodeURIComponent(location.hash.slice(1));
     if (id) highlight(id);
   }, [location.hash]);
@@ -133,8 +178,8 @@ export function EventsPage() {
         <div>
           <h1>Eventos</h1>
           <div className="sub">
-            Salen del vault (<code>20 Eventos</code>). Créalos aquí —se guarda una nota en Obsidian— o en Obsidian con la plantilla «Evento». Sin límites verificados no se
-            puede armar (fail-closed).
+            «Nuevo evento»: elige dónde se vende y el evento (desde su página oficial con «📥 Enviar a la sala», o de la lista oficial) y se rellena todo lo demás. Se guarda
+            como nota en Obsidian (<code>20 Eventos</code>). Sin límites verificados no se puede armar (fail-closed).
           </div>
         </div>
         <div className="actions">
@@ -146,7 +191,12 @@ export function EventsPage() {
 
       {editing ? (
         <div ref={formRef} style={{ scrollMarginTop: 16 }}>
-          <EventForm key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? undefined : editing} onDone={done} />
+          <EventForm
+            key={`${editing === 'new' ? 'new' : editing.id}-${importing?.seq ?? 0}`}
+            initial={editing === 'new' ? undefined : editing}
+            imported={importing?.page ?? null}
+            onDone={done}
+          />
         </div>
       ) : null}
 

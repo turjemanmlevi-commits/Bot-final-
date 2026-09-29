@@ -39,7 +39,7 @@ Todas las acciones en la web las hace **una persona, con su propia cuenta**. `au
 
 ## Cómo preparar la compra
 
-1. **Evento** — Dashboard → *Eventos* → **Nuevo evento**: recinto [[Estadio Santiago Bernabéu]], proveedor *Real Madrid*. Con el token gratuito de football-data.org (Ajustes · Fuentes de eventos) salen los **próximos partidos en casa** (LaLiga y Champions) con la fecha y la hora oficiales: **Usar este evento** los rellena y la vigilancia avisa cuando LaLiga fija o cambia la hora (ver [[Buscar eventos oficiales y vigilar la venta]]). realmadrid.com no tiene API: pega el enlace de la página del partido y la **hora de apertura de tu fase de venta** desde la web del club.
+1. **Evento** — Dashboard → *Eventos* → **Nuevo evento** → *Dónde se vende*: **Real Madrid**. Abre la página del partido en realmadrid.com y pulsa el marcador **📥 Enviar a la sala**: se rellenan el partido, la fecha y la hora, el [[Estadio Santiago Bernabéu]], el enlace, **las fases de venta** que enseñe la página (elige la tuya: socios, Madridistas, general…) y el límite si lo dice. Con el token gratuito de football-data.org sale además la lista de **próximos partidos en casa** (LaLiga y Champions) y la vigilancia avisa cuando LaLiga fija o cambia la hora (ver [[Buscar eventos oficiales y vigilar la venta]]).
 2. **Límites** — los de tu fase, con el enlace a las condiciones.
 3. **Cuentas** — una por persona que va a ir (su alias, nunca su número de socio ni su DNI).
 4. **Operación** — sigue [[Comprar entradas reales (paso a paso)]].

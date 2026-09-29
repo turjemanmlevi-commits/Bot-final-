@@ -120,6 +120,8 @@ function seedTicketmaster(tm: FakeTicketmaster): void {
     }),
     tmEvent({ id: 'TM-LEJANO', name: 'Gira 2027', venue: MA, start: '2027-03-01T20:00:00Z', sale: '2026-10-05T08:00:00Z', status: 'offsale' }),
     tmEvent({ id: 'TM-OTRO', name: 'Otro recinto', venue: MADARENA, start: '2026-10-05T19:00:00Z', sale: '2026-06-01T08:00:00Z' }),
+    // Los aparcamientos salen como «eventos» en la API: no son entradas.
+    tmEvent({ id: 'TM-PARKING', name: 'Parking - Morat - Los Estadios', venue: MA, start: '2026-10-10T17:00:00Z', sale: '2026-10-03T08:00:00Z' }),
   ];
 }
 
@@ -399,6 +401,31 @@ describe('fuentes oficiales desde el dashboard', () => {
     assert.match(none.message ?? '', /no tiene eventos de «nadie»/);
   });
 
+  it('sin recinto: eventos de toda España, cada uno con su recinto del vault (o sin él, para crearlo)', async () => {
+    const r = (await (await http.request('/api/feeds/events?feed=ticketmaster&days=14')).json()) as FeedEventsResult;
+    assert.deepEqual(
+      r.events.map((e) => [e.id, e.vaultVenueId]),
+      [
+        ['TM-OTRO', null],
+        ['TM-MORAT', 'movistar-arena'],
+        ['TM-AITANA', 'movistar-arena'],
+      ],
+    );
+    assert.equal(r.truncated, false);
+    assert.equal(r.message, null);
+  });
+
+  it('sin recinto, por apertura de la venta: en el orden en que abren y sin aparcamientos', async () => {
+    const r = (await (await http.request('/api/feeds/events?feed=ticketmaster&days=14&by=sale')).json()) as FeedEventsResult;
+    assert.deepEqual(
+      r.events.map((e) => e.id),
+      ['TM-AITANA', 'TM-LEJANO'],
+    );
+    const last = tm.calls.filter((c) => c.path.endsWith('events.json')).at(-1);
+    assert.equal(last?.params.sort, 'onSaleStartDate,asc');
+    assert.ok(last?.params.onsaleStartDateTime, 'filtra por apertura desde ahora');
+  });
+
   it('un evento concreto, tal y como está ahora', async () => {
     const res = await http.request('/api/feeds/ticketmaster/events/TM-AITANA');
     assert.equal(res.status, 200);
@@ -425,6 +452,27 @@ describe('fuentes oficiales desde el dashboard', () => {
     const month = (await (await http.request('/api/feeds/events?feed=football&venueId=estadio-santiago-bernabeu&days=30')).json()) as FeedEventsResult;
     assert.equal(month.events.at(-1)?.id, '1004');
     assert.equal(month.events.at(-1)?.timeTBA, true);
+  });
+
+  it('partidos sin estadio: los del club elegido en casa, con su estadio del vault', async () => {
+    const r = (await (await http.request('/api/feeds/events?feed=football&days=14&club=Real%20Madrid')).json()) as FeedEventsResult;
+    assert.deepEqual(
+      r.events.map((e) => [e.id, e.vaultVenueId, e.home]),
+      [
+        ['1001', 'estadio-santiago-bernabeu', 'Real Madrid'],
+        ['1003', 'estadio-santiago-bernabeu', 'Real Madrid'],
+      ],
+    );
+    // Sin club: toda LaLiga (el Getafe no tiene estadio en este vault: se podrá crear) y la Champions de clubes españoles.
+    const all = (await (await http.request('/api/feeds/events?feed=football&days=14')).json()) as FeedEventsResult;
+    assert.deepEqual(
+      all.events.map((e) => [e.id, e.vaultVenueId]),
+      [
+        ['1001', 'estadio-santiago-bernabeu'],
+        ['1003', 'estadio-santiago-bernabeu'],
+        ['1002', null],
+      ],
+    );
   });
 
   it('partidos: si la cuenta no tiene la Champions, salen los de LaLiga y se avisa', async () => {

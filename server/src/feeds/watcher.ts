@@ -320,7 +320,11 @@ export class EventWatcher {
   private startText(event: CatalogEvent, w: EventWatch, now: number): string {
     const what = w.anchorKind === 'SALE' ? 'La venta abre' : 'El evento es';
     const source = w.feed ? `Consulto ${FEED_LABEL[w.feed]} cada 10 minutos: si cambia la hora, las preventas, el límite o se cancela, te aviso aquí.` : 'Te recordaré la hora el día antes y una hora antes.';
-    return `👀 <b>Vigilando: ${esc(event.name)}</b>\n${what} el ${esc(this.fmt(w.anchor))} (${esc(this.rel(Date.parse(w.anchor) - now))}).\n${esc(source)}`;
+    const noSale =
+      w.anchorKind === 'EVENT'
+        ? '\nTodavía no tiene hora de apertura de la venta: cuando se anuncie, ponla en Eventos → Editar (o vuelve a pulsar «📥 Enviar a la sala» en la página del evento).'
+        : '';
+    return `👀 <b>Vigilando: ${esc(event.name)}</b>\n${what} el ${esc(this.fmt(w.anchor))} (${esc(this.rel(Date.parse(w.anchor) - now))}).\n${esc(source)}${esc(noSale)}`;
   }
 
   /** Cambio detectado: queda en la vigilancia, como alerta en el dashboard y (si importa) en Telegram. */
