@@ -1,10 +1,11 @@
+import { VenueMap } from '../components/VenueMap';
 import { useMemo, useState } from 'react';
 import { HUMAN_TASK_KIND_LABEL, HUMAN_TASK_STATE_LABEL, type HumanTask } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Pill } from '../components/ui';
 import { Api } from '../lib/api';
 import { euros, formatDuration, formatMoney, fmtDateTime, parseEuros } from '../lib/format';
-import { useAction, useNow } from '../lib/hooks';
+import { useAction, useAsync, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
 function TaskCard({ task }: { task: HumanTask }) {
@@ -13,6 +14,12 @@ function TaskCard({ task }: { task: HumanTask }) {
   const { run, busy } = useAction();
   const account = s.accounts[task.accountId];
   const op = task.operationId ? s.operations[task.operationId] : undefined;
+  const ev = op ? s.events[op.eventId] : undefined;
+  const venueHash = ev
+    ? (Object.values(s.venues).find((v) => v.active && v.venueId === ev.venueId && v.eventId === ev.id) ??
+        Object.values(s.venues).find((v) => v.active && v.venueId === ev.venueId && v.eventId === null))?.hash
+    : undefined;
+  const venue = useAsync(() => (venueHash && task.target ? Api.venue(venueHash) : Promise.resolve(null)), [venueHash, Boolean(task.target)]);
   const [qty, setQty] = useState(String(task.target?.qty ?? 1));
   const [price, setPrice] = useState(task.target ? euros(task.target.maxUnitPrice) : '');
   const [seats, setSeats] = useState('');
@@ -69,6 +76,12 @@ function TaskCard({ task }: { task: HumanTask }) {
             <Icon name="external" size={16} /> Abrir la web oficial
           </a>
         </div>
+      ) : null}
+      {task.target && venue.data ? (
+        <details open>
+          <summary className="small ink2" style={{ cursor: 'pointer' }}>Dónde está {task.target.sectionLabel} en el recinto</summary>
+          <VenueMap artifact={venue.data} highlight={task.target.sectionLabel} compact />
+        </details>
       ) : null}
       {task.target ? (
         <div className="task-target">

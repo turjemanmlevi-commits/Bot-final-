@@ -1,3 +1,4 @@
+import { VenueMap } from '../components/VenueMap';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { parseVenueLayout, type LabelResolutionResult, type VaultCompileReport, type VaultIssue, type VenueSection } from '@to/shared';
@@ -497,6 +498,9 @@ export function VenueDetailPage() {
           </div>
         </div>
       </div>
+      <Card title="Plano del recinto">
+        <VenueMap artifact={a} />
+      </Card>
       <div className="grid cols-2">
         <Card title="Procedencia">
           <dl className="kv">

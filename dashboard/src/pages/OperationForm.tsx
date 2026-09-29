@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { LIMIT_SEMANTICS_LABEL, type OperationConfig } from '@to/shared';
 import { Icon } from '../components/Icon';
+import { VenueMap } from '../components/VenueMap';
 import { Callout, Card, Pill } from '../components/ui';
 import { Api } from '../lib/api';
 import { euros, formatMoney, fromLocalInput, parseEuros, toLocalInput } from '../lib/format';
@@ -331,6 +332,17 @@ export function OperationFormPage() {
                 </span>
               ))}
             </div>
+            {artifact.data ? (
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="small muted">Toca una zona del plano para añadirla como objetivo (el número es el orden en que se intentará):</span>
+                <VenueMap
+                  artifact={artifact.data}
+                  targets={f.targets}
+                  compact
+                  onPick={(name) => set('targets', f.targets.includes(name) ? f.targets : [...f.targets, name])}
+                />
+              </div>
+            ) : null}
             {suggestions.length > 0 ? (
               <div className="stack" style={{ gap: 6 }}>
                 <span className="small muted">Añadir desde el vault ({artifact.data?.name}):</span>

@@ -14,6 +14,7 @@ import {
 } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { OperationHero } from '../components/OperationHero';
+import { VenueMap } from '../components/VenueMap';
 import { CartsTable } from './Carts';
 import { BarList, Callout, Card, CheckPill, Empty, Meter, Pill, QueuePill, SessionPill, type BarItem } from '../components/ui';
 import { Api } from '../lib/api';
@@ -44,7 +45,12 @@ export function OperationDetailPage() {
   const summary = s.operations[id];
   const detail = useAsync(() => Api.operation(id), [id, summary?.version]);
   const [tab, setTab] = useState<Tab>('directo');
-  const artifactHash = detail.data?.armSnapshot?.venueArtifactHash ?? null;
+  const event = summary ? s.events[summary.eventId] : undefined;
+  const liveVenueHash = event
+    ? (Object.values(s.venues).find((v) => v.active && v.venueId === event.venueId && v.eventId === event.id) ??
+        Object.values(s.venues).find((v) => v.active && v.venueId === event.venueId && v.eventId === null))?.hash
+    : undefined;
+  const artifactHash = detail.data?.armSnapshot?.venueArtifactHash ?? liveVenueHash ?? null;
   const artifact = useAsync(() => (artifactHash ? Api.venue(artifactHash) : Promise.resolve(null)), [artifactHash]);
 
   if (!summary) {
@@ -85,6 +91,8 @@ export function OperationDetailPage() {
 
       <OperationHero op={summary} compact onChanged={detail.reload} />
 
+      {d && artifact.data ? <PurchasePlan detail={d} artifact={artifact.data} /> : null}
+
       <div className="tabs" role="tablist">
         {(
           [
@@ -108,6 +116,67 @@ export function OperationDetailPage() {
       {tab === 'historial' ? d ? <HistoryTab id={id} detail={d} /> : <div className="muted">Cargando…</div> : null}
       {tab === 'replay' ? <ReplayTab id={id} /> : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Plan de compra (plano con el orden de zonas y quién va a por cada una)
+// ---------------------------------------------------------------------------
+
+function PurchasePlan({ detail, artifact }: { detail: OperationDetail; artifact: VenueArtifact }) {
+  const s = useLive();
+  const targets = detail.config.preferences.targets;
+  const open = Object.values(s.humanTasks).filter((t) => t.operationId === detail.summary.id && t.state === 'OPEN' && t.kind === 'ADD_TO_CART');
+  const carts = Object.values(s.carts).filter((c) => c.operationId === detail.summary.id && c.state !== 'RELEASED');
+  const who = (accountId: string) => s.accounts[accountId]?.label ?? accountId;
+  return (
+    <Card title="Plan de compra · dónde y en qué orden">
+      <div className="grid cols-2" style={{ alignItems: 'start' }}>
+        <div style={{ minWidth: 0 }}>
+          <VenueMap artifact={artifact} targets={targets} compact />
+        </div>
+        <div className="stack" style={{ gap: 12, minWidth: 0 }}>
+          <div>
+            <div className="sign">Orden de zonas</div>
+            {targets.length === 0 ? (
+              <div className="small ink2">Cualquier zona permitida del recinto.</div>
+            ) : (
+              <ol style={{ margin: '6px 0 0', paddingLeft: 20 }}>
+                {targets.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ol>
+            )}
+            <div className="small muted" style={{ marginTop: 6 }}>
+              Cada cuenta empieza por la 1. Si pulsa «No pude», pasa a la siguiente. Máximo {formatMoney(detail.config.maxUnitPrice, detail.config.currency)} por entrada.
+            </div>
+          </div>
+          <div>
+            <div className="sign">Ahora mismo</div>
+            {open.length === 0 && carts.length === 0 ? (
+              <div className="small ink2">
+                {['ARMED', 'FROZEN', 'VALIDATED', 'DRAFT'].includes(detail.summary.state)
+                  ? 'Las tareas de compra se reparten en T0 a las cuentas con «Sesión lista».'
+                  : 'Sin tareas de compra abiertas.'}
+              </div>
+            ) : (
+              <ul style={{ margin: '6px 0 0', paddingLeft: 18 }} className="small">
+                {open.map((t) => (
+                  <li key={t.id}>
+                    <b>{who(t.accountId)}</b> intentando {t.target?.qty ?? '?'} en <b>{t.target?.sectionLabel}</b>
+                  </li>
+                ))}
+                {carts.map((c) => (
+                  <li key={c.id}>
+                    <b>{who(c.accountId)}</b>: {c.items.map((i) => `${i.qty} en ${i.sectionLabel}`).join(', ')} {c.state === 'PAID' ? '· pagado' : '· en carrito'}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
