@@ -374,13 +374,6 @@ class Compiler {
       if (venue.sections.length === 0) {
         this.warn(venue.note.file, `El recinto ${venue.name} no tiene secciones`);
       }
-      if (venue.missingCapacity > 0) {
-        const n = venue.missingCapacity;
-        this.warn(
-          venue.note.file,
-          `${n} ${n === 1 ? 'sección' : 'secciones'} de ${venue.name} sin aforo (\`capacity\`): solo hace falta para simular el recinto, no para comprar en asistencia manual`,
-        );
-      }
       venue.zones.sort((a, b) => a.id.localeCompare(b.id));
       venue.sections.sort((a, b) => a.id.localeCompare(b.id));
 
@@ -648,6 +641,23 @@ class Compiler {
   venueDrafts(): VenueDraft[] {
     return [...this.venues.values()];
   }
+
+  /**
+   * Secciones sin aforo: el aforo solo lo necesita el simulador, así que solo se
+   * avisa en los recintos que usa algún evento simulado (en asistencia manual no hace falta).
+   */
+  warnMissingCapacity(events: Array<{ venueId: string; providerId: string }>, providers: Array<{ providerId: string; mode: string }>): void {
+    const simulated = new Set(providers.filter((p) => p.mode === 'SIMULATED').map((p) => p.providerId));
+    const simVenues = new Set(events.filter((e) => simulated.has(e.providerId)).map((e) => e.venueId));
+    for (const venue of this.venues.values()) {
+      if (venue.missingCapacity === 0 || !simVenues.has(venue.id)) continue;
+      const n = venue.missingCapacity;
+      this.warn(
+        venue.note.file,
+        `${n} ${n === 1 ? 'sección' : 'secciones'} de ${venue.name} sin aforo (\`capacity\`): el simulador lo necesita para ensayar en este recinto`,
+      );
+    }
+  }
 }
 
 export async function compileVault(opts: CompileOptions): Promise<CompiledVault> {
@@ -668,6 +678,7 @@ export async function compileVault(opts: CompileOptions): Promise<CompiledVault>
     .map((v) => c.buildArtifact(v, null, new Set(), [], []));
   const providers = c.compileProviders(byType('provider'));
   const events = c.compileEvents(byType('event'), artifacts);
+  c.warnMissingCapacity(events, providers);
 
   artifacts.sort((a, b) => a.venueId.localeCompare(b.venueId) || (a.eventId ?? '').localeCompare(b.eventId ?? ''));
   const report: VaultCompileReport = {

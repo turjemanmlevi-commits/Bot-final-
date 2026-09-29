@@ -26,6 +26,26 @@ const VAULT = path.resolve(fileURLToPath(new URL('../../../vault', import.meta.u
 const START = Date.parse('2026-09-28T16:00:00Z');
 
 describe('vault real', () => {
+  it('tiene los 20 estadios de LaLiga 2026-27, pabellones y recintos de festivales, sin avisos', async () => {
+    const c = await compileVault({ vaultDir: VAULT, timeZone: 'Europe/Madrid' });
+    assert.deepEqual(c.report.errors, []);
+    assert.deepEqual(c.report.warnings, []);
+    const ids = new Set(c.report.venues.map((v) => v.venueId));
+    for (const id of [
+      'estadio-santiago-bernabeu', 'riyadh-air-metropolitano', 'spotify-camp-nou', 'san-mames', 'reale-arena', 'estadio-de-la-cartuja',
+      'estadio-ramon-sanchez-pizjuan', 'estadio-de-mestalla', 'estadio-de-la-ceramica', 'estadi-ciutat-de-valencia', 'estadio-de-mendizorroza',
+      'abanca-balaidos', 'abanca-riazor', 'estadio-manuel-martinez-valero', 'rcde-stadium', 'coliseum-getafe', 'estadio-la-rosaleda',
+      'estadio-el-sadar', 'estadio-el-sardinero', 'estadio-de-vallecas',
+      'movistar-arena', 'palau-sant-jordi', 'roig-arena', 'plaza-de-toros-de-las-ventas', 'campus-de-cantoblanco-uam', 'espacio-iberdrola-music',
+    ]) {
+      assert.ok(ids.has(id), `falta el recinto ${id}`);
+    }
+    for (const v of c.report.venues) assert.ok(v.sections > 0, `${v.name} sin secciones`);
+    // Los nombres de las ticketeras se resuelven: «Lateral Oeste Grada baja» → su sección.
+    const metro = c.artifacts.find((a) => a.venueId === 'riyadh-air-metropolitano' && a.eventId === null);
+    assert.ok(metro?.sections.some((s) => s.name === 'Lateral Oeste · Grada baja'));
+  });
+
   it('compila sin errores con Ticketmaster, entradas.com, Real Madrid y el Bernabéu', async () => {
     const c = await compileVault({ vaultDir: VAULT, timeZone: 'Europe/Madrid' });
     assert.deepEqual(c.report.errors, []);

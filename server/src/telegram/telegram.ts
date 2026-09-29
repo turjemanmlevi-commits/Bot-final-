@@ -290,9 +290,11 @@ export class TelegramNotifier implements Notifier {
       const message = (err as Error).message;
       return {
         ok: false,
-        message: /chat not found|bot was blocked|user is deactivated/i.test(message)
-          ? `Telegram no deja escribir al chat ${target}: abre el bot en Telegram, pulsa «Iniciar» (/start) y vuelve a probar.`
-          : `No se pudo enviar: ${message}`,
+        message: /bots? can't send messages to (the )?bots?/i.test(message)
+          ? `${target} es el número de un bot, no el de una persona: elige tu chat en Ajustes · Telegram (el de quien pulsó «Iniciar»).`
+          : /chat not found|bot was blocked|user is deactivated/i.test(message)
+            ? `Telegram no deja escribir al chat ${target}: abre el bot en Telegram, pulsa «Iniciar» (/start) y vuelve a probar.`
+            : `No se pudo enviar: ${message}`,
       };
     }
   }

@@ -1,7 +1,7 @@
 ---
 type: provider
 id: manual
-name: Asistencia manual
+name: Otra web oficial (genérico)
 mode: MANUAL_ASSIST
 authorizedCapabilities: []
 source: "Modo sin automatización contra el proveedor"

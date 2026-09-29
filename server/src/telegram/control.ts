@@ -34,6 +34,11 @@ export interface TelegramInitial {
   notifier?: TelegramNotifier | null;
 }
 
+/** ¿Es el número del propio bot? (el token empieza por él: 123456789:AA…) */
+export function isBotId(chatId: string, token: string): boolean {
+  return chatId.trim() === token.split(':')[0];
+}
+
 export class TelegramControl {
   private notifier: TelegramNotifier | null = null;
   private token: string | null = null;
@@ -49,6 +54,11 @@ export class TelegramControl {
     this.apiBase = (opts.apiBase ?? 'https://api.telegram.org').replace(/\/+$/, '');
     this.timeZone = opts.timeZone ?? 'Europe/Madrid';
     this.chatId = initial.chatId ?? null;
+    if (this.chatId && initial.token && isBotId(this.chatId, initial.token)) {
+      // El número del propio bot (el principio del token) no es un chat: un bot no puede escribirse a sí mismo.
+      log.warn(`TELEGRAM_CHAT_ID=${this.chatId} es el número del propio bot, no un chat: elige tu chat en Ajustes · Telegram.`);
+      this.chatId = null;
+    }
     opts.runtime.ctx.telegramStatus = () => this.status();
     if (initial.token) {
       this.token = initial.token;
@@ -97,6 +107,12 @@ export class TelegramControl {
   /** Elige (o quita, con null) el chat principal, lo guarda y le da la bienvenida. */
   setMainChat(chatId: string | null, actor: string): Promise<TelegramConfigResult> {
     return this.serial(async () => {
+      if (chatId && this.token && isBotId(chatId, this.token)) {
+        return this.result(
+          false,
+          `${chatId} es el número del propio bot (sale al principio del token), no tu chat. Abre el bot en Telegram, pulsa «Iniciar» y elige tu nombre en la lista (o escribe el número que te contesta el bot).`,
+        );
+      }
       const warning = await this.persist({ TELEGRAM_CHAT_ID: chatId });
       this.chatId = chatId;
       this.notifier?.setMainChat(chatId);

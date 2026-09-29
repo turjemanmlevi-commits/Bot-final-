@@ -196,3 +196,30 @@ describe('Telegram desde el dashboard', () => {
     }
   });
 });
+
+describe('chat principal: el número del bot no vale', () => {
+  it('se rechaza al elegirlo y se ignora si estaba guardado', async () => {
+    const { isBotId } = await import('../telegram/control');
+    assert.equal(isBotId('1234567890', REAL_FORMAT), true);
+    assert.equal(isBotId('6626060160', REAL_FORMAT), false);
+    const tg = new FakeTelegram(REAL_FORMAT, 'bot_prueba_bot');
+    const base = await tg.listen();
+    const dir = await mkdtemp(path.join(tmpdir(), 'to-tgbot-'));
+    await writeFixtureVault(dir);
+    const h = await createHarness(dir);
+    try {
+      // Guardado por error en .env: al arrancar no cuenta como chat principal.
+      const c = new TelegramControl({ runtime: h.app.runtime, apiBase: base, envFile: null, retryMs: 50 }, { token: REAL_FORMAT, chatId: '1234567890' });
+      assert.equal(c.status().mainChatConfigured, false);
+      const r = await c.setMainChat('1234567890', 'Levi');
+      assert.equal(r.ok, false);
+      assert.match(r.message, /número del propio bot/);
+      assert.equal(c.status().mainChatId, null);
+      c.stop();
+    } finally {
+      await h.stop();
+      await tg.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

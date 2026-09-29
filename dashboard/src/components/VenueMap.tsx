@@ -68,15 +68,26 @@ function sideFor(name: string): Side | null {
 }
 
 /**
+ * Grada de estadio sin punto cardinal en el nombre: detrás de una portería
+ * («Fondo…», «Gol…», «Marcador») o a lo largo del campo («Tribuna», «Preferencia»…).
+ */
+function standRole(name: string): 'end' | 'side' | null {
+  const n = ` ${norm(name)} `;
+  if (/ (fondo|gol|marcador) /.test(n)) return 'end';
+  if (/ (tribuna|preferencia|lateral|rio|grada central) /.test(n)) return 'side';
+  return null;
+}
+
+/**
  * Nivel dentro de una grada: cuanto más bajo, más cerca del campo. Solo importa
  * el orden relativo dentro de cada grada. null si el nombre no lo dice.
  */
 function tierOf(s: VenueSection): number | null {
   const n = ` ${norm(`${s.name} ${s.level ?? ''}`)} `;
-  if (/ (cuarto|4º|4o|4 anfiteatro) /.test(n)) return 4;
-  if (/ (tercer|tercero|3er|3º|3 anfiteatro) /.test(n)) return 3;
-  if (/ (segundo|2º|2o|2 anfiteatro) /.test(n)) return 2;
-  if (/ (primer|primero|1er|1º|1 anfiteatro) /.test(n)) return 1;
+  if (/ (cuarto|cuarta|4º|4o|4a|4 anfiteatro) /.test(n)) return 4;
+  if (/ (tercer|tercero|tercera|3er|3º|3a|3 anfiteatro) /.test(n)) return 3;
+  if (/ (segundo|segunda|2º|2o|2a|2 anfiteatro) /.test(n)) return 2;
+  if (/ (primer|primero|primera|1er|1º|1a|1 anfiteatro) /.test(n)) return 1;
   const numbered = / (?:nivel|anillo|piso|planta) (\d{1,2}) /.exec(n);
   if (numbered) return Math.max(0, Number(numbered[1]) - 1);
   if (/ (nivel inferior|inferior|baja|bajo|lower|nivel campo|pie de campo) /.test(n)) return 0;
@@ -262,7 +273,8 @@ function buildLayout(a: VenueArtifact): Layout {
     if (side) sided[side].push(z);
     else ringZones.push(z);
   }
-  const hasSided = Object.values(sided).some((l) => l.length > 0);
+  // Estadio: alguna grada con punto cardinal o con nombre de fondo («Gol Mar», «Marcador»…).
+  const hasSided = Object.values(sided).some((l) => l.length > 0) || ringZones.some((z) => standRole(z.name) === 'end');
   const pieces: Piece[] = [];
   const zoneLabels: Layout['zoneLabels'] = [];
   const legend = new Map<string, { name: string; rings: number[] }>();
@@ -275,10 +287,13 @@ function buildLayout(a: VenueArtifact): Layout {
   let rings = 1;
 
   if (hasSided) {
-    // Estadio: las zonas sin orientación ocupan los lados libres.
+    // Estadio: las zonas sin orientación ocupan los lados libres (los fondos, arriba y abajo;
+    // tribuna y preferencia, a los lados).
     for (const z of ringZones) {
-      const free = (['left', 'right', 'top', 'bottom'] as Side[]).find((sd) => sided[sd].length === 0);
-      sided[free ?? 'bottom'].push(z);
+      const role = standRole(z.name);
+      const prefs: Side[] = role === 'end' ? ['top', 'bottom', 'left', 'right'] : ['left', 'right', 'top', 'bottom'];
+      const free = prefs.find((sd) => sided[sd].length === 0);
+      sided[free ?? prefs[0] ?? 'bottom'].push(z);
     }
     const RANGE: Record<Side, [number, number]> = { right: [-45, 45], bottom: [45, 135], left: [135, 225], top: [225, 315] };
     for (const side of Object.keys(sided) as Side[]) {
@@ -727,13 +742,25 @@ export function VenueMap({
 
   // Rectángulos de la pista / zonas de pie.
   const centerRects = useMemo(() => {
-    const n = layout.center.length;
     const pad = 10;
     const gap = 6;
-    const w = (2 * g.fieldX - pad * 2 - (n - 1) * gap) / Math.max(1, n);
     const h = stadium ? g.fieldY * 1.2 : 2 * g.fieldY - pad * 2;
-    const y = cy - h / 2;
-    return layout.center.map((c, i) => ({ ...c, x: cx - g.fieldX + pad + i * (w + gap), y, w, h }));
+    const top = cy - h / 2;
+    const x0 = cx - g.fieldX + pad;
+    const width = 2 * g.fieldX - pad * 2;
+    const row = (items: Spot[], y: number, rh: number) => {
+      const w = (width - (items.length - 1) * gap) / Math.max(1, items.length);
+      return items.map((c, i) => ({ ...c, x: x0 + i * (w + gap), y, w, h: rh }));
+    };
+    // «Front Stage» / «Golden» en una fila junto al escenario; el resto de la pista, detrás.
+    const isFront = (c: Spot) => / (front|golden|delantera) /.test(` ${key(c.section.name)} `);
+    const front = layout.center.filter(isFront);
+    const rest = layout.center.filter((c) => !isFront(c));
+    if (front.length > 0 && rest.length > 0) {
+      const fh = (h - gap) * 0.38;
+      return [...row(front, top, fh), ...row(rest, top + fh + gap, h - fh - gap)];
+    }
+    return row(layout.center, top, h);
   }, [layout, g, cx, cy, stadium]);
 
   const targetsKey = targets.join('\u0000');
@@ -1158,7 +1185,11 @@ export function VenueMap({
             </>
           ) : (
             `${onPick ? 'Toca una zona para añadirla como objetivo.' : 'Toca o pasa el ratón por una zona para ver su nombre.'} ${
-              stadium ? 'Cada grada va del nivel más cercano al campo (dentro) al más alto (fuera).' : 'Los anillos van de la zona más cercana a la pista o la platea (dentro) a la más alta (fuera).'
+              stadium
+                ? 'Cada grada va del nivel más cercano al campo (dentro) al más alto (fuera).'
+                : layout.pieces.length > 0
+                  ? 'Los anillos van de la zona más cercana a la pista o la platea (dentro) a la más alta (fuera).'
+                  : 'Delante, lo más cerca del escenario.'
             } Plano orientativo: los sectores exactos están en el plano oficial de la venta.`
           )}
         </div>

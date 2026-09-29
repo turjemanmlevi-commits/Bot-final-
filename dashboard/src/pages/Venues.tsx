@@ -13,8 +13,11 @@ import { live, useLive } from '../lib/store';
 // Nuevo recinto (recinto rápido)
 // ---------------------------------------------------------------------------
 
-const EXAMPLE_PABELLON = ['Pista (de pie)', 'Grada Baja: 101, 102, 103', 'Grada Alta: 201, 202, 203'].join('\n');
-const EXAMPLE_ESTADIO = ['Tribuna: Baja, Alta', 'Fondo Norte: Baja, Alta', 'Fondo Sur: Baja, Alta', 'Lateral: Baja, Alta'].join('\n');
+const EXAMPLE_PABELLON = ['Pista (de pie): Front Stage, General', 'Grada baja: Izquierda, Central, Derecha', 'Grada alta: Izquierda, Central, Derecha'].join('\n');
+const EXAMPLE_ESTADIO = ['Tribuna: Grada baja, Grada alta', 'Preferencia: Grada baja, Grada alta', 'Fondo Norte: Grada baja, Grada alta', 'Fondo Sur: Grada baja, Grada alta'].join(
+  '\n',
+);
+const EXAMPLE_FESTIVAL = ['Pista (de pie): Front Stage, General', 'VIP (de pie)', 'Zona PMR (de pie)'].join('\n');
 
 /**
  * Si la compilación trae errores (en esta u otras notas), el servidor puede
@@ -196,6 +199,9 @@ function VenueQuickForm({ onClose }: { onClose: () => void }) {
               </button>
               <button type="button" className="btn ghost sm" onClick={() => fillExample(EXAMPLE_ESTADIO)}>
                 Ejemplo: estadio
+              </button>
+              <button type="button" className="btn ghost sm" onClick={() => fillExample(EXAMPLE_FESTIVAL)}>
+                Ejemplo: festival
               </button>
             </div>
           </div>
