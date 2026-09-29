@@ -14,19 +14,19 @@ tags:
 
 ## Telegram (opcional)
 
-Configuración paso a paso: [[Configurar Telegram]]. Todo se configura en el `.env`, que solo se lee al arrancar: tras cambiarlo, cierra la ventana del servidor y vuelve a abrir `INICIAR.bat`.
+Configuración paso a paso: [[Configurar Telegram]]. Se configura desde el dashboard (*Ajustes · Telegram*): el token y el chat principal se guardan en el `.env` y se aplican al momento, sin reiniciar. Al conectar, el bot se configura solo (menú de comandos y descripción). Si se edita el `.env` a mano, solo se lee al arrancar.
 
 ### Chats
 
 | Chat | Cómo se configura | Qué recibe | Qué puede hacer |
 |---|---|---|---|
-| **Principal** (tú o un grupo) | `TELEGRAM_CHAT_ID` en `.env`. Los de grupo empiezan por «-» | Todo: alertas, tareas de todas las cuentas y el aviso de apertura | Responder cualquier tarea y todos los comandos, incluidos `/pausa` y `/parar_todo` |
-| **De una cuenta** | *Cuentas → editar → Chat de Telegram* (sin reiniciar) | Las tareas y alertas de esa cuenta y el aviso de apertura de sus operaciones | Responder **solo sus tareas** («Esta tarea es de otra cuenta») y `/estado`, `/tareas`, `/id`, `/ayuda` |
+| **Principal** (tú o un grupo) | *Ajustes · Telegram* → **Usar como chat principal** (se guarda como `TELEGRAM_CHAT_ID`). Los de grupo empiezan por «-» | Todo: alertas, tareas de todas las cuentas y el aviso de apertura | Responder cualquier tarea y todos los comandos, incluidos `/pausa` y `/parar_todo` |
+| **De una cuenta** | *Ajustes · Telegram* → **Asignar a una cuenta**, o *Cuentas → editar → Chat de Telegram* (sin reiniciar). Al vincularlo le llega una bienvenida | Las tareas y alertas de esa cuenta y el aviso de apertura de sus operaciones | Responder **solo sus tareas** («Esta tarea es de otra cuenta») y `/estado`, `/tareas`, `/id`, `/ayuda` |
 | **Cualquier otro** | — | Nada | Solo recibe su chat ID como respuesta. Sus botones contestan «Este chat no está autorizado» |
 
 ### Averiguar un chat ID
 
-- Con solo `TELEGRAM_BOT_TOKEN` el bot ya funciona: quien le escriba `/start` (botón **Iniciar**) recibe el chat ID de ese chat.
+- Con solo el token el bot ya funciona: quien le escriba `/start` (botón **Iniciar**) recibe el chat ID de ese chat y aparece en *Ajustes · Telegram*.
 - `/id` lo muestra en cualquier chat (útil en grupos).
 - *Ajustes · Telegram* lista los últimos chats que han escrito al bot (hasta 10, solo en memoria: se borran al reiniciar), con su chat ID, si ya están configurados y un botón **Probar**.
 - **Enviar mensaje de prueba** manda un mensaje al chat principal; **Probar ese chat**, a cualquier otro ID. Si Telegram falla, el dashboard explica por qué (token no válido, chat no encontrado…) en lugar de dar un error.

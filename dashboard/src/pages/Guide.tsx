@@ -23,7 +23,7 @@ const STEPS: Step[] = [
     who: 'Tú',
     title: 'Cuentas: una por persona que va a ir',
     icon: 'users',
-    text: 'Cuentas → Nueva cuenta. Elige dónde compra (Real Madrid, Ticketmaster o entradas.com) y pon alias, nunca emails, teléfonos ni DNI. Si esa persona usa Telegram, añade su chat ID y recibirá solo sus tareas.',
+    text: 'Cuentas → Nueva cuenta. Elige dónde compra (Real Madrid, Ticketmaster o entradas.com) y pon alias, nunca emails, teléfonos ni DNI. Si usa Telegram, que abra el bot y pulse «Iniciar»: asígnale su chat en Ajustes · Telegram y recibirá solo sus tareas.',
     link: { to: '/cuentas', label: 'Ir a Cuentas' },
   },
   {

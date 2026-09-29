@@ -270,7 +270,12 @@ function TelegramCard() {
               </Pill>
             ) : null}
           </div>
-          {tg.detail ? <div className="small ink2">{tg.detail}</div> : null}
+          {tg.enabled && tg.detail ? <div className="small ink2">{tg.detail}</div> : null}
+          {last ? (
+            <Callout tone={last.ok ? 'good' : 'critical'}>
+              {fmtTime(last.at)} — {last.message}
+            </Callout>
+          ) : null}
         </div>
 
         {/* 1 · Token */}
@@ -382,11 +387,6 @@ function TelegramCard() {
             </button>
             <span className="small ink2">Te llegará un mensaje al chat principal. Escribe /ayuda al bot para ver cómo responder rápido.</span>
           </div>
-          {last ? (
-            <Callout tone={last.ok ? 'good' : 'critical'}>
-              {fmtTime(last.at)} — {last.message}
-            </Callout>
-          ) : null}
         </div>
 
         {/* Cada persona en su chat */}

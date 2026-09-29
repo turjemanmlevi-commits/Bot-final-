@@ -104,15 +104,19 @@ Es orientativo: los sectores exactos están en el plano oficial de cada venta.
 
 ## Telegram
 
+Todo desde el dashboard, sin tocar archivos ni reiniciar (**Ajustes · Telegram**):
+
 1. En Telegram, habla con **@BotFather** → `/newbot` → copia el token.
-2. Abre `.env` con el Bloc de notas y pega el token detrás de `TELEGRAM_BOT_TOKEN=`. Guarda y reinicia (cierra la ventana negra y abre **Sala de control**).
-3. Escribe `/start` a tu bot: te responde con el **chat ID** de ese chat (los de grupo empiezan por `-`).
-4. Pégalo detrás de `TELEGRAM_CHAT_ID=`, guarda y reinicia.
-5. En **Ajustes · Telegram** pulsa **Enviar mensaje de prueba**. Esa página también lista los chats que han escrito al bot.
+2. **Conecta tu bot**: pega el token → **Conectar**. Se comprueba con Telegram, se guarda en `.env` y el bot se conecta al momento; además se configura solo (menú de comandos y descripción).
+3. **Abrir @tu_bot** → pulsa **Iniciar**: tu nombre aparece en el dashboard.
+4. **Usar como chat principal** junto a tu nombre: te llega la bienvenida con cómo responder rápido.
+5. **Enviar mensaje de prueba**.
+
+Cada persona que vaya a comprar pulsa **Iniciar** en el bot y se le asigna su cuenta en esa misma página (**Asignar a una cuenta**): recibe solo sus tareas. El token solo vive en el `.env` de tu PC; el dashboard no lo vuelve a mostrar.
 
 Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad**, de la cantidad pedida a 1 (`✅ 2 en carrito`, `✅ 1 en carrito`; en filas de 5, hasta 20), **❌ No pude** y **❓ No sé**. Tras «N en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (`5`, `8`, `10`, `15` o `20 min`) junto a **💳 Ya lo he pagado**. Los avisos de carrito a punto de caducar y el de «se acabó el tiempo del carrito, ¿lo has pagado?» llegan con **💳 Ya lo he pagado** y **⏱ Quedan 5 / 10 / 15 min**. Cuando una tarea se responde (en Telegram o en el dashboard), sus botones desaparecen en todos los chats. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard.
 
-Cada cuenta puede tener su propio chat (**Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos: `/estado`, `/tareas`, `/id`, `/ayuda`; y solo en el chat principal, `/pausa` y `/parar_todo`.
+Cada cuenta puede tener su propio chat (**Ajustes · Telegram → Asignar a una cuenta**, o **Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos (salen en el menú del bot): `/tareas`, `/estado`, `/ayuda`, `/id`; y solo en el chat principal, `/pausa` y `/parar_todo`.
 
 Guía: `vault/00 Guía/Configurar Telegram.md`.
 
@@ -160,7 +164,7 @@ En Telegram hay que sumar lo que tarde la red de Telegram. Los tiempos del simul
 
 ## Configuración
 
-`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram, los minutos para responder una tarea de compra antes de que el sistema pida verificarla (`MANUAL_TASK_MINUTES`, **30** por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar. Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
+`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram (mejor desde **Ajustes · Telegram**, que lo guarda ahí sin reiniciar), los minutos para responder una tarea de compra antes de que el sistema pida verificarla (`MANUAL_TASK_MINUTES`, **30** por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar. Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
 
 Un `.env` creado con una versión anterior puede tener `MANUAL_TASK_MINUTES=10`, y ese valor manda sobre el nuevo defecto: cámbialo a `30` (o borra la línea) y reinicia.
 

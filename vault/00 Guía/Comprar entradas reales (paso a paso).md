@@ -31,7 +31,7 @@ Particularidades de cada web: [[Real Madrid]] · [[Ticketmaster]] · [[Entradas.
 
 ### 2. Telegram
 
-Sigue [[Configurar Telegram]] (unos 10 minutos). Al terminar, en **Ajustes · Telegram** pulsa **Enviar mensaje de prueba** y comprueba que llega al móvil. Es opcional, pero con Telegram cada persona recibe sus tareas con botones y el aviso de apertura de la venta.
+En **Ajustes · Telegram** (unos 5 minutos, sin tocar archivos): pega el token de tu bot → **Conectar**, abre el bot y pulsa **Iniciar**, **Usar como chat principal** y **Enviar mensaje de prueba**; comprueba que llega al móvil. Detalle: [[Configurar Telegram]]. Es opcional, pero con Telegram cada persona recibe sus tareas con botones y el aviso de apertura de la venta.
 
 ### 3. Cuentas: una por persona que va a ir
 
@@ -45,7 +45,7 @@ Sigue [[Configurar Telegram]] (unos 10 minutos). Al terminar, en **Ajustes · Te
 | Hogar / Medio de pago (alias) | `casa-ana`, `tarjeta-ana`. Obligatorios si el evento cuenta el límite por hogar o por medio de pago |
 | Verificación | **Verificada (legítima)** |
 | Elegible para | `*` (cualquier evento) |
-| Chat de Telegram | Opcional: el chat ID de esa persona, para que reciba solo sus tareas (ver [[Configurar Telegram]]) |
+| Chat de Telegram | Opcional: esa persona pulsa **Iniciar** en el bot y su chat se elige en la lista del campo (o en *Ajustes · Telegram* → **Asignar a una cuenta**); recibe solo sus tareas y una bienvenida con cómo responder rápido |
 
 Pulsa **Crear cuenta**. Solo **alias**: nunca emails, teléfonos, DNI ni números de socio (el formulario rechaza lo que parece un email, un teléfono o un documento). El sistema no pide ni guarda contraseñas.
 
@@ -120,7 +120,7 @@ Que cada persona lo lea ya, pero **«Sesión lista» se pulsa el día de la vent
 
 | Cuándo | Qué pasa | Qué hacéis |
 |---|---|---|
-| **T−60 min** | — | Doble clic en **Sala de control** (o `INICIAR.bat`). En **Resumen**, repasa «Compra real · lista de comprobación» y comprueba que el evento y la operación que nombra son **los vuestros** (el evento de demostración «Noche Flamenca Demo» también cuenta como evento verificado). En **Ajustes · Telegram**, **Enviar mensaje de prueba**. La operación debe estar *Armada* (el botón **Readiness** la comprueba) |
+| **T−60 min** | — | Doble clic en **Sala de control** (o `INICIAR.bat`). En **Resumen**, repasa «Compra real · lista de comprobación» y comprueba que el evento y la operación que nombra son **los vuestros** (el evento de demostración «Noche Flamenca Demo» también cuenta como evento verificado). En **Ajustes · Telegram**, **Enviar mensaje de prueba**. La operación debe estar *Armada* (el botón **Comprobación previa** la comprueba) |
 | **T−30 / T−15 min** | El sistema espera a cada cuenta | Cada persona **inicia sesión en la web oficial** (navegador o móvil), abre la página del evento y pulsa **Sesión lista** en *Tareas humanas* o en Telegram (en la tarea «Inicia sesión» de **esta** operación: cada compra lo pide de nuevo) |
 | **T−30 s** | La operación pasa a *Congelada*: ya no se puede editar | Página del evento abierta, sesión iniciada y medio de pago a mano |
 | **T0** | Pasa a *En ejecución*. Telegram envía **«🚦 ¡Abre la venta!»** con el botón a la web oficial (al chat principal y a los chats de las cuentas). Cada cuenta con «Sesión lista» recibe **«Añade N entradas · <zona>»**, en Telegram y en *Tareas humanas*, donde la tarea muestra el plano con **su zona resaltada** («Dónde está <zona> en el recinto») | Pulsa **Abrir la web oficial** y entra en la venta; si hay **cola virtual**, espera tu turno como cualquier comprador |
