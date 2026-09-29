@@ -13,8 +13,10 @@ tags:
 > - En la UE, la Directiva (UE) 2019/2161 (Directiva «Ómnibus»), incorporada al derecho español en 2021, considera práctica desleal revender a consumidores entradas compradas con medios automatizados para eludir los límites de compra u otras normas de la venta. Comprad solo para el grupo y respetad las condiciones de cada web. Ver [[Uso legítimo y guardarraíles]].
 
 > [!tip] En resumen
-> **La víspera:** arrancar, Telegram, cuentas, evento y operación, y **armarla**.
-> **El día:** cada persona inicia sesión en la web oficial y pulsa **Sesión lista**. A la hora de apertura (T0) cada una recibe su tarea («Añade 2 entradas · Lateral Este · Primer anfiteatro, máx. 120 €»), compra en la web oficial, responde aquí y **paga**.
+> **La víspera:** arrancar, Telegram, cuentas, evento y operación (tocando en el plano las zonas en orden), y **armarla**. Cada persona recibe su **plan**.
+> **El día:** cada persona inicia sesión en la web oficial y pulsa **Sesión lista**. A la hora de apertura (T0) cada una recibe «🚦 ¡Abre la venta!» y su tarea («Añade 2 entradas · Lateral Este · Primer anfiteatro, máx. 120 €») con el plano y su zona resaltada, compra en la web oficial, responde aquí y **paga**.
+>
+> La misma explicación, en 9 pasos y con el plano, está en el dashboard: **Cómo se compra** (menú de la izquierda, apartado *Preparar*).
 
 Particularidades de cada web: [[Real Madrid]] · [[Ticketmaster]] · [[Entradas.com]].
 
@@ -22,10 +24,10 @@ Particularidades de cada web: [[Real Madrid]] · [[Ticketmaster]] · [[Entradas.
 
 ### 1. Arrancar
 
-- Doble clic en **`INICIAR.bat`** (en la carpeta `bot final`). Comprueba Node.js, instala lo que falte, compila y abre el dashboard en <http://localhost:8787>.
+- Doble clic en **Sala de control** (acceso directo del Escritorio) o en **`INICIAR.bat`** (carpeta `bot final`). Comprueba Node.js (lo instala si falta), instala lo demás, compila y abre el dashboard en <http://localhost:8787>.
 - Deja **abierta la ventana negra** mientras uses el sistema. Si la cierras, se para.
 - Si Windows muestra «Windows protegió su PC»: **Más información → Ejecutar de todas formas** (pasa con archivos descargados de Internet).
-- ¿Primera vez? Sigue [[Bajar el proyecto a tu ordenador]].
+- ¿Primera vez? En PowerShell pega `irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex` y sigue [[Bajar el proyecto a tu ordenador]].
 
 ### 2. Telegram
 
@@ -50,6 +52,7 @@ Pulsa **Crear cuenta**. Solo **alias**: nunca emails, teléfonos, DNI ni número
 ### 4. Recinto
 
 - El [[Estadio Santiago Bernabéu]] ya está creado: zonas Lateral Oeste, Lateral Este, Fondo Norte y Fondo Sur, y en cada una Nivel inferior y del primer al cuarto anfiteatro (por ejemplo, `Lateral Este · Primer anfiteatro`).
+- **Ver el plano:** *Recintos · vault* → pulsa el nombre del recinto. El campo está en el centro con el **norte arriba**: Fondo Norte arriba, Fondo Sur abajo, Lateral Oeste a la izquierda y Lateral Este a la derecha. Cada grada tiene sus niveles como **anillos**: el de dentro es el más cercano al campo (Nivel inferior, que la leyenda llama «Grada / Tribuna») y el de fuera el más alto (Cuarto anfiteatro). Toca o pasa el ratón por un anillo para ver su nombre y cómo lo llama la web. En pabellones y teatros el **escenario** está arriba y las gradas forman una «U» alrededor. Es orientativo: los sectores exactos, en el plano oficial de la venta.
 - Para otro recinto: **Recintos · vault → Nuevo recinto**. Escribe el nombre, la ciudad, de dónde sale el plano (el enlace al plano oficial) y las zonas: **una zona por línea**, con sus secciones después de «:» separadas por comas. «(de pie)» marca una zona sin asiento:
 
 ```text
@@ -90,57 +93,61 @@ Marca **«He comprobado estos límites en las condiciones oficiales»** solo cua
 |---|---|
 | Evento | El que acabas de crear |
 | T0 (apertura de venta, hora local) | Se rellena con la apertura del evento: compruébalo |
-| Ventana (minutos) | **60** en ventas reales con cola (más si esperas una cola muy larga). Cuando acaba la ventana, la operación termina y se cancelan sus tareas abiertas |
+| Ventana (minutos) | **60** en ventas reales con cola (el formulario lo pone solo al elegir un evento de Real Madrid, Ticketmaster o entradas.com; más si esperas una cola muy larga). Cuando acaba la ventana, la operación termina y se cancelan sus tareas abiertas |
 | Entradas | Cuántas queréis en total |
 | Máximo por entrada (con gastos) | Lo máximo que pagaríais por entrada, **gastos de gestión incluidos** |
 | Presupuesto total | Lo máximo que gastaréis entre todos |
-| Grupo mínimo por carrito | Mínimo de entradas juntas en un carrito. Pon **1** si cada persona compra solo la suya |
-| Dónde (en orden de preferencia) | Pulsa las sugerencias del vault y ordénalas con las flechas. Por ejemplo: 1) `Lateral Este · Primer anfiteatro`, 2) `Fondo Sur` |
-| Asientos juntos | Si lo marcas, la tarea pide las entradas «juntas (misma fila)» |
+| Grupo mínimo por carrito | Mínimo de entradas por tarea y carrito. Viene en **2**: pon **1** si cada persona compra solo la suya o si aceptáis entradas sueltas. Con 2, si alguien consigue solo 1 de 2, la que falta **no** se le vuelve a pedir |
+| Dónde (en orden de preferencia) | **Toca en el plano** cada zona en el orden en que queréis intentarlo: cada toque añade ese anillo (grada + nivel, por ejemplo `Lateral Este · Primer anfiteatro`) y el plano lo numera 1, 2, 3… Para una grada entera (cualquier nivel) pulsa su botón en «Añadir desde el vault» (`+ Fondo Sur`, marcado *zona*). Reordena con las flechas y quita con ✕. Sin objetivos = cualquier zona del recinto |
+| Asientos juntos | Viene **marcado**: la tarea pide las entradas «juntas (misma fila)». Desmárcalo si os da igual |
 | Con qué cuentas | Las del grupo |
 | Avisar antes de que caduque un carrito (s) | `300, 120, 60` (avisos a 5, 2 y 1 minuto) |
 
 Pulsa **Crear y validar**, corrige lo que salga en rojo en la pestaña *Preparación* y pulsa **Armar**. Se puede armar la víspera.
 
-Al armar, cada cuenta recibe su tarea **«Inicia sesión»** con su **plan**, en el dashboard y en Telegram:
+En la página de la operación, la tarjeta **«Plan de compra · dónde y en qué orden»** muestra el plano con las zonas numeradas, la lista en orden y, durante la venta, quién está intentando qué zona y qué hay ya en carrito.
 
-> Plan: la venta abre a las 18:05. Irás a por 1) Lateral Este · Primer anfiteatro, 2) Fondo Sur; hasta 2 entradas, máximo 120,00 € por entrada con gastos…
+Al armar, cada cuenta recibe su tarea **«Inicia sesión»** con su **plan**, en *Tareas humanas* y en Telegram:
+
+> Plan: la venta abre a las 18:05. Irás a por 1) Lateral Este · Primer anfiteatro, 2) Fondo Sur; hasta 2 entradas, máximo 120,00 € por entrada con gastos. Cuando llegue la hora te avisaremos y te diremos exactamente qué zona intentar.
 
 Que cada persona lo lea ya, pero **«Sesión lista» se pulsa el día de la venta**, cuando tenga la sesión iniciada de verdad en la web oficial.
 
 > [!tip] Colas largas
-> Cada tarea de compra se puede responder durante **10 minutos**. Si esperáis una cola larga (un partido grande), añade la línea `MANUAL_TASK_MINUTES=30` al archivo `.env` y reinicia (cierra la ventana negra y vuelve a abrir `INICIAR.bat`). Si una tarea caduca no se pierde nada: pasa a «¿Están las N entradas de … en el carrito?» y se responde igual.
+> Cada tarea de compra se puede responder durante **10 minutos**. Si esperáis una cola larga (un partido grande), abre `.env` con el Bloc de notas, cambia la línea `MANUAL_TASK_MINUTES=10` por `MANUAL_TASK_MINUTES=30` (si no está, añádela), guarda y reinicia (cierra la ventana negra y vuelve a abrir **Sala de control**). Si una tarea caduca no se pierde nada: pasa a «¿Están las N entradas de … en el carrito?» y se responde igual.
 
 ## El día de la venta
 
 | Cuándo | Qué pasa | Qué hacéis |
 |---|---|---|
-| **T−60 min** | — | Doble clic en `INICIAR.bat`. En **Resumen**, repasa «Compra real · lista de comprobación». En **Ajustes · Telegram**, **Enviar mensaje de prueba**. La operación debe estar *Armada* (el botón **Readiness** la comprueba) |
+| **T−60 min** | — | Doble clic en **Sala de control** (o `INICIAR.bat`). En **Resumen**, repasa «Compra real · lista de comprobación» y comprueba que el evento y la operación que nombra son **los vuestros** (el evento de demostración «Noche Flamenca Demo» también cuenta como evento verificado). En **Ajustes · Telegram**, **Enviar mensaje de prueba**. La operación debe estar *Armada* (el botón **Readiness** la comprueba) |
 | **T−30 / T−15 min** | El sistema espera a cada cuenta | Cada persona **inicia sesión en la web oficial** (navegador o móvil), abre la página del evento y pulsa **Sesión lista** en *Tareas humanas* o en Telegram |
 | **T−30 s** | La operación pasa a *Congelada*: ya no se puede editar | Página del evento abierta, sesión iniciada y medio de pago a mano |
-| **T0** | Pasa a *En ejecución*. Telegram envía **«🚦 ¡Abre la venta!»** con el botón a la web oficial. Cada cuenta con «Sesión lista» recibe **«Añade N entradas · <zona>»** | Pulsa **Abrir la web oficial** y entra en la venta; si hay **cola virtual**, espera tu turno como cualquier comprador |
+| **T0** | Pasa a *En ejecución*. Telegram envía **«🚦 ¡Abre la venta!»** con el botón a la web oficial (al chat principal y a los chats de las cuentas). Cada cuenta con «Sesión lista» recibe **«Añade N entradas · <zona>»**, en Telegram y en *Tareas humanas*, donde la tarea muestra el plano con **su zona resaltada** («Dónde está <zona> en el recinto») | Pulsa **Abrir la web oficial** y entra en la venta; si hay **cola virtual**, espera tu turno como cualquier comprador |
 | **Pasada la cola** | — | Elige asientos de **esa zona**, a **ese precio máximo o menos** (con gastos), y añádelos al carrito. Después responde la tarea |
 | **Entradas en el carrito** | Aparecen en *Carritos* con su cuenta atrás | **Paga ya en la web oficial** y pulsa **Ya lo he pagado** |
 | **Todo cubierto** | La operación pasa a *Carrito asegurado* y se cancelan las tareas que sobran | Pagad lo que falte y, al final, **Cerrar** |
 
 > [!note] ¿Nadie tiene «Sesión lista» en T0?
-> La operación arranca igual. Quien inicie sesión después y pulse **Sesión lista** recibe su tarea en menos de un segundo. Pero cuanto antes, mejor.
+> La operación arranca igual. Quien inicie sesión después y pulse **Sesión lista** recibe su tarea en menos de un segundo (el reparto se revisa cada 250 ms). Pero cuanto antes, mejor.
 
 ### Cómo responder a la tarea de compra
 
-- **Están en el carrito**: indica **cuántas** quedaron, el **precio por entrada con gastos** y los **minutos que le quedan al carrito** (los muestra la web). En Telegram: pulsa **✅ N en carrito** y después los minutos.
-- **No pude**: no hay entradas en esa zona a ese precio, o la web no te deja. Te llega **la siguiente zona** de la lista en menos de un segundo. Si ya no quedan zonas, esa cuenta no recibe más tareas.
+- **Están en el carrito** (dashboard): escribe **cuántas** quedaron, el **precio por entrada con gastos** y los **minutos que le quedan al carrito** (los muestra la web; el campo viene con 10: cámbialo por lo que diga la web) y pulsa **Están en el carrito**.
+- **En Telegram**: la tarea trae **un botón por cantidad**: `✅ 2 en carrito`, `✅ 1 en carrito`… Pulsa el número de entradas que tienes de verdad en el carrito. Enseguida el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** con los botones `5 min`, `8 min`, `10 min`, `15 min` y `20 min`: pulsa el más cercano **por debajo** de lo que diga la web. Así el carrito tiene cuenta atrás y os avisa antes de que caduque. **Si no pulsas los minutos, el carrito no tiene cuenta atrás ni avisos** (el mensaje con los minutos se queda en el chat: puedes pulsarlo después).
+- **Si solo conseguiste algunas** (1 de 2): pulsa las que tengas. Te llega otra tarea con las que faltan en la misma zona, salvo que el «Grupo mínimo por carrito» de la operación sea mayor que las que faltan.
+- **No pude**: no hay entradas en esa zona a ese precio, o la web no te deja. Te llega **la siguiente zona** de la lista al momento (en el ensayo, 54 ms; como mucho unos 250 ms, más lo que tarde Telegram). Si ya no quedan zonas, esa cuenta no recibe más tareas.
 - **No estoy seguro** (en Telegram, **❓ No sé**): la reserva se mantiene y llega «¿Están las N entradas de … en el carrito?». Mira el carrito en la web oficial y responde.
 
-Responde **Están en el carrito** solo cuando las entradas estén de verdad en el carrito de la web oficial.
+Responde **en carrito** solo cuando las entradas estén de verdad en el carrito de la web oficial.
 
 > [!note] «En carrito» desde Telegram
-> Se anota la cantidad que pulsas **al precio máximo** (supuesto prudente: el presupuesto nunca se queda corto). Si quieres que conste el precio exacto, responde desde el dashboard (*Tareas humanas → Están en el carrito*).
+> Se anota la cantidad que pulsas **al precio máximo** (supuesto prudente: el presupuesto nunca se queda corto). Si quieres que conste el precio exacto, responde desde el dashboard (*Tareas humanas → Están en el carrito*) **en lugar de** Telegram: una vez respondida, la tarea ya no se puede corregir.
 
 ### Pagar
 
 - Paga **en cuanto estén en el carrito**: los carritos de las ticketeras caducan en pocos minutos.
-- *Carritos* muestra cada carrito con su cuenta atrás (si indicaste los minutos) y el botón **Abrir la web oficial para pagar**. El dashboard y Telegram avisan antes de que caduque.
+- *Carritos* muestra cada carrito con su cuenta atrás (si indicaste los minutos) y el botón **Abrir la web oficial para pagar**. El dashboard y Telegram avisan antes de que caduque (a 5, 2 y 1 minuto, si no cambiaste esos avisos). Sin minutos no hay cuenta atrás: vigila el reloj de la web oficial.
 - Después de pagar, pulsa **Ya lo he pagado**. Si no lo quieres: quítalo del carrito en la web oficial y pulsa **Liberar** (mientras la operación siga en marcha, ese cupo vuelve a quedar libre).
 
 ### Terminar
@@ -153,8 +160,21 @@ Responde **Están en el carrito** solo cuando las entradas estén de verdad en e
 
 > [!info] El sistema no os hace esperar
 > - A la hora exacta de T0 la operación arranca, reparte las tareas y envía el aviso «🚦 ¡Abre la venta!».
-> - Comprueba cada 250 ms: tras **Sesión lista** o **No pude**, la tarea siguiente aparece en el dashboard en **menos de un segundo**. Telegram suele añadir menos de un segundo más.
-> - Lo que tarda **segundos** es la parte humana: ver el aviso, cambiar de pestaña, elegir asientos y pulsar. Es lo que mide «Respuesta humana» en las métricas de la operación (desde que se crea la tarea hasta que alguien la responde).
+> - Comprueba cada 250 ms: tras **Sesión lista** o **No pude**, la tarea siguiente aparece como mucho unos 250 ms después. Telegram suele añadir menos de un segundo más.
+> - Lo que tarda **segundos** es la parte humana: ver el aviso, cambiar de pestaña, pasar la cola, elegir asientos y pulsar. Es lo que mide «Respuesta humana» en las métricas de la operación (desde que se crea la tarea hasta que alguien la responde).
+
+Medido en el ensayo:
+
+| Qué | Tiempo |
+|---|---|
+| De T0 a la tarea en Telegram | 10 ms |
+| De T0 a la tarea en el dashboard | 26 ms |
+| De T0 a «🚦 ¡Abre la venta!» | 12 ms |
+| De «No pude» a la tarea con la siguiente zona | ~54 ms (como mucho unos 250 ms) |
+| Simulador sin cola: primera entrada en carrito / 8 de 8 | 33–62 ms / 41–135 ms |
+| Decisión del motor | ~0,04 ms |
+
+En Telegram hay que sumar lo que tarde la red de Telegram. Las cifras del simulador son de ensayo: en una venta real **el sistema no añade nada al carrito**; lo hacéis vosotros en la web oficial, y ahí mandan la cola virtual y vuestros segundos.
 
 Para ganar esos segundos:
 
@@ -168,17 +188,22 @@ Para ganar esos segundos:
 
 | Problema | Qué hacer |
 |---|---|
-| El dashboard no abre | ¿Está abierta la ventana negra? Si la cerraste, doble clic en `INICIAR.bat`. Si dice que el puerto ya está en uso, ya hay otro servidor abierto: usa ese o ciérralo |
-| Se cerró la ventana en plena venta | Vuelve a abrir `INICIAR.bat` enseguida. El estado se guarda en la carpeta `data`: la operación aparece como *Recuperando* y sigue cuando se responden las tareas que estaban abiertas |
+| El dashboard no abre | ¿Está abierta la ventana negra? Si la cerraste, doble clic en **Sala de control** (o `INICIAR.bat`). Si dice que el puerto ya está en uso, ya hay otro servidor abierto: usa ese o ciérralo |
+| Se cerró la ventana en plena venta | Vuelve a abrir **Sala de control** enseguida. El estado se guarda en la carpeta `data`: la operación aparece como *Recuperando* y sigue en cuanto se responden (o caducan) las tareas de compra que estaban abiertas |
 | No llega nada a Telegram | Revisa **Ajustes · Telegram** (token, chat, estado). Cada persona tiene que haber pulsado **Iniciar** (`/start`) en el bot. Ver [[Configurar Telegram]]. Mientras tanto, usad *Tareas humanas* en el dashboard |
 | A alguien no le llega su tarea de compra | ¿Ha pulsado **Sesión lista**? Sin eso no recibe tareas. ¿Le quedan zonas? Tras «No pude» en la última zona no hay más |
 | Una tarea caducó | No se pierde nada: aparece «¿Están las N entradas de … en el carrito?». Mirad el carrito en la web oficial y responded |
+| Un carrito no tiene cuenta atrás | Se respondió «en carrito» por Telegram sin pulsar los minutos. Busca en el chat el mensaje «⏱ ¿Cuántos minutos le quedan al carrito en la web?» y pulsa los minutos. Sin eso no hay avisos de caducidad: pagad cuanto antes mirando el reloj de la web oficial |
 | La venta abrió antes de lo previsto | En la operación, **Empezar ya** |
-| Alguien compró fuera del plan | Que avise a quien coordina. Los límites son **por titular**: esa compra cuenta para su cupo en la web oficial aunque el sistema no la conozca. Detén esa cuenta en *Cuentas* (**Parar cuenta**) y, si hace falta, **Reducir cantidad** en la operación |
-| El precio máximo se queda corto | En marcha solo se puede **bajar**. Para subirlo, antes de T0: **Desarmar**, editar y **Armar** de nuevo |
+| Alguien compró fuera del plan | Que avise a quien coordina. Los límites son **por titular**: esa compra cuenta para su cupo en la web oficial aunque el sistema no la conozca. **Durante la venta**, detén esa cuenta en *Cuentas* (**Parar cuenta**) y, si hace falta, **Reducir cantidad** en la operación. Antes de T0, mira la fila siguiente |
+| Una persona no va a participar (antes de T0) | **No uses «Parar cuenta»** en una cuenta de la operación antes de T0: si a la hora de T0 hay una cuenta parada, **la operación entera termina sin arrancar**. En su lugar, con tiempo antes de T0: **Desarmar**, **Editar configuración**, quitar esa cuenta de «Con qué cuentas», **Guardar y validar** y **Armar** de nuevo |
+| El precio máximo se queda corto | En marcha solo se puede **bajar**. Para subirlo, antes de T0: **Desarmar**, **Editar configuración**, **Guardar y validar** y **Armar** de nuevo |
 | Errores del vault | *Recintos · vault* muestra el error y la nota afectada. El sistema mantiene la última versión válida: corrige la nota y guarda |
 | Hay que pausar | **Pausar** en la operación, o `/pausa` en el chat principal de Telegram. **Reanudar** mientras la ventana siga abierta |
-| Parada de emergencia | **Seguridad → PARAR TODO** (kill switch global) o `/parar_todo` en el chat principal. Suéltalo en *Seguridad* antes de T0: con un kill switch activo la operación no arranca |
+| Parada de emergencia | **Seguridad → PARAR TODO** (kill switch global) o `/parar_todo` en el chat principal: pausa lo que esté en marcha. Suéltalo en *Seguridad* y pulsa **Reanudar** en la operación. **Antes de T0, suéltalo siempre**: si sigue activo a la hora de T0, la operación termina sin arrancar y habría que crear y armar otra |
+
+> [!warning] Si desarmas y vuelves a armar
+> El **plan** que ya recibió cada persona (tarea «Inicia sesión» y su mensaje de Telegram) **no se actualiza**: sigue mostrando las zonas, cantidades y precio de antes. Las tareas que llegan en T0 sí usan la configuración nueva. Avisad al grupo del cambio por vuestro chat y revisad la tarjeta **Plan de compra** de la operación.
 
 Más detalle: [[Qué hacer con cada alerta]].
 
@@ -194,5 +219,5 @@ Más detalle: [[Qué hacer con cada alerta]].
 > Mañana a las 18:05 abre la venta de «<evento>».
 > 1. Entre 30 y 15 minutos antes, inicia sesión con **tu** cuenta en la web oficial y pulsa «Sesión lista» (en Telegram o en el dashboard).
 > 2. A la hora te llega tu tarea: pulsa «Abrir la web oficial», espera la cola si la hay y compra la zona, la cantidad y el precio máximo que te diga.
-> 3. En cuanto estén en el carrito, pulsa «✅ N en carrito» (o «Están en el carrito» en el dashboard) y **paga ya**. Si no hay a ese precio, «No pude» y te llega la siguiente zona.
+> 3. En cuanto estén en el carrito, pulsa el botón con las que tengas («✅ 2 en carrito», «✅ 1 en carrito»), después los minutos que le quedan al carrito, y **paga ya en la web oficial**. Si no hay a ese precio, «❌ No pude» y te llega la siguiente zona.
 > 4. Nunca pagues más del máximo y no compartas tu contraseña con nadie.

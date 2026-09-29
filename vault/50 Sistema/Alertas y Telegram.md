@@ -34,10 +34,13 @@ Configuración paso a paso: [[Configurar Telegram]]. Todo se configura en el `.e
 ### Qué se envía
 
 - Alertas de **aviso** y **críticas**, y siempre los **carritos confirmados y asegurados**. La alerta de «tarea humana» no se repite: la tarea llega con sus propios botones.
-- **Tareas**: título, cuenta, `🎯 N × zona · máx. precio por entrada`, `⏱ Responde antes de las HH:MM` e instrucciones, con un botón de enlace **🌐 Abrir la web oficial** (el `url` del evento o, si no tiene, el del proveedor).
-  - «Inicia sesión»: **✅ Sesión lista** / **❌ No puedo**.
-  - «Añade N entradas · <zona>» y «¿Están las N entradas… en el carrito?»: **✅ N en carrito** (un botón por cantidad, hasta 6), **❌ No pude**, **❓ No sé**. Tras «en carrito» pregunta los minutos que le quedan al carrito (5, 8, 10, 15 o 20) y fija su caducidad para avisar a tiempo.
-- En **T0**, «🚦 ¡Abre la venta!» al chat principal y a los chats de las cuentas de la operación, con el enlace oficial y cuántas cuentas no han pulsado «Sesión lista».
+- **Tareas**: título, cuenta, `🎯 N × zona · máx. precio por entrada`, `⏱ Responde antes de las HH:MM` e instrucciones, con un botón de enlace **🌐 Abrir la web oficial** (el `url` del evento o, si no tiene, el del proveedor). Cada tarea va al chat principal y al chat de su cuenta.
+  - «Inicia sesión» (se crea **al armar**; en asistencia manual sus instrucciones incluyen el **plan** de la cuenta: hora de apertura, zonas en orden, cuántas entradas como mucho y precio máximo): **✅ Sesión lista** / **❌ No puedo**.
+  - «Añade N entradas · <zona>» (se crea **en T0** para cada cuenta con «Sesión lista», y después tras cada «No pude» o entrega parcial) y «¿Están las N entradas… en el carrito?»: **un botón por cantidad** (`✅ 2 en carrito`, `✅ 1 en carrito`…, hasta 6), **❌ No pude**, **❓ No sé**. El mensaje recuerda que se anota al precio máximo.
+  - Tras «en carrito», el bot pregunta en ese mismo chat **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** con `5`, `8`, `10`, `15` y `20 min`, y fija la caducidad del carrito (lo mismo que `POST /api/carts/:id/expiry`, ver [[API]]) para avisar a tiempo. Solo puede responder el chat principal o el de la cuenta del carrito. Si nadie lo pulsa, el carrito queda sin caducidad y sin avisos.
+  - Entrega parcial (por ejemplo `✅ 1 en carrito` en una tarea de 2): se confirma esa cantidad y, en el siguiente ciclo del reparto, la misma cuenta recibe otra tarea con las que faltan en la misma zona si el «grupo mínimo por carrito» lo permite.
+- En **T0**, «🚦 ¡Abre la venta!» al chat principal y a los chats de las cuentas de la operación, con el enlace oficial y cuántas cuentas no han pulsado «Sesión lista». Se envía en el mismo instante en que salen las tareas (ensayo: 12 ms tras T0; las tareas, 10 ms en Telegram y 26 ms en el dashboard).
+- Al pulsar un botón, el bot contesta con un aviso breve y quita los botones de ese mensaje.
 
 ### Comandos
 
@@ -48,7 +51,7 @@ Configuración paso a paso: [[Configurar Telegram]]. Todo se configura en el `.e
 - `/id` — chat ID de este chat. `/ayuda` (o `/start`) — lista de comandos.
 
 > [!note] Botón «N en carrito» en Telegram
-> Registra la cantidad pulsada al **precio máximo** (supuesto conservador: el presupuesto nunca se queda corto). Para registrar el precio exacto, responde desde el dashboard (*Tareas humanas → Están en el carrito*).
+> Registra la cantidad pulsada al **precio máximo** (supuesto conservador: el presupuesto nunca se queda corto). Para registrar el precio exacto, responde desde el dashboard (*Tareas humanas → Están en el carrito*) en lugar de Telegram: una tarea respondida ya no se puede cambiar.
 
 ### Estado y fallos
 

@@ -6,7 +6,7 @@ tags:
 
 # Uso legítimo y guardarraíles
 
-El sistema coordina **cuentas legítimas de personas reales** (hasta 10 por operación) para conseguir entradas **para ese grupo**, respetando las reglas de cada venta. Su alcance automático termina en **carrito asegurado**: **pagar lo hace siempre una persona**.
+El sistema coordina **cuentas legítimas de personas reales** (hasta 10 por operación) para conseguir entradas **para ese grupo**, respetando las reglas de cada venta. Su alcance automático termina en **carrito asegurado**: **pagar lo hace siempre una persona**. Y esa automatización solo existe contra el simulador (o con una API autorizada por escrito, que no se incluye): en **Ticketmaster, entradas.com y Real Madrid no automatiza nada**; cada persona inicia sesión, añade al carrito y paga en la web oficial.
 
 ## Lo que el sistema no puede hacer (por diseño)
 

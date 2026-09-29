@@ -19,9 +19,9 @@ Las notas sin `type` son documentación y se ignoran. La carpeta `_plantillas` y
 |---|---|---|
 | `venue` | `10 Recintos/<Recinto>/<Recinto>.md` | `id`, `name`, `city`, `aliases`, `source`, `verifiedAt`, `confidence` |
 | `zone` | `10 Recintos/<Recinto>/Zonas/` | `venue`, `aliases` |
-| `section` | `10 Recintos/<Recinto>/Secciones/` | `venue`, `zone`, `kind` (SEATED/STANDING), `aliases`, `rows`, `seatsPerRow`, `capacity`, `view` (0–5), `obstructed`, `accessible`, `distance`, `confidence` |
-| `event` | `20 Eventos/` | `venue`, `provider`, `providerEventRef`, `startsAt`, `onSaleAt`, `currency`, `limit*`, `closedSections` |
-| `provider` | `30 Proveedores/` | `id`, `mode`, `authorizedCapabilities` |
+| `section` | `10 Recintos/<Recinto>/Secciones/` | `venue`, `zone`, `kind` (SEATED/STANDING), `level`, `aliases`, `rows`, `seatsPerRow`, `capacity`, `view` (0–5), `obstructed`, `accessible`, `distance`, `confidence` |
+| `event` | `20 Eventos/` | `venue`, `provider`, `url` (enlace oficial: el botón «Abrir la web oficial» de las tareas), `providerEventRef`, `startsAt`, `onSaleAt`, `currency`, `limit*`, `closedSections` |
+| `provider` | `30 Proveedores/` | `id`, `mode`, `url` (web oficial), `authorizedCapabilities` |
 
 - `venue` y `zone` se escriben como enlaces: `venue: "[[Arena Demo Madrid]]"`. Si una nota está dentro de la carpeta de un recinto, `venue` es opcional.
 - Las **fechas sin zona horaria** (como las escribe Obsidian: `2026-10-09T10:00`) se interpretan en `Europe/Madrid` (variable `VAULT_TZ` del servidor).
@@ -40,6 +40,15 @@ Cada ticketera escribe las secciones a su manera: «SEC 101», «Grada Baja - 10
 Cuanto menos directa es la coincidencia, **más ambigüedad** (0 = segura, 1 = sin resolver). Cada operación decide cuánta ambigüedad tolera. Las etiquetas que no se resuelven aparecen en el dashboard (Operación → En directo → Inventario): añádelas como alias de su sección.
 
 Puedes probar cualquier etiqueta en el dashboard: **Recintos → (recinto) → Probar una etiqueta del proveedor**.
+
+## El plano del dashboard
+
+El dashboard dibuja el plano de cada recinto con estas mismas notas (ver [[Dashboard]]):
+
+- Si los nombres de las zonas dicen su orientación (`Norte`, `Sur`, `Este`, `Oeste`; también `izquierda`/`derecha`), se dibuja como **estadio** con el norte arriba y cada zona en su lado.
+- El nivel de cada sección sale de su nombre o de su propiedad `level`: `Nivel inferior`/`Grada baja` es el anillo más cercano al campo; `Primer`…`Cuarto anfiteatro`, los siguientes hacia fuera.
+- Si ninguna zona tiene orientación, se dibuja como **pabellón o teatro**: escenario arriba, las zonas de pie (`kind: STANDING`, o que se llaman Pista/General) en el centro y el resto en anillos en «U» (platea o grada baja dentro, palcos, anfiteatro, grada alta fuera).
+- `accessible: true` pinta la sección en verde; las secciones cerradas por un evento salen atenuadas.
 
 ## Errores mientras escribes
 

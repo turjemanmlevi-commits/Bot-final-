@@ -1,32 +1,60 @@
 # Ticket Orchestrator v4 · Sala de control
 
-Orquestador *speed-first* para que un grupo de personas consiga entradas coordinando **hasta 10 cuentas legítimas**: Venue Intelligence en un vault de Obsidian, motor de selección determinista, dashboard en tiempo real, Telegram opcional y *human-in-the-loop*.
+Sala de control para que un grupo de personas consiga entradas coordinando **hasta 10 cuentas legítimas**, una por persona: plano visual de cada recinto, reparto de zonas, límites y presupuesto, dashboard en tiempo real, Telegram opcional y *human-in-the-loop*. Los datos de recintos y eventos viven en un vault de Obsidian.
 
-> **Alcance automático terminal: carrito asegurado. El pago lo hace siempre una persona.**
-> El sistema no paga, no resuelve CAPTCHA/SMS/2FA, no se salta colas, no sobrepasa límites de compra y no suplanta identidades: esas capacidades no existen en el código y los *gates* lo comprueban.
+> [!IMPORTANT]
+> **En Ticketmaster, entradas.com y Real Madrid el sistema no compra nada.** No entra en sus webs: no inicia sesión, no mira el inventario, no añade al carrito y no paga. Cada persona compra **en la web oficial, con su propia cuenta**. El sistema decide quién va a por qué zona, cuántas y hasta qué precio, se lo dice a cada una en el segundo exacto y lleva la cuenta de límites, presupuesto y carritos.
+>
+> Solo contra el **simulador interno** (para ensayar) añade al carrito él solo. Ni siquiera ahí paga: **el pago lo hace siempre una persona**. Tampoco resuelve CAPTCHA/SMS/2FA, ni se salta colas, ni sobrepasa límites de compra, ni suplanta identidades: esas funciones no existen en el código y los *gates* lo comprueban.
 
-## Empezar en Windows (lo más fácil)
+## Instalar en Windows: un solo comando (lo más fácil)
 
-1. Instala **Node.js LTS** desde <https://nodejs.org> (versión 20.19 o superior; con las opciones por defecto).
-2. Descarga el proyecto en `C:\Users\Leviç\OneDrive\Desktop\bot final`:
-   - con Git (ver «Alternativa: PowerShell» más abajo), o
-   - en GitHub: rama `claude/confident-bell-yb79l7` → **Code → Download ZIP**, y extrae el ZIP en esa carpeta.
-3. Haz **doble clic en `INICIAR.bat`**. Al terminar se abre <http://localhost:8787> en el navegador.
+1. Abre **PowerShell**: tecla Windows → escribe `PowerShell` → Enter. No hace falta abrirlo como administrador.
+2. Copia esta línea, pégala (clic derecho) y pulsa **Enter**:
 
-Qué hace `INICIAR.bat`:
+   ```powershell
+   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex
+   ```
 
-- Comprueba que tienes Node.js 20.19 o superior (si no, abre nodejs.org).
+3. Si Windows pide permiso para instalar Node.js, pulsa **Sí**. Cuando pregunte `Instalar tambien Obsidian para ver el vault? (s/n)`, escribe `s` y Enter (o `n` si ya lo tienes).
+4. Se abre una **ventana negra** (el servidor). La primera vez tarda unos minutos; después se abre solo <http://localhost:8787>. **Deja esa ventana abierta** mientras uses el sistema.
+
+Qué hace el comando (`instalar.ps1`):
+
+| Paso | Qué hace |
+|---|---|
+| 1. Node.js | Si no lo tienes, instala **Node.js LTS** con `winget` (el instalador de Windows). Si tu Windows no tiene `winget`, abre nodejs.org y se para: instálalo y repite el comando |
+| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`). **No borra nada**: nunca toca tu `.env` (configuración de Telegram) ni la carpeta `data` (cuentas, operaciones, carritos) |
+| 3. Acceso directo | Crea **Sala de control** en el Escritorio (abre `INICIAR.bat`) |
+| 4. Obsidian | Opcional: lo instala con `winget` si respondes `s` |
+| 5. Arranque | Abre `INICIAR.bat`, que instala dependencias, compila y abre el navegador |
+
+**Las siguientes veces:** doble clic en **Sala de control** del Escritorio (o en `INICIAR.bat` dentro de `bot final`).
+
+**Para actualizar:** cierra la ventana negra y vuelve a pegar el mismo comando. Conserva `.env` y `data`; sustituye los ficheros del proyecto por la versión nueva. Las notas que tú creaste en el vault se quedan, pero si **editaste** una nota que venía con el proyecto (por ejemplo, un recinto), la versión nueva la sustituye: cópiala antes.
+
+> Si al final sale «Node.js no aparece todavía», cierra PowerShell, abre otro y vuelve a pegar el comando (pasa cuando Node.js se acaba de instalar).
+
+Qué hace `INICIAR.bat` cada vez que lo abres:
+
+- Si no encuentra Node.js, lo instala con `winget`; si no puede, abre nodejs.org. Exige Node.js 20.19 o superior.
 - Crea `.env` a partir de `.env.example` si no existe.
 - Ejecuta `npm install` (reintenta una vez; si falla por `EPERM`/`EBUSY`, te aconseja pausar la sincronización de OneDrive) y `npm run build`.
-- Arranca el servidor y abre el navegador en el puerto de `.env` (`PORT`, 8787 por defecto).
+- Arranca el servidor y abre el navegador en el puerto de `.env` (`PORT`, 8787 por defecto). Para pararlo, cierra la ventana negra (o `Ctrl+C`).
 
-**Deja abierta la ventana negra** mientras uses el sistema. Para pararlo, ciérrala (o pulsa `Ctrl+C`).
+> La carpeta está en el Escritorio sincronizado con OneDrive. Si la instalación va lenta o da `EPERM`, pausa OneDrive mientras se instala (`node_modules` tiene miles de ficheros).
 
-> Si Windows muestra «Windows protegió su PC» al abrirlo, pulsa **Más información → Ejecutar de todas formas** (pasa con los ficheros descargados de internet).
+### Alternativa: ZIP
 
-## Alternativa: PowerShell
+1. En GitHub, rama `claude/confident-bell-yb79l7` → **Code → Download ZIP** (enlace directo: <https://github.com/turjemanmlevi-commits/Bot-final-/archive/refs/heads/claude/confident-bell-yb79l7.zip>).
+2. Extrae el ZIP y copia **el contenido** de la carpeta de dentro en `C:\Users\Leviç\OneDrive\Desktop\bot final` (que `INICIAR.bat` quede directamente dentro de `bot final`).
+3. Doble clic en `INICIAR.bat`. Si Windows muestra «Windows protegió su PC»: **Más información → Ejecutar de todas formas**.
 
-Requisitos: [Node.js 22 LTS](https://nodejs.org) (≥ 20.19), [Git](https://git-scm.com/download/win) y [Obsidian](https://obsidian.md).
+Para actualizar: descarga un ZIP nuevo y copia encima **conservando la carpeta `data` y tu `.env`**.
+
+### Alternativa: Git
+
+Requisitos: [Git](https://git-scm.com/download/win) y [Node.js LTS](https://nodejs.org) (≥ 20.19).
 
 ```powershell
 cd "C:\Users\Leviç\OneDrive\Desktop"
@@ -37,39 +65,64 @@ npm run build
 npm start
 ```
 
-Abre <http://localhost:8787> y pulsa **Nueva demo**: crea cuentas ficticias y una operación contra el simulador que arranca en 60 segundos.
+Para actualizar: `git pull` y vuelve a abrir `INICIAR.bat` (reinstala y recompila).
+
+### Probar y abrir el vault
+
+Pulsa **Nueva demo** en el dashboard: crea cuentas ficticias y una operación contra el simulador que arranca en 60 segundos.
 
 En Obsidian: **Abrir carpeta como vault** → `bot final\vault`. Empieza por la nota **Inicio**. Con el servidor en marcha, al guardar una nota de recinto o evento el dashboard se actualiza solo.
 
-Para actualizar: `git pull` y vuelve a abrir `INICIAR.bat` (reinstala y recompila). Si descargaste el ZIP, descarga uno nuevo y sustituye los ficheros **conservando la carpeta `data/` y tu `.env`**.
-
-> La carpeta está en el Escritorio sincronizado con OneDrive. Si la instalación va lenta o da `EPERM`, pausa OneDrive mientras se instala (`node_modules` tiene miles de ficheros).
-
 ## Comprar entradas reales (Ticketmaster, entradas.com, Real Madrid)
 
-Con estas ticketeras el sistema trabaja en **asistencia manual**: **no entra en sus webs** (no inicia sesión, no lee, no añade al carrito, no paga). Cada persona compra en la **web oficial con su propia cuenta**; el sistema coordina quién va a por qué zona y cuántas, precio máximo, límites por titular, presupuesto, caducidad de carritos, alertas y Telegram.
+Con estas ticketeras el sistema trabaja en **asistencia manual**. En el dashboard, **Cómo se compra** lo explica en 9 pasos con el plano. En resumen:
 
 1. **Cuentas → Nueva cuenta**: una por persona (alias y, si quiere, su chat de Telegram).
 2. **Eventos → Nuevo evento**: enlace oficial, fecha del evento, hora de apertura de la venta (T0) y límites de compra verificados en las condiciones oficiales.
-3. **Recintos · vault → Nuevo recinto** si el recinto no está (el Estadio Santiago Bernabéu ya viene incluido).
-4. **Operaciones → Nueva operación → Crear y validar → Armar**.
-5. **El día de la venta**: cada persona abre sesión en la web oficial y pulsa **Sesión lista** antes de T0. A T0 recibe sus tareas con **Abrir la web oficial**; cuando tiene las entradas en el carrito responde **Están en el carrito** (o **No pude** para pasar a la siguiente zona), paga en la web oficial y marca **Ya lo he pagado** en Carritos.
+3. **Recintos · vault**: el Estadio Santiago Bernabéu ya viene incluido, con su plano. Para otro recinto, **Nuevo recinto**.
+4. **Operaciones → Nueva operación**: toca en el plano las zonas en orden de preferencia (salen numeradas 1, 2, 3…), cantidad, precio máximo y cuentas → **Crear y validar → Armar**. Cada persona recibe su **plan** (zonas en orden, cuántas, precio máximo).
+5. **El día de la venta**: cada persona inicia sesión en la web oficial y pulsa **Sesión lista** antes de T0. A T0 le llega **«🚦 ¡Abre la venta!»** y su tarea («Añade 2 entradas · Lateral Este · Primer anfiteatro, máx. 120 €») con el plano y su zona resaltada. Compra en la web oficial y responde **✅ 2 en carrito** (o **No pude** para pasar a la siguiente zona), **paga en la web oficial** y marca **Ya lo he pagado** en *Carritos*.
 
 Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
 > La directiva europea Ómnibus prohíbe revender entradas compradas con medios automatizados que eludan los límites o controles del vendedor. Aquí todo lo hace una persona. Cada cuenta debe ser de una persona real que va a asistir; las entradas de socio del Real Madrid son personales e intransferibles.
 
+## Plano visual de asientos
+
+- **Recintos · vault → (recinto)**: plano generado desde el vault. En un estadio, el campo en el centro, el **norte arriba** y cada grada en su lado (Fondo Norte arriba, Fondo Sur abajo, Lateral Oeste a la izquierda, Lateral Este a la derecha) con sus niveles como **anillos**: del más cercano al campo (dentro) al más alto (fuera). En pabellones y teatros, el **escenario arriba** y las gradas en «U» alrededor de la pista. Toca una zona para ver su nombre y cómo la llama la web.
+- **Nueva operación**: tocar una zona del plano la añade como objetivo; el número indica el orden en que se intentará.
+- **Operación → «Plan de compra · dónde y en qué orden»**: el plano con los objetivos numerados, la lista en orden y quién está intentando qué ahora mismo.
+- **Tareas humanas**: cada tarea de compra muestra el plano con **su zona resaltada** («Tu zona»).
+
+Es orientativo: los sectores exactos están en el plano oficial de cada venta.
+
 ## Telegram
 
 1. En Telegram, habla con **@BotFather** → `/newbot` → copia el token.
-2. Pégalo en `.env` como `TELEGRAM_BOT_TOKEN` y reinicia (cierra la ventana y abre `INICIAR.bat`).
+2. Abre `.env` con el Bloc de notas y pega el token detrás de `TELEGRAM_BOT_TOKEN=`. Guarda y reinicia (cierra la ventana negra y abre **Sala de control**).
 3. Escribe `/start` a tu bot: te responde con el **chat ID** de ese chat (los de grupo empiezan por `-`).
-4. Ponlo en `TELEGRAM_CHAT_ID` y reinicia.
+4. Pégalo detrás de `TELEGRAM_CHAT_ID=`, guarda y reinicia.
 5. En **Ajustes · Telegram** pulsa **Enviar mensaje de prueba**. Esa página también lista los chats que han escrito al bot.
 
-Cada cuenta puede tener su propio chat (**Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos: `/estado`, `/tareas`, `/id`, `/ayuda`; y en el chat principal `/pausa` y `/parar_todo`.
+Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad** (`✅ 2 en carrito`, `✅ 1 en carrito`), **❌ No pude** y **❓ No sé**. Tras «en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (5, 8, 10, 15 o 20) para avisar antes de que caduque. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard.
+
+Cada cuenta puede tener su propio chat (**Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos: `/estado`, `/tareas`, `/id`, `/ayuda`; y solo en el chat principal, `/pausa` y `/parar_todo`.
 
 Guía: `vault/00 Guía/Configurar Telegram.md`.
+
+## Velocidad medida (ensayo)
+
+| Qué | Tiempo |
+|---|---|
+| De la hora de apertura (T0) a la tarea en Telegram | 10 ms |
+| De T0 a la tarea en el dashboard | 26 ms |
+| De T0 a «🚦 ¡Abre la venta!» | 12 ms |
+| De «No pude» a la tarea con la siguiente zona | ~54 ms; como mucho unos 250 ms (el reparto se revisa cada 250 ms) |
+| Simulador sin cola: primera entrada en carrito | 33–62 ms |
+| Simulador sin cola: 8 de 8 entradas en carrito | 41–135 ms |
+| Decisión del motor | ~0,04 ms |
+
+En Telegram hay que sumar lo que tarde la red de Telegram. Los tiempos del simulador son solo de ensayo: con una cola virtual simulada, lo que manda es la cola (1–2 s). En una venta real lo que cuenta son **segundos humanos**: la cola virtual de la web oficial, elegir asientos y pulsar. Por eso el plan llega al armar y la tarea en el milisegundo de T0.
 
 ## Qué hay dentro
 
@@ -78,20 +131,21 @@ Guía: `vault/00 Guía/Configurar Telegram.md`.
 | `vault/` | Vault de Obsidian: **datos** (recintos, zonas, secciones, eventos con límites, proveedores) y **documentación** (guías, runbooks, sistema, decisiones) |
 | `shared/` | Contratos de dominio, API/SSE, esquemas de entrada y reglas de la máquina de estados |
 | `server/` | Compilador del vault, motor (política, decisión, asignación), simulador, runtime, journal, API + SSE, Telegram, gates, bench, replay, tests |
-| `dashboard/` | Sala de control en React (tiempo real) |
+| `dashboard/` | Sala de control en React (tiempo real), con el plano de recintos y la página **Cómo se compra** |
 
 ## Scripts
 
 | Comando | Qué hace |
 |---|---|
-| `INICIAR.bat` (Windows) | Instala si hace falta, compila y arranca; abre el navegador |
+| `instalar.ps1` (Windows) | Instalación en un comando: Node.js, proyecto, acceso directo, Obsidian opcional y arranque |
+| `INICIAR.bat` (Windows) | Instala si hace falta (incluido Node.js), compila y arranca; abre el navegador |
 | `npm start` | Servidor + dashboard compilado en <http://localhost:8787> |
 | `npm run dev` | Servidor con recarga al cambiar el código |
 | `npm run dev:dashboard` | Dashboard con recarga en <http://localhost:5173> (necesita el servidor) |
 | `npm run build` | Compila el dashboard |
 | `npm run vault:compile` | Compila el vault a `compiled/` y lista errores y avisos |
 | `npm run seed:demo` | Crea la demo en un servidor en marcha |
-| `npm test` | Tests (motor, asignación, vault, runtime completo) |
+| `npm test` | Tests (motor, asignación, vault, runtime completo, Telegram) |
 | `npm run gates` | Production gates G0–G6 (`-- --full` para más semillas) |
 | `npm run bench` | Latencia del motor y operaciones simuladas |
 | `npm run replay -- <id>` | Reproduce las decisiones de una operación desde el journal |
@@ -100,13 +154,13 @@ Guía: `vault/00 Guía/Configurar Telegram.md`.
 
 ## Configuración
 
-Copia `.env.example` a `.env` si quieres cambiar algo (puerto, zona horaria del vault, Telegram, Postgres, token de operador). Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
+`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram, los minutos para responder una tarea de compra (`MANUAL_TASK_MINUTES`, 10 por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar. Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
 
 ## Modos de proveedor
 
 | Modo | Uso |
 |---|---|
-| **Simulado** | Proveedor interno realista (colas, retos, latencias, competencia, ambigüedad, rate limits, cambio de esquema). Solo para ensayar y para los gates |
+| **Simulado** | Proveedor interno realista (colas, retos, latencias, competencia, ambigüedad, rate limits, cambio de esquema). Solo para ensayar y para los gates. Es el único modo en el que se añade al carrito automáticamente |
 | **Asistencia manual** | Ticketmaster, entradas.com, Real Madrid y cualquier ticketera real: el sistema reparte tareas a las personas del grupo, que compran en la web oficial, y lleva límites, presupuesto y caducidades |
 | **API autorizada** | Requiere un acuerdo escrito con el proveedor y un adaptador programado para él. No se incluye ninguno: una nota de proveedor con este modo funciona como asistencia manual |
 
