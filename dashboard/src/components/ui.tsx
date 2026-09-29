@@ -227,13 +227,13 @@ export function Meter({
           {segments.map((s) => (
             <span className="key" key={s.label}>
               <span className={`swatch ${s.kind === 'soft' ? 'soft' : ''}`} aria-hidden />
-              {s.label} <b className="mono">{s.display ?? s.value}</b>
+              <span className="klabel">{s.label}</span> <b className="mono">{s.display ?? s.value}</b>
             </span>
           ))}
           {trackLabel ? (
             <span className="key">
               <span className="swatch track" aria-hidden />
-              {trackLabel} <b className="mono">{rest}</b>
+              <span className="klabel">{trackLabel}</span> <b className="mono">{rest}</b>
             </span>
           ) : null}
         </div>
@@ -282,14 +282,15 @@ export function BarList({ items, emptyText = 'Sin datos todavía.', ariaLabel }:
               style={{
                 position: 'absolute',
                 right: 6,
-                top: -30,
+                bottom: 'calc(100% + 4px)',
                 zIndex: 5,
+                maxWidth: 'calc(100% - 12px)',
                 padding: '4px 8px',
                 borderRadius: 6,
                 background: 'var(--ink)',
                 color: 'var(--surface)',
                 fontSize: 12,
-                whiteSpace: 'nowrap',
+                overflowWrap: 'anywhere',
                 pointerEvents: 'none',
               }}
             >
@@ -382,21 +383,26 @@ const STATION_INDEX: Record<OperationState, number> = {
   CLOSED: 6,
 };
 
+/**
+ * En pantallas estrechas (< 600 px) solo se ve el nombre de la etapa actual; las
+ * demás quedan como puntos (el nombre sigue en `title`), para que no se solapen.
+ */
 export function StateRail({ state }: { state: OperationState }) {
   const idx = STATION_INDEX[state];
   const tone =
     state === 'CART_SECURED' ? 'good' : state === 'PAUSED' || state === 'RECOVERING' ? 'warning' : state === 'CANCELLED' ? 'critical' : state === 'RUNNING' ? 'live' : '';
+  const last = STATIONS.length - 1;
   return (
-    <div className="rail" role="img" aria-label={`Estado: ${OPERATION_STATE_LABEL[state]}`}>
+    <div className="rail" role="img" aria-label={`Estado: ${OPERATION_STATE_LABEL[state]} (etapa ${idx + 1} de ${STATIONS.length})`}>
       <div className="progress-line" style={{ width: `calc(${(idx / 6) * 100}% * 6 / 7)` }} />
       {STATIONS.map((s, i) => {
         let label = s.label;
         if (i === 5 && state === 'ENDED') label = 'Finalizada';
         if (i === 6 && state === 'CANCELLED') label = 'Cancelada';
         if (i === 4 && (state === 'PAUSED' || state === 'RECOVERING')) label = OPERATION_STATE_LABEL[state];
-        const cls = i < idx ? 'done' : i === idx ? `current ${tone}` : '';
+        const cls = [i < idx ? 'done' : i === idx ? `current ${tone}` : '', i === 0 ? 'edge-start' : i === last ? 'edge-end' : ''].filter(Boolean).join(' ');
         return (
-          <div key={s.key} className={`station ${cls}`}>
+          <div key={s.key} className={`station ${cls}`} title={label}>
             <span className="node">{i < idx ? <Icon name="check" size={12} /> : null}</span>
             <span className="sname">{label}</span>
           </div>

@@ -242,6 +242,7 @@ h4 {
 }
 
 .brand-mark {
+  position: relative;
   width: 30px;
   height: 30px;
   border-radius: 6px;
@@ -250,6 +251,28 @@ h4 {
   display: grid;
   place-items: center;
   flex: none;
+}
+
+/* Sin conexión: punto rojo sobre la marca (visible también en la tira móvil). */
+.brand.off .brand-mark::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--critical);
+  border: 2px solid var(--surface);
+}
+
+/* Envoltorio de la navegación: no existe en escritorio; en móvil es la tira que se desplaza. */
+.nav-scroll {
+  display: contents;
+}
+
+.nav-fade {
+  display: none;
 }
 
 .brand-name {
@@ -443,28 +466,67 @@ h4 {
 
 @media (max-width: 900px) {
   .shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    /* La tira de navegación no crece aunque la página sea corta. */
+    grid-template-rows: auto 1fr;
   }
   .nav {
-    position: static;
+    position: sticky;
+    top: 0;
+    z-index: 30;
     height: auto;
-    flex-direction: row;
-    align-items: center;
-    overflow-x: auto;
-    padding: 10px 16px;
+    display: block;
+    padding: 0;
+    overflow: hidden;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+  .nav-scroll {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
     gap: 12px;
+    padding: 10px 16px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  /* Hueco final: el último enlace puede salir de debajo del degradado. */
+  .nav-scroll::after {
+    content: '';
+    flex: 0 0 16px;
+    align-self: stretch;
+  }
+  .nav-fade {
+    display: block;
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 36px;
+    pointer-events: none;
+    background: linear-gradient(to right, color-mix(in oklab, var(--surface) 0%, transparent), var(--surface));
+  }
+  /* En móvil la barra superior no se pega: la tira de navegación ocupa ese sitio. */
+  .topbar {
+    position: static;
+  }
+  .banner {
+    padding-left: 16px;
+    padding-right: 16px;
+    flex-wrap: wrap;
   }
   .brand {
     border-bottom: 0;
     padding: 0;
+    flex: none;
   }
   .brand-text {
     display: none;
   }
   .nav-group {
     flex-direction: row;
+    flex: none;
   }
   .nav-group .sign,
   .nav-foot {
@@ -540,6 +602,34 @@ h4 {
 .card.hero {
   border-color: var(--line-strong);
   box-shadow: var(--shadow);
+}
+
+/* Reloj a la izquierda y progreso a la derecha; en móvil, una sola columna. */
+.hero-grid {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: start;
+  gap: 28px;
+}
+
+.hero-grid > * {
+  min-width: 0;
+}
+
+.hero-note {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 600px) {
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+  .hero-figure {
+    font-size: 52px;
+  }
+  .hero-figure small {
+    font-size: 24px;
+  }
 }
 
 .divider {
@@ -1033,7 +1123,20 @@ textarea.input {
 .legend .key {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* El rótulo no se parte; la cifra puede pasar de línea si no cabe. */
+.legend .klabel {
+  white-space: nowrap;
+}
+
+.legend .key b {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .legend .swatch {
@@ -1100,6 +1203,23 @@ textarea.input {
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   white-space: nowrap;
+  min-width: 0;
+}
+
+/* Móvil: rótulo encima y barra a todo el ancho; el valor baja de línea si no cabe. */
+@media (max-width: 600px) {
+  .barrow {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .barrow .btrack {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+  .barrow .bvalue {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }
 
 .dots5 {
@@ -1190,6 +1310,16 @@ textarea.input {
 
 .board.sm .flap {
   font-size: 26px;
+}
+
+/* Móvil: la cuenta atrás grande se escala para caber (hasta «T−123:45:12»). */
+@media (max-width: 600px) {
+  .board:not(.sm) .flap {
+    font-size: clamp(24px, 9vw, 44px);
+  }
+  .board:not(.sm) .board-prefix {
+    font-size: 18px;
+  }
 }
 
 @keyframes flip {
@@ -1336,6 +1466,22 @@ textarea.input {
 .station .badge {
   position: absolute;
   top: 58px;
+}
+
+/* Móvil: solo se nombra la etapa actual; las demás quedan como puntos. */
+@media (max-width: 600px) {
+  .station:not(.current) .sname {
+    display: none;
+  }
+  .station.current .sname {
+    white-space: nowrap;
+  }
+  .station.current.edge-start .sname {
+    align-self: flex-start;
+  }
+  .station.current.edge-end .sname {
+    align-self: flex-end;
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -1667,6 +1813,25 @@ dialog.modal .modal-foot {
 
 .countdown.hot {
   color: var(--critical-ink);
+}
+
+/* Pantallas táctiles: objetivos de toque cómodos. */
+@media (pointer: coarse) {
+  .btn.sm {
+    min-height: 36px;
+  }
+  .chip {
+    height: auto;
+    min-height: 36px;
+  }
+  .chip button {
+    width: 32px;
+    height: 32px;
+    border-radius: 16px;
+  }
+  .chip.suggest {
+    min-height: 36px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

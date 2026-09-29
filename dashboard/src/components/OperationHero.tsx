@@ -52,15 +52,15 @@ export function OperationHero({ op, link = false, compact = false, onChanged }: 
       </header>
       <div className="card-body stack" style={{ gap: 18 }}>
         <StateRail state={op.state} />
-        <div className="grid" style={{ gridTemplateColumns: 'minmax(0, auto) minmax(0, 1fr)', alignItems: 'start', gap: 28 }}>
-          <div className="stack" style={{ gap: 10 }}>
+        <div className="grid hero-grid">
+          <div className="stack hero-clock" style={{ gap: 10 }}>
             {boardTarget ? <T0Board t0={boardTarget} now={now} caption={caption ?? undefined} /> : null}
-            <div className="small ink2">
+            <div className="small ink2 hero-note">
               T0 <b className="mono">{new Date(op.t0).toLocaleString('es-ES')}</b> · ventana {op.runWindowMinutes} min
             </div>
           </div>
           <div className="stack" style={{ gap: 14, minWidth: 0 }}>
-            <div className="row" style={{ alignItems: 'baseline', gap: 14 }}>
+            <div className="row" style={{ alignItems: 'baseline', gap: '4px 14px' }}>
               <span className="hero-figure" aria-label={`${carted} de ${requested} entradas en carrito`}>
                 {carted}
                 <small>/{requested}</small>
@@ -89,7 +89,7 @@ export function OperationHero({ op, link = false, compact = false, onChanged }: 
               />
             ) : null}
             {alloc ? (
-              <div className="small muted">
+              <div className="small muted hero-note">
                 Presupuesto {formatMoney(alloc.budget.total, alloc.currency)} · quedan {formatMoney(alloc.budget.remaining, alloc.currency)} · máx.{' '}
                 {formatMoney(alloc.maxUnitPrice, alloc.currency)}/entrada
               </div>

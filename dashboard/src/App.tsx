@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { NavLink, Route, Routes, useNavigate } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { DialogProvider, useDialog } from './components/Dialog';
 import { Icon, type IconName } from './components/Icon';
 import { Api, getActor, setActor, setToken } from './lib/api';
@@ -59,14 +59,50 @@ function NavItem({ to, icon, label, count, hot }: { to: string; icon: IconName; 
   );
 }
 
+/** Pantalla estrecha: la navegación es una tira horizontal (mismo corte que styles.css). */
+const NARROW_QUERY = '(max-width: 900px)';
+
+/**
+ * true cuando se ha perdido la conexión en vivo tras haber cargado datos. Espera
+ * un momento antes de avisar para no parpadear en cada reconexión breve.
+ */
+function useConnectionLost(ready: boolean, connected: boolean): boolean {
+  const [lost, setLost] = useState(false);
+  useEffect(() => {
+    if (!ready || connected) {
+      setLost(false);
+      return;
+    }
+    const t = setTimeout(() => setLost(true), 1500);
+    return () => clearTimeout(t);
+  }, [ready, connected]);
+  return lost;
+}
+
 function Shell() {
   const s = useLive();
   const now = useNow(1000);
   const ask = useDialog();
   const navigate = useNavigate();
+  const location = useLocation();
   const { run, busy } = useAction();
   const [theme, setTheme] = useTheme();
   const [actor, setActorState] = useState(getActor());
+  const navScrollRef = useRef<HTMLDivElement>(null);
+  const connectionLost = useConnectionLost(s.ready, s.connected) && !s.unauthorized;
+
+  // En móvil la navegación es una tira que se desplaza: el enlace activo se trae a la vista.
+  useEffect(() => {
+    let narrow = false;
+    try {
+      narrow = window.matchMedia(NARROW_QUERY).matches;
+    } catch {
+      narrow = false;
+    }
+    if (!narrow) return;
+    const el = navScrollRef.current?.querySelector<HTMLElement>('.nav-link.active');
+    el?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [location.pathname]);
 
   const counts = useMemo(() => {
     const alerts = Object.values(s.alerts).filter((a) => a.state !== 'RESOLVED');
@@ -114,53 +150,63 @@ function Shell() {
   return (
     <div className="shell">
       <nav className="nav" aria-label="Secciones">
-        <NavLink to="/" className="brand">
-          <span className="brand-mark">
-            <Icon name="ticket" size={18} />
-          </span>
-          <span className="brand-text">
-            <span className="brand-name">Sala de control</span>
-            <br />
-            <span className="brand-sub">Ticket Orchestrator v4</span>
-          </span>
-        </NavLink>
-        <div className="nav-group">
-          <span className="sign">Operar</span>
-          <NavItem to="/" icon="gauge" label="Resumen" />
-          <NavItem to="/operaciones" icon="ops" label="Operaciones" count={counts.running} />
-          <NavItem to="/tareas" icon="task" label="Tareas humanas" count={counts.tasks} hot={counts.tasks > 0} />
-          <NavItem to="/carritos" icon="cart" label="Carritos" count={counts.carts} hot={counts.carts > 0} />
-          <NavItem to="/alertas" icon="bell" label="Alertas" count={counts.alerts} hot={counts.critical > 0} />
-        </div>
-        <div className="nav-group">
-          <span className="sign">Preparar</span>
-          <NavItem to="/guia" icon="book" label="Cómo se compra" />
-          <NavItem to="/cuentas" icon="users" label="Cuentas" />
-          <NavItem to="/eventos" icon="calendar" label="Eventos" />
-          <NavItem to="/recintos" icon="map" label="Recintos · vault" />
-        </div>
-        <div className="nav-group">
-          <span className="sign">Controlar</span>
-          <NavItem to="/seguridad" icon="shield" label="Seguridad" hot={Boolean(globalKill)} count={globalKill ? 1 : undefined} />
-          <NavItem to="/calidad" icon="beaker" label="Calidad · gates" />
-          <NavItem to="/auditoria" icon="scroll" label="Auditoría" />
-          <NavItem to="/ajustes" icon="gear" label="Ajustes · Telegram" hot={Boolean(s.system && !s.system.telegram.enabled)} />
-        </div>
-        <div className="nav-foot">
-          <button type="button" className="btn" onClick={() => void newDemo()} disabled={busy}>
-            <Icon name="demo" size={15} /> Nueva demo
-          </button>
-          <div className="row small muted">
-            <span className={`conn ${s.connected ? '' : 'off'}`}>
-              <span className="dot" aria-hidden />
-              {s.connected ? 'En vivo' : 'Sin conexión'}
+        <div className="nav-scroll" ref={navScrollRef}>
+          <NavLink to="/" className={`brand ${s.connected ? '' : 'off'}`} title={s.connected ? undefined : 'Sin conexión con el servidor'}>
+            <span className="brand-mark">
+              <Icon name="ticket" size={18} />
+              {s.connected ? null : <span className="sr-only">Sin conexión con el servidor</span>}
             </span>
-            <span className="mono">{s.system?.version ?? ''}</span>
+            <span className="brand-text">
+              <span className="brand-name">Sala de control</span>
+              <br />
+              <span className="brand-sub">Ticket Orchestrator v4</span>
+            </span>
+          </NavLink>
+          <div className="nav-group">
+            <span className="sign">Operar</span>
+            <NavItem to="/" icon="gauge" label="Resumen" />
+            <NavItem to="/operaciones" icon="ops" label="Operaciones" count={counts.running} />
+            <NavItem to="/tareas" icon="task" label="Tareas humanas" count={counts.tasks} hot={counts.tasks > 0} />
+            <NavItem to="/carritos" icon="cart" label="Carritos" count={counts.carts} hot={counts.carts > 0} />
+            <NavItem to="/alertas" icon="bell" label="Alertas" count={counts.alerts} hot={counts.critical > 0} />
+          </div>
+          <div className="nav-group">
+            <span className="sign">Preparar</span>
+            <NavItem to="/guia" icon="book" label="Cómo se compra" />
+            <NavItem to="/cuentas" icon="users" label="Cuentas" />
+            <NavItem to="/eventos" icon="calendar" label="Eventos" />
+            <NavItem to="/recintos" icon="map" label="Recintos · vault" />
+          </div>
+          <div className="nav-group">
+            <span className="sign">Controlar</span>
+            <NavItem to="/seguridad" icon="shield" label="Seguridad" hot={Boolean(globalKill)} count={globalKill ? 1 : undefined} />
+            <NavItem to="/calidad" icon="beaker" label="Calidad · gates" />
+            <NavItem to="/auditoria" icon="scroll" label="Auditoría" />
+            <NavItem to="/ajustes" icon="gear" label="Ajustes · Telegram" hot={Boolean(s.system && !s.system.telegram.enabled)} />
+          </div>
+          <div className="nav-foot">
+            <button type="button" className="btn" onClick={() => void newDemo()} disabled={busy}>
+              <Icon name="demo" size={15} /> Nueva demo
+            </button>
+            <div className="row small muted">
+              <span className={`conn ${s.connected ? '' : 'off'}`}>
+                <span className="dot" aria-hidden />
+                {s.connected ? 'En vivo' : 'Sin conexión'}
+              </span>
+              <span className="mono">{s.system?.version ?? ''}</span>
+            </div>
           </div>
         </div>
+        <span className="nav-fade" aria-hidden />
       </nav>
 
       <div className="main">
+        {connectionLost ? (
+          <div className="banner offline" role="alert">
+            <Icon name="alert" size={18} />
+            Sin conexión con el servidor: los datos pueden estar desactualizados
+          </div>
+        ) : null}
         {globalKill ? (
           <div className="banner critical" role="alert">
             <Icon name="power" size={18} />

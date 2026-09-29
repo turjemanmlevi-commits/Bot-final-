@@ -2,12 +2,23 @@ import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   CLAIM_STATE_LABEL,
+  COMMAND_LABEL,
+  HUMAN_TASK_KIND_LABEL,
   HUMAN_TASK_STATE_LABEL,
   LIMIT_SEMANTICS_LABEL,
+  OPERATION_STATE_LABEL,
   REJECTION_REASON_LABEL,
   STAGES,
+  killSwitchKey,
+  type Account,
+  type AllocationState,
   type AuditEvent,
+  type Cart,
+  type HumanTask,
+  type OperationCommand,
   type OperationDetail,
+  type OperationState,
+  type ReadinessPhase,
   type RejectionReason,
   type StageName,
   type VenueArtifact,
@@ -19,8 +30,8 @@ import { CartsTable } from './Carts';
 import { BarList, Callout, Card, CheckPill, Empty, Meter, Pill, QueuePill, SessionPill, type BarItem } from '../components/ui';
 import { Api } from '../lib/api';
 import { formatLatency, formatMoney, fmtDateTime, fmtTime, shortHash } from '../lib/format';
-import { useAction, useAsync } from '../lib/hooks';
-import { useLive } from '../lib/store';
+import { useAction, useAsync, useNow } from '../lib/hooks';
+import { useLive, type LiveState } from '../lib/store';
 
 type Tab = 'directo' | 'preparacion' | 'carritos' | 'historial' | 'replay';
 
@@ -38,6 +49,116 @@ const STAGE_LABEL: Record<StageName, string> = {
   queue_wait: 'Espera en cola',
   human_task: 'Respuesta humana',
 };
+
+// ---------------------------------------------------------------------------
+// Textos: códigos del servidor → castellano
+// ---------------------------------------------------------------------------
+
+/** Motivos de rechazo o ambigüedad de una reserva (claim.reason). */
+const CLAIM_REASON_LABEL: Record<string, string> = {
+  HUMAN_FAILED: 'la persona no pudo',
+  NOT_IN_CART: 'no estaba en el carrito',
+  TASK_CANCELLED: 'tarea cancelada',
+  SOLD_OUT: 'agotadas',
+  PRICE_CHANGED: 'el precio cambió',
+  LIMIT_REACHED: 'límite de la cuenta alcanzado',
+  NOT_IN_QUEUE: 'no había pasado la cola',
+  SESSION_INVALID: 'sesión no válida',
+  INVALID_REQUEST: 'petición no válida',
+  RATE_LIMITED: 'el proveedor pidió esperar',
+  READBACK_FAILED: 'no se pudo leer el carrito',
+  READBACK_MISSING: 'no apareció al leer el carrito',
+  SCHEMA_DRIFT: 'la web cambió de formato',
+  BLOCKED: 'bloqueado',
+};
+
+/** «HUMAN_FAILED: nota» → «la persona no pudo: nota». Los textos libres se dejan tal cual. */
+function claimReasonText(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  const m = /^([A-Z][A-Z_]+)(?:\s*:\s*([\s\S]*))?$/.exec(reason.trim());
+  if (!m) return reason;
+  const code = m[1] ?? '';
+  const rest = m[2]?.trim() ?? '';
+  const label = CLAIM_REASON_LABEL[code];
+  if (!label) return reason;
+  return rest ? `${label}: ${CLAIM_REASON_LABEL[rest] ?? rest}` : label;
+}
+
+const TASK_RESULT_LABEL: Record<string, string> = {
+  IN_CART: 'en el carrito',
+  FAILED: 'no pudo',
+  UNKNOWN: 'sin confirmar',
+  READY: 'sesión lista',
+};
+
+const CHECK_STATUS_LABEL: Record<string, string> = { PASS: 'OK', WARN: 'con avisos', FAIL: 'falla', BLOCKED: 'bloqueada', NOT_RUN: 'sin ejecutar' };
+
+const PHASE_LABEL: Record<ReadinessPhase, string> = { 'T-12h': 'T−12 h', 'T-1h': 'T−1 h', 'T-5m': 'T−5 min', MANUAL: 'manual' };
+
+function commandLabel(cmd: string): string {
+  if (cmd === 'readiness') return 'Comprobación previa';
+  return COMMAND_LABEL[cmd as OperationCommand] ?? cmd;
+}
+
+function stateLabel(v: unknown): string {
+  return OPERATION_STATE_LABEL[v as OperationState] ?? String(v);
+}
+
+const CART_PLAN_LABEL: Partial<Record<Cart['state'], string>> = {
+  ACTIVE: 'en carrito',
+  REVIEW_REQUIRED: 'revisar',
+  PAID: 'pagado',
+  EXPIRED: 'caducado',
+};
+
+function providerModeOf(s: LiveState, providerId: string) {
+  return s.system?.providers.find((p) => p.id === providerId)?.mode ?? s.providerAuthorizations.find((p) => p.providerId === providerId)?.mode;
+}
+
+/**
+ * Por qué una cuenta con «Sesión lista» y sin tarea abierta no está intentando comprar.
+ * Sigue el mismo orden que el reparto de tareas del servidor; null si no se puede deducir.
+ */
+function idleReason(args: {
+  s: LiveState;
+  state: OperationState;
+  providerId: string;
+  operationId: string;
+  account: Account;
+  alloc: AllocationState | undefined;
+  minGroup: number | null;
+}): string | null {
+  const { s, state, providerId, operationId, account, alloc, minGroup } = args;
+  if (state === 'ARMED' || state === 'FROZEN') return 'esperando a T0';
+  if (state === 'PAUSED') return 'operación en pausa: no se reparten tareas';
+  if (state === 'RECOVERING') return 'operación recuperándose: no se reparten tareas';
+  if (state === 'CART_SECURED') return 'la cantidad pedida ya está en carrito';
+  if (state !== 'RUNNING') return null;
+  const killed = ['global', killSwitchKey('PROVIDER', providerId), killSwitchKey('OPERATION', operationId), killSwitchKey('ACCOUNT', account.id)].some(
+    (k) => s.killSwitches[k]?.engaged,
+  );
+  if (killed) return 'kill switch activo: no se reparten tareas';
+  if (!account.enabled) return 'cuenta desactivada';
+  if (!alloc) return null;
+  if (alloc.cartedQty >= alloc.requestedQty) return 'la cantidad pedida ya está en carrito';
+  if (alloc.remainingQty <= 0) return 'esperando: la cantidad pedida ya está repartida';
+  const cap = alloc.perAccount[account.id];
+  if (!cap) return null;
+  const group = alloc.perGroup[cap.groupKey];
+  const accountLeft = Math.max(0, cap.cap - cap.used);
+  const groupLeft = group ? Math.max(0, group.cap - group.used) : 0;
+  if (accountLeft === 0) return 'sin cupo: la cuenta ya tiene su máximo de entradas';
+  if (groupLeft === 0) return 'sin cupo: su grupo de límite ya está completo';
+  if (minGroup === null) return null;
+  if (alloc.remainingQty < minGroup) {
+    return `esperando: ${alloc.remainingQty === 1 ? 'queda 1 entrada' : `quedan ${alloc.remainingQty} entradas`} por repartir, menos que el grupo mínimo (${minGroup})`;
+  }
+  if (accountLeft < minGroup) return `le ${accountLeft === 1 ? 'queda 1' : `quedan ${accountLeft}`} de cupo, menos que el grupo mínimo (${minGroup})`;
+  if (groupLeft < minGroup) return `a su grupo de límite le ${groupLeft === 1 ? 'queda 1' : `quedan ${groupLeft}`}, menos que el grupo mínimo (${minGroup})`;
+  const byBudget = Math.floor(alloc.budget.remaining / Math.max(1, alloc.maxUnitPrice));
+  if (byBudget < minGroup) return `esperando: el presupuesto que queda no llega para ${minGroup} entradas a precio máximo`;
+  return null;
+}
 
 export function OperationDetailPage() {
   const { id = '' } = useParams();
@@ -125,10 +246,24 @@ export function OperationDetailPage() {
 
 function PurchasePlan({ detail, artifact }: { detail: OperationDetail; artifact: VenueArtifact }) {
   const s = useLive();
+  const opId = detail.summary.id;
+  const summary = s.operations[opId] ?? detail.summary;
   const targets = detail.config.preferences.targets;
-  const open = Object.values(s.humanTasks).filter((t) => t.operationId === detail.summary.id && t.state === 'OPEN' && t.kind === 'ADD_TO_CART');
-  const carts = Object.values(s.carts).filter((c) => c.operationId === detail.summary.id && c.state !== 'RELEASED');
+  const alloc = s.allocations[opId] ?? detail.allocation ?? undefined;
+  const maxUnitPrice = alloc?.maxUnitPrice ?? detail.config.maxUnitPrice;
+  const minGroup = detail.armSnapshot?.compiledPolicy.minGroupSize ?? detail.config.preferences.minGroupSize;
+  const tasks = Object.values(s.humanTasks).filter((t) => t.operationId === opId && t.state === 'OPEN');
+  const open = tasks.filter((t) => t.kind === 'ADD_TO_CART');
+  const carts = Object.values(s.carts).filter((c) => c.operationId === opId && c.state !== 'RELEASED');
   const who = (accountId: string) => s.accounts[accountId]?.label ?? accountId;
+  const live = ['RUNNING', 'PAUSED', 'RECOVERING', 'CART_SECURED'].includes(summary.state);
+  // Cuentas con «Sesión lista» que ahora no tienen tarea: se explica por qué esperan.
+  const idle = live
+    ? summary.accountIds
+        .map((aid) => s.accounts[aid])
+        .filter((a): a is Account => a !== undefined && a.session.state === 'READY' && !tasks.some((t) => t.accountId === a.id))
+        .map((a) => ({ account: a, reason: idleReason({ s, state: summary.state, providerId: summary.providerId, operationId: opId, account: a, alloc, minGroup }) }))
+    : [];
   return (
     <Card title="Plan de compra · dónde y en qué orden">
       <div className="grid cols-2" style={{ alignItems: 'start' }}>
@@ -148,14 +283,14 @@ function PurchasePlan({ detail, artifact }: { detail: OperationDetail; artifact:
               </ol>
             )}
             <div className="small muted" style={{ marginTop: 6 }}>
-              Cada cuenta empieza por la 1. Si pulsa «No pude», pasa a la siguiente. Máximo {formatMoney(detail.config.maxUnitPrice, detail.config.currency)} por entrada.
+              Cada cuenta empieza por la 1. Si pulsa «No pude», pasa a la siguiente. Máximo {formatMoney(maxUnitPrice, detail.config.currency)} por entrada.
             </div>
           </div>
           <div>
             <div className="sign">Ahora mismo</div>
-            {open.length === 0 && carts.length === 0 ? (
+            {open.length === 0 && carts.length === 0 && idle.length === 0 ? (
               <div className="small ink2">
-                {['ARMED', 'FROZEN', 'VALIDATED', 'DRAFT'].includes(detail.summary.state)
+                {['ARMED', 'FROZEN', 'VALIDATED', 'DRAFT'].includes(summary.state)
                   ? 'Las tareas de compra se reparten en T0 a las cuentas con «Sesión lista».'
                   : 'Sin tareas de compra abiertas.'}
               </div>
@@ -163,12 +298,15 @@ function PurchasePlan({ detail, artifact }: { detail: OperationDetail; artifact:
               <ul style={{ margin: '6px 0 0', paddingLeft: 18 }} className="small">
                 {open.map((t) => (
                   <li key={t.id}>
-                    <b>{who(t.accountId)}</b> intentando {t.target?.qty ?? '?'} en <b>{t.target?.sectionLabel}</b>
+                    <b>{who(t.accountId)}</b> intentando {t.target?.qty ?? '?'} en <b>{t.target?.sectionLabel ?? '—'}</b>
                   </li>
                 ))}
                 {carts.map((c) => (
-                  <li key={c.id}>
-                    <b>{who(c.accountId)}</b>: {c.items.map((i) => `${i.qty} en ${i.sectionLabel}`).join(', ')} {c.state === 'PAID' ? '· pagado' : '· en carrito'}
+                  <PlanCartLine key={c.id} cart={c} who={who(c.accountId)} />
+                ))}
+                {idle.map(({ account, reason }) => (
+                  <li key={account.id} className="ink2">
+                    <b>{account.label}</b>: {reason ?? 'sesión lista, sin tarea en este momento'}
                   </li>
                 ))}
               </ul>
@@ -177,6 +315,25 @@ function PurchasePlan({ detail, artifact }: { detail: OperationDetail; artifact:
         </div>
       </div>
     </Card>
+  );
+}
+
+function PlanCartLine({ cart, who }: { cart: Cart; who: string }) {
+  const now = useNow(5000);
+  const label = CART_PLAN_LABEL[cart.state];
+  if (!label) return null;
+  // Un carrito confirmado por una persona no caduca solo: si pasa la hora, hay que decir si se pagó.
+  const overdue = cart.state === 'ACTIVE' && cart.confirmation === 'HUMAN' && cart.expiresAt !== null && Date.parse(cart.expiresAt) <= now;
+  return (
+    <li>
+      <b>{who}</b>: {cart.items.map((i) => `${i.qty} en ${i.sectionLabel}`).join(', ') || `${cart.qty} entradas`} · {label}
+      {overdue ? (
+        <>
+          {' '}
+          · <b>tiempo agotado: ¿se pagó?</b> <Link to="/carritos">Responder</Link>
+        </>
+      ) : null}
+    </li>
   );
 }
 
@@ -206,6 +363,26 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
   );
   const tasks = useMemo(() => Object.values(s.humanTasks).filter((t) => t.operationId === id && t.state === 'OPEN'), [s.humanTasks, id]);
   const sectionName = (sid: string | null) => (sid ? (artifact?.sections.find((x) => x.id === sid)?.name ?? sid) : '—');
+  const manual = summary ? providerModeOf(s, summary.providerId) === 'MANUAL_ASSIST' : false;
+  const minGroup = detail ? (detail.armSnapshot?.compiledPolicy.minGroupSize ?? detail.config.preferences.minGroupSize) : null;
+  const opCarts = Object.values(s.carts).filter((c) => c.operationId === id && (c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED'));
+  /** Qué está haciendo cada cuenta ahora mismo (tarea abierta, carrito o por qué espera). */
+  const nowText = (a: Account): string | null => {
+    const task: HumanTask | undefined = tasks.find((t) => t.accountId === a.id);
+    if (task) {
+      if (task.kind === 'ADD_TO_CART') return `intentando ${task.target?.qty ?? '?'} en ${task.target?.sectionLabel ?? '—'}`;
+      if (task.kind === 'VERIFY_CART') return 'verificando su carrito';
+      return 'tiene que iniciar sesión';
+    }
+    const cart = opCarts.find((c) => c.accountId === a.id);
+    if (cart) {
+      if (cart.state === 'REVIEW_REQUIRED') return `carrito de ${cart.qty} por revisar`;
+      const overdue = cart.confirmation === 'HUMAN' && cart.expiresAt !== null && Date.parse(cart.expiresAt) <= Date.now();
+      return overdue ? `${cart.qty} en carrito · tiempo agotado: ¿se pagó?` : `${cart.qty} en carrito, pendiente de pago`;
+    }
+    if (!summary || a.session.state !== 'READY') return null;
+    return idleReason({ s, state: summary.state, providerId: summary.providerId, operationId: id, account: a, alloc, minGroup });
+  };
 
   const rejectionItems: BarItem[] = inventory
     ? (Object.entries(inventory.rejectedByReason) as Array<[RejectionReason, number]>)
@@ -247,6 +424,7 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                 <th>Sesión</th>
                 <th>Cola</th>
                 <th style={{ width: '18%' }}>Cupo</th>
+                <th>Ahora</th>
                 <th />
               </tr>
             </thead>
@@ -266,7 +444,13 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                       <SessionPill state={a.session.state} />
                     </td>
                     <td>
-                      <QueuePill state={a.session.queue.state} position={a.session.queue.position} etaMs={a.session.queue.etaMs} />
+                      {manual ? (
+                        <span className="muted" title="En asistencia manual la cola la ve cada persona en la web oficial">
+                          —
+                        </span>
+                      ) : (
+                        <QueuePill state={a.session.queue.state} position={a.session.queue.position} etaMs={a.session.queue.etaMs} />
+                      )}
                     </td>
                     <td>
                       {cap ? (
@@ -281,6 +465,9 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                       ) : (
                         '—'
                       )}
+                    </td>
+                    <td className="small ink2" style={{ minWidth: 160 }}>
+                      {nowText(a) ?? '—'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {a.session.state === 'CHALLENGE_REQUIRED' || a.session.state === 'LOGGED_OUT' || a.session.state === 'EXPIRED' || a.session.state === 'UNKNOWN' ? (
@@ -332,7 +519,11 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
               ) : null}
             </div>
           ) : (
-            <div className="muted">Aparecerá cuando la operación empiece a leer inventario (en T0).</div>
+            <div className="muted">
+              {manual
+                ? 'En asistencia manual el sistema no lee la web oficial: cada persona ve las entradas disponibles en su navegador.'
+                : 'Aparecerá cuando la operación empiece a leer inventario (en T0).'}
+            </div>
           )}
         </Card>
         <Card title="Latencia por etapa">
@@ -349,7 +540,7 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                   Decisiones <b className="mono">{metrics.counters.decisions}</b>
                 </span>
                 <span>
-                  Claims <b className="mono">{metrics.counters.claims}</b>
+                  Reservas <b className="mono">{metrics.counters.claims}</b>
                 </span>
                 <span>
                   Confirmados <b className="mono">{metrics.counters.confirmed}</b>
@@ -426,9 +617,13 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
         )}
       </Card>
 
-      <Card title="Claims" flush>
+      <Card title="Reservas" flush>
         {claims.length === 0 ? (
-          <div className="card-body muted">Un claim es una reserva de capacidad enviada al proveedor (o a una persona en modo manual).</div>
+          <div className="card-body muted">
+            {manual
+              ? 'Cada tarea de compra que recibe una persona aparta su cantidad aquí hasta que responde.'
+              : 'Cada intento de añadir al carrito aparta su cantidad aquí hasta que el proveedor responde.'}
+          </div>
         ) : (
           <div className="table-wrap">
             <table className="t">
@@ -463,7 +658,12 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                       </Pill>
                     </td>
                     <td className="small muted">
-                      {[c.resolution === 'RECONCILIATION' ? 'reconciliado' : c.resolution === 'HUMAN' ? 'por una persona' : null, c.reason].filter(Boolean).join(' · ') || '—'}
+                      {[
+                        c.resolution === 'RECONCILIATION' ? 'reconciliado' : c.resolution === 'HUMAN' && !c.reason?.startsWith('HUMAN_FAILED') ? 'por una persona' : null,
+                        claimReasonText(c.reason),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ') || '—'}
                     </td>
                   </tr>
                 ))}
@@ -518,7 +718,7 @@ function PrepTab({ detail, artifact }: { detail: OperationDetail; artifact: Venu
         )}
       </Card>
 
-      <Card title="Readiness">
+      <Card title="Comprobación previa">
         {detail.readiness.length === 0 ? (
           <div className="muted">Se evalúa al armar y automáticamente en T−12 h, T−1 h y T−5 min.</div>
         ) : (
@@ -531,7 +731,7 @@ function PrepTab({ detail, artifact }: { detail: OperationDetail; artifact: Venu
                   <div className="row">
                     <CheckPill status={r.overall} />
                     <span className="small muted">
-                      {r.phase} · {fmtDateTime(r.at)}
+                      {PHASE_LABEL[r.phase] ?? r.phase} · {fmtDateTime(r.at)}
                     </span>
                   </div>
                   <table className="t">
@@ -691,31 +891,40 @@ function PrepTab({ detail, artifact }: { detail: OperationDetail; artifact: Venu
 // Historial y replay
 // ---------------------------------------------------------------------------
 
-function describe(e: AuditEvent): string {
+function describe(e: AuditEvent, currency: string): string {
   const p = (e.payload ?? {}) as Record<string, unknown>;
   switch (e.type) {
     case 'operation.state_changed':
-      return `Estado ${String(p.from)} → ${String(p.to)}${p.reason ? ` (${String(p.reason)})` : ''}`;
-    case 'operation.command':
-      return `Comando «${String(p.command)}»${p.value !== null && p.value !== undefined ? ` = ${String(p.value)}` : ''}`;
+      return `Estado ${stateLabel(p.from)} → ${stateLabel(p.to)}${p.reason ? ` (${String(p.reason)})` : ''}`;
+    case 'operation.command': {
+      const has = p.value !== null && p.value !== undefined;
+      const value = has ? (p.command === 'lower-max-price' && typeof p.value === 'number' ? formatMoney(p.value, currency) : String(p.value)) : '';
+      return `Comando «${commandLabel(String(p.command))}»${has ? ` = ${value}` : ''}`;
+    }
     case 'claim.reserved':
       return `Reserva ${String(p.qty)} × ${String(p.offerRef)}`;
     case 'claim.confirmed':
       return `Confirmado ${String(p.qty)} entradas (${String(p.level)}${p.resolution === 'RECONCILIATION' ? ', reconciliado' : ''})`;
     case 'claim.rejected':
-      return `Rechazado: ${String(p.reason)}`;
+      return `Reserva rechazada: ${claimReasonText(typeof p.reason === 'string' ? p.reason : null) ?? '—'}`;
+    case 'claim.cancelled':
+      return `Reserva cancelada: ${claimReasonText(typeof p.reason === 'string' ? p.reason : null) ?? '—'}`;
     case 'claim.ambiguous':
-      return `Resultado ambiguo: ${String(p.reason)}`;
+      return `Resultado ambiguo: ${claimReasonText(typeof p.reason === 'string' ? p.reason : null) ?? '—'}`;
     case 'alert.raised':
       return `Alerta: ${String(p.title)}`;
     case 'readiness.evaluated':
-      return `Readiness ${String(p.phase)}: ${String(p.overall)}`;
+      return `Comprobación previa ${PHASE_LABEL[p.phase as ReadinessPhase] ?? String(p.phase)}: ${CHECK_STATUS_LABEL[String(p.overall)] ?? String(p.overall)}`;
     case 'human_task.created':
-      return `Tarea humana creada (${String(p.kind)})`;
+      return `Tarea humana creada (${HUMAN_TASK_KIND_LABEL[p.kind as HumanTask['kind']] ?? String(p.kind)})`;
     case 'human_task.responded':
-      return `Tarea respondida: ${String(p.result)}`;
+      return `Tarea respondida: ${TASK_RESULT_LABEL[String(p.result)] ?? String(p.result)}`;
     case 'cart.paid_by_human':
       return 'Carrito marcado como pagado por una persona';
+    case 'cart.released':
+      return `Carrito liberado (${String(p.qty)} entradas)`;
+    case 'cart.expired':
+      return `Carrito caducado (${String(p.qty)} entradas)`;
     default:
       return e.type;
   }
@@ -736,7 +945,7 @@ function HistoryTab({ id, detail }: { id: string; detail: OperationDetail }) {
             <li key={e.seq}>
               <span className="ts">{fmtTime(e.at)}</span>
               <span>
-                {describe(e)} <span className="muted small">· {e.actor}</span>
+                {describe(e, detail.config.currency)} <span className="muted small">· {e.actor}</span>
               </span>
             </li>
           ))}
@@ -787,7 +996,7 @@ function HistoryTab({ id, detail }: { id: string; detail: OperationDetail }) {
                       {HUMAN_TASK_STATE_LABEL[t.state]}
                     </Pill>
                   </td>
-                  <td className="small muted">{t.response ? `${t.response.result} · ${t.response.actor}` : ''}</td>
+                  <td className="small muted">{t.response ? `${TASK_RESULT_LABEL[t.response.result] ?? t.response.result} · ${t.response.actor}` : ''}</td>
                 </tr>
               ))}
             </tbody>

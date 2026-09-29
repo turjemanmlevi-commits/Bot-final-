@@ -58,7 +58,7 @@ const STEPS: Step[] = [
     who: 'Cada persona',
     title: 'Iniciar sesión en la web oficial y pulsar «Sesión lista»',
     icon: 'user',
-    text: 'Botón «Abrir la web oficial», iniciar sesión con su cuenta y pulsar «Sesión lista» (en el dashboard o en Telegram). Si alguien llega tarde puede hacerlo después: la operación no se cancela.',
+    text: 'Botón «Abrir la web oficial», iniciar sesión con su cuenta y pulsar «Sesión lista» (en el dashboard o en Telegram). Hay que pulsarlo en cada compra: al armar la operación se pide confirmarla de nuevo, aunque ya se hubiera pulsado antes. Si alguien llega tarde puede hacerlo después: la operación no se cancela.',
     link: { to: '/tareas', label: 'Ir a Tareas' },
   },
   {
@@ -83,7 +83,7 @@ const STEPS: Step[] = [
     who: 'Cada persona',
     title: 'Responder: «2 en carrito» o «No pude»',
     icon: 'check',
-    text: '«N en carrito» y los minutos que le quedan al carrito (un toque en Telegram). «No pude» si no hay entradas por ese precio: la siguiente zona llega en unos 50 ms. El sistema reparte lo que falta y nunca supera los límites.',
+    text: '«N en carrito» y los minutos que le quedan al carrito (un toque en Telegram). «No pude» si no hay entradas por ese precio: la siguiente zona llega al instante (medido: ~50 ms). El sistema reparte lo que falta y nunca supera los límites.',
   },
   {
     n: 9,
@@ -91,7 +91,7 @@ const STEPS: Step[] = [
     who: 'Cada persona',
     title: 'Pagar en la web oficial y marcarlo',
     icon: 'lock',
-    text: 'Se paga siempre en la web oficial. Después: Carritos → «Ya lo he pagado». Hay avisos por Telegram a 5, 2 y 1 minuto de que caduque.',
+    text: 'Se paga siempre en la web oficial. Después: Carritos → «Ya lo he pagado». Hay avisos por Telegram a 5, 2 y 1 minutos de que caduque (si indicas los minutos que le quedan al carrito). Si se acaba el tiempo, el sistema no da las entradas por perdidas: pregunta «¿Lo has pagado?». Responde «Ya lo he pagado» o, si se perdieron, «Liberar» y esas entradas se vuelven a repartir.',
     link: { to: '/carritos', label: 'Ir a Carritos' },
   },
 ];
@@ -169,7 +169,7 @@ export function GuidePage() {
                 <VenueMap artifact={art.data} targets={['Lateral Este · Primer anfiteatro', 'Fondo Sur · Segundo anfiteatro', 'Fondo Norte']} compact />
                 <span className="small ink2">
                   Ejemplo en el Estadio Santiago Bernabéu: 1) Lateral Este · Primer anfiteatro; si no hay, 2) Fondo Sur · Segundo anfiteatro; si tampoco, 3) cualquier nivel del
-                  Fondo Norte. Cada cuenta empieza por la 1 y pasa a la siguiente con «No pude».
+                  Fondo Norte. Cada cuenta empieza por la 1 y, con «No pude», recibe al instante la siguiente.
                 </span>
               </div>
             ) : (
@@ -195,6 +195,8 @@ export function GuidePage() {
               <dd>Vuelve a abrir INICIAR.bat (o «Sala de control» en el Escritorio).</dd>
               <dt>Sin Telegram</dt>
               <dd>Ajustes · Telegram → «Enviar mensaje de prueba».</dd>
+              <dt>Se acabó el tiempo</dt>
+              <dd>Carritos → «Ya lo he pagado» si llegaste a pagar; si no, «Liberar» y se reparten de nuevo.</dd>
               <dt>Pausar</dt>
               <dd>Botón Pausar en la operación o /pausa en Telegram.</dd>
               <dt>Parar todo</dt>

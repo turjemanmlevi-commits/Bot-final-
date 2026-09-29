@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router';
-import { ALERT_KIND_LABEL, type Alert } from '@to/shared';
+import { ALERT_KIND_LABEL, type Alert, type Cart } from '@to/shared';
 import { Api } from '../lib/api';
-import { fmtRel } from '../lib/format';
+import { fmtCountdown, fmtRel } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 import { useDialog } from './Dialog';
@@ -15,6 +15,18 @@ export function sortAlerts(alerts: Alert[]): Alert[] {
       Number(a.state === 'RESOLVED') - Number(b.state === 'RESOLVED') ||
       SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] ||
       b.updatedAt.localeCompare(a.updatedAt),
+  );
+}
+
+/** Cuenta atrás en vivo del carrito de la alerta (solo mientras está por pagar). */
+function CartCountdown({ cart }: { cart: Cart }) {
+  const now = useNow(1000);
+  if (!cart.expiresAt || (cart.state !== 'ACTIVE' && cart.state !== 'REVIEW_REQUIRED')) return null;
+  const left = Date.parse(cart.expiresAt) - now;
+  return (
+    <span className={`countdown small ${left < 120_000 ? 'hot' : ''}`} style={{ marginLeft: 8, whiteSpace: 'nowrap' }} title="Tiempo que le queda al carrito">
+      <Icon name="clock" size={12} /> {left > 0 ? `caduca en ${fmtCountdown(left)}` : 'tiempo agotado'}
+    </span>
   );
 }
 
@@ -66,7 +78,10 @@ export function AlertRow({ alert, compact = false }: { alert: Alert; compact?: b
         <Icon name={icon} size={18} title={alert.severity} />
       </span>
       <div style={{ minWidth: 0 }}>
-        <div className="title">{alert.title}</div>
+        <div className="title">
+          {alert.title}
+          {cart && alert.state !== 'RESOLVED' ? <CartCountdown cart={cart} /> : null}
+        </div>
         {!compact || alert.severity !== 'INFO' ? <div className="msg">{alert.message}</div> : null}
         <div className="meta">
           {ALERT_KIND_LABEL[alert.kind]} · {fmtRel(alert.updatedAt, now)}

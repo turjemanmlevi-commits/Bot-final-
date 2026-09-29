@@ -6,9 +6,10 @@ import { Icon } from '../components/Icon';
 import { OperationHero } from '../components/OperationHero';
 import { Callout, Card, CartPill, Empty, Pill, Stat } from '../components/ui';
 import { Api } from '../lib/api';
-import { formatDuration, formatMoney, fmtDateTime, fmtRel } from '../lib/format';
+import { fmtCountdown, formatMoney, fmtDateTime, fmtRel } from '../lib/format';
 import { useAction, useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
+import { isOpenCart, isSimCart, isTimeUp } from './Carts';
 
 const ACTIVE = ['ARMED', 'FROZEN', 'RUNNING', 'PAUSED', 'RECOVERING'];
 
@@ -28,17 +29,22 @@ export function OverviewPage() {
   const focus = active.find((o) => o.state === 'RUNNING') ?? active[0] ?? recentSecured[0] ?? null;
   const others = [...active, ...recentSecured].filter((o) => o.id !== focus?.id).slice(0, 4);
   const openAlerts = useMemo(() => sortAlerts(Object.values(s.alerts).filter((a) => a.state !== 'RESOLVED')), [s.alerts]);
+  // Carritos abiertos: primero los reales (por caducidad) y después los del simulador, que no se pagan.
   const pendingCarts = useMemo(
     () =>
       Object.values(s.carts)
-        .filter((c) => c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED')
-        .sort((a, b) => (a.expiresAt ?? '9').localeCompare(b.expiresAt ?? '9')),
-    [s.carts],
+        .filter(isOpenCart)
+        .map((c) => ({ c, sim: isSimCart(c, s) }))
+        .sort((a, b) => Number(a.sim) - Number(b.sim) || (a.c.expiresAt ?? '9').localeCompare(b.c.expiresAt ?? '9')),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [s.carts, s.operations, s.system],
   );
+  const realCarts = pendingCarts.filter((x) => !x.sim).map((x) => x.c);
   const openTasks = useMemo(() => Object.values(s.humanTasks).filter((t) => t.state === 'OPEN'), [s.humanTasks]);
   const critical = openAlerts.filter((a) => a.severity === 'CRITICAL').length;
-  const ticketsInCarts = pendingCarts.reduce((n, c) => n + c.qty, 0);
-  const totalInCarts = pendingCarts.reduce((n, c) => n + c.total, 0);
+  const ticketsInCarts = realCarts.reduce((n, c) => n + c.qty, 0);
+  const totalInCarts = realCarts.reduce((n, c) => n + c.total, 0);
+  const simInCarts = pendingCarts.length - realCarts.length;
   const nextT0 = active.filter((o) => Date.parse(o.t0) > now)[0];
 
   const newDemo = async () => {
@@ -76,7 +82,7 @@ export function OverviewPage() {
             }
           >
             El flujo es: <b>vault</b> (recintos, eventos y límites en Obsidian) → <b>operación</b> (qué, cuánto, a qué precio y con qué cuentas) → <b>armar</b> →
-            en T0 el sistema asegura carritos → <b>pagas tú</b>.
+            en T0 cada persona pone sus entradas en el carrito de la web oficial → <b>paga allí</b> y lo marca aquí.
           </Empty>
         </Card>
         <RealPurchaseChecklist />
@@ -106,7 +112,17 @@ export function OverviewPage() {
       </div>
 
       <div className="grid cols-4">
-        <Stat label="Entradas por pagar" value={ticketsInCarts} detail={pendingCarts.length ? `${pendingCarts.length} carritos · ${formatMoney(totalInCarts, pendingCarts[0]?.currency ?? 'EUR')}` : 'Ningún carrito pendiente'} />
+        <Stat
+          label="Entradas por pagar"
+          value={ticketsInCarts}
+          detail={
+            realCarts.length
+              ? `${realCarts.length} carrito${realCarts.length === 1 ? '' : 's'} · ${formatMoney(totalInCarts, realCarts[0]?.currency ?? 'EUR')}`
+              : simInCarts
+                ? `Ningún carrito real · ${simInCarts} de simulación`
+                : 'Ningún carrito pendiente'
+          }
+        />
         <Stat label="Operaciones activas" value={active.length} detail={nextT0 ? `Próximo T0 ${fmtRel(nextT0.t0, now)}` : `${ops.length} en total`} />
         <Stat label="Alertas críticas" value={critical} detail={`${openAlerts.length} abiertas en total`} />
         <Stat label="Tareas humanas" value={openTasks.length} detail={openTasks.length ? 'Te esperan en Tareas' : 'Nada pendiente'} />
@@ -134,24 +150,31 @@ export function OverviewPage() {
           flush
         >
           {pendingCarts.length === 0 ? (
-            <div className="card-body muted">Cuando el sistema asegure entradas, aparecerán aquí con su cuenta atrás.</div>
+            <div className="card-body muted">Cuando alguien consiga entradas, aparecerán aquí con su cuenta atrás.</div>
           ) : (
             <table className="t">
               <tbody>
-                {pendingCarts.slice(0, 6).map((c) => {
+                {pendingCarts.slice(0, 6).map(({ c, sim }) => {
                   const left = c.expiresAt ? Date.parse(c.expiresAt) - now : null;
+                  const timeUp = isTimeUp(c, now);
                   return (
                     <tr key={c.id}>
                       <td>
-                        <b>{s.accounts[c.accountId]?.label ?? c.accountId}</b>
+                        <b>{s.accounts[c.accountId]?.label ?? c.accountId}</b> {sim ? <span className="tag">Simulación (no se paga)</span> : null}
                         <div className="small muted">{c.items.map((i) => `${i.qty}× ${i.sectionLabel}`).join(' · ')}</div>
                       </td>
                       <td>
                         <CartPill state={c.state} />
                       </td>
                       <td className="num">{formatMoney(c.total, c.currency)}</td>
-                      <td className="num">
-                        {left === null ? '—' : <span className={`countdown ${left < 120_000 ? 'hot' : ''}`}>{left > 0 ? formatDuration(left) : 'caducado'}</span>}
+                      <td className="num" style={{ whiteSpace: 'nowrap' }}>
+                        {left === null ? (
+                          '—'
+                        ) : (
+                          <span className={`countdown ${timeUp || left < 120_000 ? 'hot' : ''}`}>
+                            {left > 0 ? fmtCountdown(left) : c.confirmation === 'HUMAN' ? 'tiempo agotado: ¿pagado?' : 'caducando…'}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -224,15 +247,23 @@ function RealPurchaseChecklist() {
       (a) => a.enabled && a.verification === 'VERIFIED' && a.providerId !== 'manual' && modeOf(a.providerId) === 'MANUAL_ASSIST',
     );
 
-    const readyEvents = Object.values(s.events)
-      .filter((e) => isReal(e.providerId) && e.limits.verified && e.limits.semantics !== 'UNKNOWN' && Date.parse(e.onSaleAt ?? e.startsAt) > now)
-      .sort((a, b) => (a.onSaleAt ?? a.startsAt).localeCompare(b.onSaleAt ?? b.startsAt));
-    const nextEvent = readyEvents[0];
-
+    // Proveedor genérico «manual», simulador o nota de demo: sirven para ensayar, no para la compra real.
+    const isDemoLike = (providerId: string, eventId: string) =>
+      providerId === 'sim' || providerId === 'manual' || (s.events[eventId]?.tags.includes('demo') ?? false);
+    // Operaciones armadas no simuladas; primero las de eventos reales (no demo), después por T0.
     const armedOps = Object.values(s.operations)
       .filter((o) => isReal(o.providerId) && REAL_ARMED.includes(o.state))
-      .sort((a, b) => a.t0.localeCompare(b.t0));
+      .sort((a, b) => Number(isDemoLike(a.providerId, a.eventId)) - Number(isDemoLike(b.providerId, b.eventId)) || a.t0.localeCompare(b.t0));
     const firstOp = armedOps[0];
+
+    // El evento de la operación real armada; si no hay, el próximo evento real (ni simulador, ni
+    // proveedor genérico «manual», ni notas de demo).
+    const upcomingReal = Object.values(s.events)
+      .filter((e) => !isDemoLike(e.providerId, e.id) && isReal(e.providerId) && Date.parse(e.startsAt) > now)
+      .sort((a, b) => (a.onSaleAt ?? a.startsAt).localeCompare(b.onSaleAt ?? b.startsAt));
+    const realArmed = firstOp && !isDemoLike(firstOp.providerId, firstOp.eventId) ? firstOp : undefined;
+    const nextEvent = (realArmed ? s.events[realArmed.eventId] : undefined) ?? upcomingReal[0];
+    const eventVerified = nextEvent !== undefined && nextEvent.limits.verified && nextEvent.limits.semantics !== 'UNKNOWN';
     const armedIds = new Set(armedOps.map((o) => o.id));
     const leased = Object.values(s.accounts).filter((a) => a.leasedBy !== null && armedIds.has(a.leasedBy));
     const readyCount = leased.filter((a) => a.session.state === 'READY').length;
@@ -253,11 +284,13 @@ function RealPurchaseChecklist() {
       },
       {
         title: 'Evento con límites verificados',
-        done: nextEvent !== undefined,
+        done: eventVerified,
         text: nextEvent
-          ? `${nextEvent.name} · ${nextEvent.onSaleAt ? `venta ${fmtDateTime(nextEvent.onSaleAt)}` : `empieza ${fmtDateTime(nextEvent.startsAt)}`}.`
+          ? `${nextEvent.name} · ${nextEvent.onSaleAt ? `venta ${fmtDateTime(nextEvent.onSaleAt)}` : `empieza ${fmtDateTime(nextEvent.startsAt)}`}.${
+              eventVerified ? '' : ' Faltan los límites comprobados en la web oficial.'
+            }`
           : 'Crea el evento con la hora de venta y los límites comprobados en la web oficial.',
-        to: '/eventos',
+        to: nextEvent ? `/eventos#${encodeURIComponent(nextEvent.id)}` : '/eventos',
         cta: 'Eventos',
       },
       {

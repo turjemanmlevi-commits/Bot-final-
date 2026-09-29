@@ -4,7 +4,7 @@ import { LIMIT_SEMANTICS_LABEL, type CatalogEvent, type ProviderMode } from '@to
 import { EventForm } from '../components/EventForm';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Pill } from '../components/ui';
-import { fmtDate, fmtDateTime, fmtRel } from '../lib/format';
+import { fmtDateTime, fmtRel } from '../lib/format';
 import { useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
@@ -162,7 +162,7 @@ export function EventsPage() {
                   <div className="stack">
                     <dl className="kv">
                       <dt>Evento</dt>
-                      <dd>{fmtDate(e.startsAt)}</dd>
+                      <dd>{fmtDateTime(e.startsAt)}</dd>
                       <dt>Venta (T0)</dt>
                       <dd>{e.onSaleAt ? `${fmtDateTime(e.onSaleAt)} · ${fmtRel(e.onSaleAt, now)}` : 'sin fecha'}</dd>
                       <dt>Límites</dt>

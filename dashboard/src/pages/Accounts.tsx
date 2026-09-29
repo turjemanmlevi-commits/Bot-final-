@@ -4,7 +4,7 @@ import type { Account, AccountInput, ProviderMode } from '@to/shared';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { Callout, Card, Empty, Pill, QueuePill, SessionPill } from '../components/ui';
-import { Api } from '../lib/api';
+import { Api, ApiError } from '../lib/api';
 import { useAction } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
@@ -27,6 +27,46 @@ const MODE_SUFFIX: Record<ProviderMode, string> = {
   AUTHORIZED_API: 'API autorizada',
   SIMULATED: 'simulador (solo ensayos)',
 };
+
+const FIELD_LABEL: Record<string, string> = {
+  holderRef: 'Titular',
+  householdRef: 'Hogar',
+  paymentRef: 'Medio de pago',
+  telegramChatId: 'Chat de Telegram',
+  label: 'Nombre visible',
+};
+
+/** Mensajes de zod en inglés que puede devolver el servidor, en castellano. */
+function zodToSpanish(msg: string): string {
+  const min = /^Too small: expected string to have >=?(\d+) characters?$/i.exec(msg);
+  if (min) return min[1] === '1' ? 'no puede estar vacío' : `mínimo ${min[1]} caracteres`;
+  const max = /^Too big: expected string to have <=?(\d+) characters?$/i.exec(msg);
+  if (max) return `máximo ${max[1]} caracteres`;
+  if (/^Invalid input: expected string/i.test(msg)) return 'tiene que ser un texto';
+  return msg;
+}
+
+/** «holderRef: Usa un alias…; label: Too small…» → «Titular: Usa un alias…; Nombre visible: no puede estar vacío». */
+function accountErrorText(message: string): string {
+  return message
+    .split('; ')
+    .map((part) => {
+      const m = /^(holderRef|householdRef|paymentRef|telegramChatId|label)(?:\.\S*)?: (.*)$/s.exec(part);
+      if (!m) return part;
+      return `${FIELD_LABEL[m[1] ?? ''] ?? m[1]}: ${zodToSpanish(m[2] ?? '')}`;
+    })
+    .join('; ');
+}
+
+/** Ejecuta una llamada de cuentas traduciendo los nombres de campo del error. */
+async function withFieldLabels<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof ApiError) throw new ApiError(e.status, e.code, accountErrorText(e.message));
+    throw e;
+  }
+}
 
 function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => void }) {
   const s = useLive();
@@ -60,7 +100,10 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
       paymentRef: f.paymentRef?.trim() ? f.paymentRef.trim() : null,
       telegramChatId: f.telegramChatId?.trim() ? f.telegramChatId.trim() : null,
     };
-    const r = await run(() => (initial ? Api.updateAccount(initial.id, body) : Api.createAccount(body)), initial ? 'Cuenta actualizada' : 'Cuenta creada');
+    const r = await run(
+      () => withFieldLabels(() => (initial ? Api.updateAccount(initial.id, body) : Api.createAccount(body))),
+      initial ? 'Cuenta actualizada' : 'Cuenta creada',
+    );
     if (r) onDone();
   };
   return (
@@ -168,6 +211,9 @@ export function AccountsPage() {
   const highlight = location.hash.slice(1);
   const providerName = (pid: string) =>
     s.providerAuthorizations.find((p) => p.providerId === pid)?.name ?? s.system?.providers.find((p) => p.id === pid)?.name ?? pid;
+  /** Asistencia manual: la sesión y la cola las lleva la persona en la web oficial. */
+  const isManual = (pid: string) =>
+    pid === 'manual' || (s.system?.providers.find((p) => p.id === pid)?.mode ?? s.providerAuthorizations.find((p) => p.providerId === pid)?.mode) === 'MANUAL_ASSIST';
 
   useEffect(() => {
     if (highlight) document.getElementById(`acc-${highlight}`)?.scrollIntoView({ block: 'center' });
@@ -213,6 +259,7 @@ export function AccountsPage() {
                   <th>Verificación</th>
                   <th>Sesión</th>
                   <th>Cola</th>
+                  <th>Telegram</th>
                   <th>En uso por</th>
                   <th />
                 </tr>
@@ -221,6 +268,7 @@ export function AccountsPage() {
                 {accounts.map((a) => {
                   const killed = s.killSwitches[`account:${a.id}`]?.engaged ?? false;
                   const op = a.leasedBy ? s.operations[a.leasedBy] : undefined;
+                  const manual = isManual(a.providerId);
                   return (
                     <tr key={a.id} id={`acc-${a.id}`} style={highlight === a.id ? { outline: '2px solid var(--data-1)', outlineOffset: -2 } : undefined}>
                       <td>
@@ -242,16 +290,48 @@ export function AccountsPage() {
                         {a.session.detail ? <div className="small muted" style={{ maxWidth: 260 }}>{a.session.detail}</div> : null}
                       </td>
                       <td>
-                        <QueuePill state={a.session.queue.state} position={a.session.queue.position} etaMs={a.session.queue.etaMs} />
+                        {manual ? (
+                          <div className="small muted" style={{ minWidth: 110 }} title="En asistencia manual la cola de la web oficial la gestiona la persona">
+                            — (la gestiona la persona)
+                          </div>
+                        ) : (
+                          <QueuePill state={a.session.queue.state} position={a.session.queue.position} etaMs={a.session.queue.etaMs} />
+                        )}
                       </td>
-                      <td className="small">{op ? <Link to={`/operaciones/${op.id}`}>{op.name}</Link> : '—'}</td>
                       <td>
-                        <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
+                        {a.telegramChatId ? (
+                          <span className="tag mono" title="Esta persona recibe sus tareas en este chat de Telegram">
+                            <Icon name="send" size={12} />
+                            &nbsp;{a.telegramChatId}
+                          </span>
+                        ) : (
+                          <span className="muted" title="Sin chat propio: sus tareas llegan al chat principal">
+                            —
+                          </span>
+                        )}
+                      </td>
+                      <td className="small" style={{ minWidth: 130 }}>
+                        {op ? <Link to={`/operaciones/${op.id}`}>{op.name}</Link> : '—'}
+                      </td>
+                      <td>
+                        <div className="row" style={{ justifyContent: 'flex-end', gap: 6, minWidth: 150 }}>
                           {a.session.state !== 'READY' ? (
                             <>
-                              <button type="button" className="btn sm" disabled={busy} onClick={() => void run(() => Api.openSession(a.id), 'Abriendo sesión…')} title="Pedir al proveedor (o a una persona) que abra sesión">
-                                Abrir sesión
-                              </button>
+                              {manual ? (
+                                <button
+                                  type="button"
+                                  className="btn sm"
+                                  disabled={busy}
+                                  onClick={() => void run(() => Api.openSession(a.id), 'Tarea enviada: inicia sesión en la web oficial y pulsa «Sesión lista»')}
+                                  title="Crea la tarea para que la persona inicie sesión en la web oficial"
+                                >
+                                  Pedir inicio de sesión
+                                </button>
+                              ) : (
+                                <button type="button" className="btn sm" disabled={busy} onClick={() => void run(() => Api.openSession(a.id), 'Abriendo sesión…')} title="Pedir al proveedor que abra sesión">
+                                  Abrir sesión
+                                </button>
+                              )}
                               <button type="button" className="btn sm primary" disabled={busy} onClick={() => void run(() => Api.sessionReady(a.id), 'Sesión marcada como lista')} title="Ya has iniciado sesión o resuelto el reto">
                                 <Icon name="check" size={13} /> Lista
                               </button>

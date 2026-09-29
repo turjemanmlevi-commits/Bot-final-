@@ -337,11 +337,12 @@ function TaskCard({ task }: { task: HumanTask }) {
 function responseText(t: HumanTask, currency: string): string {
   const r = t.response;
   if (!r) return '—';
+  // Las cierra el sistema (operación asegurada, cancelada…): se muestra el motivo, no «No pudo».
+  if (r.actor === 'system') return `${r.note ?? RESULT_LABEL[r.result]} · sistema`;
   const parts = [RESULT_LABEL[r.result]];
   if (r.qty) parts.push(`${r.qty} ${plural(r.qty, 'entrada', 'entradas')}`);
   if (r.unitPrice) parts.push(`${formatMoney(r.unitPrice, currency)}/u`);
-  if (r.note && r.actor === 'system') parts.push(r.note);
-  parts.push(r.actor === 'system' ? 'sistema' : r.actor);
+  parts.push(r.actor);
   return parts.join(' · ');
 }
 

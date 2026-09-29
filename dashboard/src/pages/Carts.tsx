@@ -185,23 +185,25 @@ export function CartCard({ cart }: { cart: Cart }) {
       </div>
       {open ? (
         <>
-          <div className="row">
-            {cart.openUrl ? (
+          {cart.openUrl || !timeUp ? (
+            <div className="row">
+              {cart.openUrl ? (
               <a className={`btn ${timeUp ? '' : 'primary'}`} href={cart.openUrl} target="_blank" rel="noreferrer">
                 <Icon name="external" size={14} /> {sim ? 'Abrir carrito (simulador)' : cart.confirmation === 'HUMAN' ? 'Abrir la web oficial para pagar' : 'Abrir carrito'}
               </a>
             ) : null}
-            {!timeUp ? (
-              <>
-                <button type="button" className="btn" disabled={busy} onClick={() => void markPaid(false)}>
-                  <Icon name="check" size={14} /> Ya lo he pagado
-                </button>
-                <button type="button" className="btn danger" disabled={busy} onClick={() => void release()}>
-                  Liberar
-                </button>
-              </>
-            ) : null}
-          </div>
+              {!timeUp ? (
+                <>
+                  <button type="button" className="btn" disabled={busy} onClick={() => void markPaid(false)}>
+                    <Icon name="check" size={14} /> Ya lo he pagado
+                  </button>
+                  <button type="button" className="btn danger" disabled={busy} onClick={() => void release()}>
+                    Liberar
+                  </button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
           <ExpiryControl cart={cart} left={left} />
         </>
       ) : cart.state === 'EXPIRED' ? (
