@@ -8,11 +8,13 @@ import {
   AI_STATUS_LABEL,
   EventNoteInputSchema,
   guessVenueLayout,
+  limitAbovePhase,
   LIMIT_SEMANTICS,
   LIMIT_SEMANTICS_LABEL,
   LOCAL_DATETIME_RE,
   TOP_PER_ACCOUNT,
   TOP_WATCH_DAYS,
+  watchStartMs,
   type AiEventDetails,
   type AiEventSummary,
   type AiSaleZone,
@@ -179,6 +181,15 @@ const SEMANTICS_HELP: Record<LimitSemantics, string> = {
   PER_HOUSEHOLD: 'Las cuentas del mismo hogar comparten cupo.',
   PER_PAYMENT_METHOD: 'Las cuentas que pagan con la misma tarjeta comparten cupo.',
   UNKNOWN: 'No se sabe cómo cuenta: no se podrá armar ninguna operación.',
+};
+
+/** Quién comparte el cupo de «Por grupo». */
+const GROUP_NOUN: Record<LimitSemantics, string> = {
+  PER_ACCOUNT: 'cuenta',
+  PER_HOLDER: 'titular',
+  PER_HOUSEHOLD: 'hogar',
+  PER_PAYMENT_METHOD: 'tarjeta',
+  UNKNOWN: 'grupo',
 };
 
 const GROUP_HINT: Record<LimitSemantics, string> = {
@@ -391,6 +402,12 @@ function ImportSummary({
             </b>
           )}
         </div>
+        {!ev.name && !ev.startsAtLocal ? (
+          <div className="small" style={{ color: 'var(--warning-ink)' }}>
+            Esta página no es la de un evento (¿la portada de {info.page.host || 'la web'}?): abre la página del evento en la web oficial y vuelve a pulsar «📥 Enviar a la
+            sala».
+          </div>
+        ) : null}
         {ev.status ? <div className="small" style={{ color: 'var(--critical-ink)' }}>{IMPORT_STATUS[ev.status]}</div> : null}
         {newVenue ? (
           <div className="small">
@@ -416,7 +433,7 @@ function ImportSummary({
             <span className="small">¿Qué venta es la vuestra? Su hora será la apertura (T0):</span>
             <div className="row" style={{ gap: 6 }}>
               {ev.sales.map((x) => (
-                <button key={x.name} type="button" className={`btn sm ${info.sale === x.name ? 'primary' : ''}`} onClick={() => onChoose(info.index, x.name)}>
+                <button key={x.name} type="button" className={`btn sm wrap ${info.sale === x.name ? 'primary' : ''}`} onClick={() => onChoose(info.index, x.name)}>
                   {info.sale === x.name ? <Icon name="check" size={12} /> : null} {x.name} · {x.startsAtLocal.replace('T', ' ')}
                 </button>
               ))}
@@ -468,8 +485,9 @@ function AiSummary({
   onSale,
   venueNote,
 }: {
-  info: { details: AiEventDetails; sale: string | null };
-  onSale: (name: string) => void;
+  /** sale: posición de la fase elegida en details.sales. */
+  info: { details: AiEventDetails; sale: number | null };
+  onSale: (index: number) => void;
   venueNote: { tone: 'good' | 'warning' | 'info'; text: string } | null;
 }) {
   const d = info.details;
@@ -526,9 +544,9 @@ function AiSummary({
           <div className="stack" style={{ gap: 4 }}>
             <span className="small">¿Qué venta es la vuestra? Su hora será la apertura (T0){d.sales.some((x) => x.limit !== null) ? ' y su límite, el de la compra' : ''}:</span>
             <div className="row" style={{ gap: 6 }}>
-              {d.sales.map((x) => (
-                <button key={x.name} type="button" className={`btn sm ${info.sale === x.name ? 'primary' : ''}`} onClick={() => onSale(x.name)}>
-                  {info.sale === x.name ? <Icon name="check" size={12} /> : null} {x.name} · {fmtLocalDate(x.opensAtLocal)}
+              {d.sales.map((x, i) => (
+                <button key={`${i}-${x.name}`} type="button" className={`btn sm wrap ${info.sale === i ? 'primary' : ''}`} onClick={() => onSale(i)}>
+                  {info.sale === i ? <Icon name="check" size={12} /> : null} {x.name} · {fmtLocalDate(x.opensAtLocal)}
                   {x.limit !== null ? ` · máx. ${x.limit}/persona` : ''}
                 </button>
               ))}
@@ -667,7 +685,7 @@ function SaleStructure({ zones, venueId, sourceUrl }: { zones: AiSaleZone[]; ven
       </div>
       {artifact && venueId && (missing > 0 || aliases > 0) ? (
         <div className="row" style={{ gap: 8 }}>
-          <button type="button" className="btn sm" disabled={busy} onClick={() => void add()}>
+          <button type="button" className="btn sm wrap" disabled={busy} onClick={() => void add()}>
             {busy
               ? 'Añadiendo…'
               : missing > 0
@@ -706,7 +724,18 @@ export function EventForm({
     initial
       ? fromEvent(initial)
       : top
-        ? { ...blank(top.providerId ?? ''), watchDaysBefore: String(TOP_WATCH_DAYS), perAccountQty: String(TOP_PER_ACCOUNT) }
+        ? {
+            ...blank(top.providerId ?? ''),
+            // Lo que ya se sabe del partido: sin Claude (o si falla) el formulario no queda vacío.
+            name: top.name.slice(0, 120),
+            startsAt: top.startsAtLocal ?? '',
+            onSaleAt: top.saleOpensLocal ?? '',
+            url: top.ticketUrl ?? '',
+            venueId: top.vaultVenueId ?? (top.venue ? NEW_VENUE : ''),
+            newVenue: !top.vaultVenueId && top.venue ? { name: top.venue.slice(0, 100), city: top.city } : null,
+            watchDaysBefore: String(TOP_WATCH_DAYS),
+            perAccountQty: String(TOP_PER_ACCOUNT),
+          }
         : blank(''),
   );
   /** Último estado del formulario (para lo que llega tarde, como el análisis de Claude). */
@@ -740,8 +769,10 @@ export function EventForm({
   const [picked, setPicked] = useState<{ event: FeedEvent; sale: FeedSale | null } | null>(null);
   /** Página oficial enviada con «📥 Enviar a la sala» (y qué evento y fase de venta se usan). */
   const [fromPage, setFromPage] = useState<{ page: PageImport; index: number; sale: string | null } | null>(null);
-  /** Evento leído por Claude (y qué fase de venta es la apertura). */
-  const [aiPicked, setAiPicked] = useState<{ details: AiEventDetails; sale: string | null } | null>(null);
+  /** Evento leído por Claude (y qué fase de venta es la apertura: su posición en details.sales). */
+  const [aiPicked, setAiPicked] = useState<{ details: AiEventDetails; sale: number | null } | null>(null);
+  /** La lista de Claude está buscando o leyendo un evento (no se ofrece otra consulta a la vez). */
+  const [pickerBusy, setPickerBusy] = useState(false);
   /** Plano oficial recién encontrado por Claude: se sitúan sus zonas en cuanto el recinto esté listo. */
   const [planFresh, setPlanFresh] = useState(false);
   /** Qué pasa con el recinto del evento elegido (se crea al momento si no estaba). */
@@ -806,9 +837,10 @@ export function EventForm({
     const nowLocal = madridLocal(Date.now());
     // Completando, manda la apertura que ya estaba puesta (su fase y su límite); si no hay, la venta general próxima.
     const openedAt = mode === 'complete' ? fRef.current.onSaleAt : '';
-    const saleName = openedAt ? (d.sales.find((x) => x.opensAtLocal === openedAt)?.name ?? null) : undefined;
-    const draft = aiEventDraft(d, { today: nowLocal.slice(0, 10), nowLocal, ...(saleName !== undefined ? { saleName } : {}) });
-    setAiPicked({ details: d, sale: saleName !== undefined ? saleName : (aiDefaultSale(d.sales, nowLocal)?.name ?? null) });
+    const chosen = openedAt ? d.sales.find((x) => x.opensAtLocal === openedAt) : aiDefaultSale(d.sales, nowLocal);
+    const saleIndex = chosen ? d.sales.indexOf(chosen) : null;
+    const draft = aiEventDraft(d, { today: nowLocal.slice(0, 10), nowLocal, saleIndex });
+    setAiPicked({ details: d, sale: saleIndex });
     setErrors({});
     if (mode === 'complete') {
       // Se mira ahora: cuando React aplique esto, el formulario ya tendrá el plano nuevo.
@@ -922,15 +954,17 @@ export function EventForm({
     }
   };
 
-  /** Otra fase de venta como apertura (socios, preventa, general…), con su límite si la web lo da. */
-  const chooseAiSale = (name: string) => {
-    const sale = aiPicked?.details.sales.find((x) => x.name === name);
+  /** Otra fase de venta como apertura (socios, preventa, general…), con su límite si la web lo da. Por posición: dos fases pueden llamarse igual. */
+  const chooseAiSale = (index: number) => {
+    const sale = aiPicked?.details.sales[index];
     if (!aiPicked || !sale) return;
     const nowLocal = madridLocal(Date.now());
     const opts = { today: nowLocal.slice(0, 10), nowLocal };
-    const before = aiEventDraft(aiPicked.details, { ...opts, saleName: aiPicked.sale }).limit;
-    const after = aiEventDraft(aiPicked.details, { ...opts, saleName: name }).limit;
-    setAiPicked({ ...aiPicked, sale: name });
+    const beforeDraft = aiEventDraft(aiPicked.details, { ...opts, saleIndex: aiPicked.sale });
+    const afterDraft = aiEventDraft(aiPicked.details, { ...opts, saleIndex: index });
+    const before = beforeDraft.limit;
+    const after = afterDraft.limit;
+    setAiPicked({ ...aiPicked, sale: index });
     setF((x) => {
       // Solo si el límite que hay es el que puso Claude (no uno oficial ni cambiado a mano).
       const untouched = before !== null && x.limitPerAccount === String(before.perAccount) && x.limitsSource === before.source;
@@ -943,7 +977,9 @@ export function EventForm({
               limitsSource: after.source,
             }
           : {};
-      return { ...x, onSaleAt: sale.opensAtLocal, ...limits };
+      // La nota dice qué apertura se eligió: se cambia si sigue siendo la que escribió Claude.
+      const notes = beforeDraft.notes && x.notes.includes(beforeDraft.notes) ? x.notes.replace(beforeDraft.notes, () => afterDraft.notes) : x.notes;
+      return { ...x, onSaleAt: sale.opensAtLocal, ...limits, notes };
     });
   };
 
@@ -1079,7 +1115,8 @@ export function EventForm({
     const perGroup = perAccountMode ? n : toInt(f.limitPerGroup) || n;
     const cap = toInt(f.limitPerOperation);
     const total = Math.min(groups * perGroup, Number.isInteger(cap) && cap > 0 ? cap : Number.POSITIVE_INFINITY);
-    const unit = { PER_ACCOUNT: 'cuentas', PER_HOLDER: 'titulares', PER_HOUSEHOLD: 'hogares', PER_PAYMENT_METHOD: 'tarjetas', UNKNOWN: '' }[f.limitSemantics];
+    const units = { PER_ACCOUNT: ['cuenta', 'cuentas'], PER_HOLDER: ['titular', 'titulares'], PER_HOUSEHOLD: ['hogar', 'hogares'], PER_PAYMENT_METHOD: ['tarjeta', 'tarjetas'], UNKNOWN: ['', ''] }[f.limitSemantics];
+    const unit = units[groups === 1 ? 0 : 1];
     return `Con tus ${accounts.length} cuenta${accounts.length === 1 ? '' : 's'} de ${provider.name} (${groups} ${unit}): hasta ${total} entrada${total === 1 ? '' : 's'} en total.`;
   }, [provider, s.accounts, f.providerId, f.limitPerAccount, f.limitPerGroup, f.limitPerOperation, f.limitSemantics, perAccountMode]);
 
@@ -1278,11 +1315,18 @@ export function EventForm({
   const startEpoch = madridEpoch(f.startsAt);
   const saleEpoch = madridEpoch(f.onSaleAt);
   const anchorEpoch = saleEpoch ?? startEpoch;
-  const watchFrom = anchorEpoch === null ? null : anchorEpoch - (Number(f.watchDaysBefore) || 0) * 86_400_000;
+  // A la misma hora de reloj aunque entre medias cambie la hora (como la vigilancia del servidor).
+  const watchFrom = anchorEpoch === null ? null : watchStartMs(anchorEpoch, Number(f.watchDaysBefore) || 0, MADRID_TZ);
   const errorCount = Object.keys(errors).length;
-  /** La fase de venta elegida tiene un límite menor que el puesto (p. ej. 1 en la de socios). */
-  const aiSale = aiPicked?.details.sales.find((x) => x.name === aiPicked.sale) ?? null;
-  const overPhase = aiSale !== null && aiSale.limit !== null && toInt(f.limitPerAccount) > aiSale.limit ? { name: aiSale.name, limit: aiSale.limit } : null;
+  /** La fase de venta elegida tiene un límite menor que el puesto (p. ej. 1 en la de socios), por cuenta o, sumando cuentas, por grupo. */
+  const aiSale = aiPicked && aiPicked.sale !== null ? (aiPicked.details.sales[aiPicked.sale] ?? null) : null;
+  const excess = aiSale
+    ? limitAbovePhase(
+        { perAccount: toInt(f.limitPerAccount), perGroup: perAccountMode ? toInt(f.limitPerAccount) : toInt(f.limitPerGroup), semantics: f.limitSemantics },
+        aiSale.limit,
+      )
+    : null;
+  const overPhase = aiSale && aiSale.limit !== null && excess ? { name: aiSale.name, limit: aiSale.limit, ...excess } : null;
   const title = initial ? `Editar ${initial.name}` : createdEvent ? `Editar ${createdEvent.name}` : 'Nuevo evento';
 
   return (
@@ -1351,10 +1395,11 @@ export function EventForm({
             aiReady ? (
               showAi ? (
                 <ClaudeEventPicker
-                  key={f.providerId}
+                  key={`ai-${f.providerId}`}
                   provider={provider}
                   picked={aiPicked?.details.name ?? null}
                   onPicked={applyAi}
+                  onBusy={setPickerBusy}
                   autoPick={top && f.providerId === top.providerId ? topSummary : null}
                 />
               ) : (
@@ -1383,7 +1428,7 @@ export function EventForm({
               </div>
             </Callout>
           ) : null}
-          {aiReady && provider && provider.mode !== 'SIMULATED' && !analyzing && f.name.trim().length >= 3 && (!showAi || aiPicked) ? (
+          {aiReady && provider && provider.mode !== 'SIMULATED' && !analyzing && !(showAi && pickerBusy) && f.name.trim().length >= 3 ? (
             <div className="row" style={{ gap: 8 }}>
               <button type="button" className="btn sm" onClick={() => void analyzeWithClaude(aiPicked ? { fresh: true } : undefined)}>
                 🤖 {aiPicked ? 'Volver a analizar con Claude' : 'Analizar con Claude'}
@@ -1397,7 +1442,7 @@ export function EventForm({
           ) : null}
           {!aiReady || otherWays || f.officialFeed !== null || !provider || provider.mode === 'SIMULATED' ? (
             <EventSourcePanel
-              key={f.providerId}
+              key={`src-${f.providerId}`}
               provider={provider ?? null}
               linked={f.officialFeed ? { feed: f.officialFeed, id: f.officialId, name: picked?.event.name ?? (initial?.officialId === f.officialId ? initial.name : null), sale: f.officialSale } : null}
               onPick={pickOfficial}
@@ -1644,7 +1689,7 @@ export function EventForm({
                 {aiSale && aiSale.limit !== null && aiSale.limit !== aiPicked.details.limit.perPerson ? (
                   <div className="small">
                     En tu fase, «{aiSale.name}», la web dice <b>{aiSale.limit} por persona</b>
-                    {toInt(f.limitPerAccount) === aiSale.limit ? ': es el que está puesto.' : '.'}
+                    {toInt(f.limitPerAccount) === aiSale.limit && !overPhase ? ': es el que está puesto.' : '.'}
                   </div>
                 ) : null}
               </Callout>
@@ -1672,8 +1717,11 @@ export function EventForm({
           ) : null}
           {overPhase ? (
             <Callout tone="warning">
-              Ojo: en «{overPhase.name}» la web dice <b>máximo {overPhase.limit} por persona</b> y aquí pone {f.limitPerAccount}. Pon {overPhase.limit} salvo que lo hayas
-              comprobado en las condiciones oficiales.
+              Ojo: en «{overPhase.name}» la web dice <b>máximo {overPhase.limit} por persona</b> y{' '}
+              {overPhase.field === 'perAccount'
+                ? `aquí pone ${overPhase.value} por cuenta`
+                : `en «Por grupo» pone ${overPhase.value} (lo que puede comprar cada ${GROUP_NOUN[f.limitSemantics]} sumando sus cuentas)`}
+              . Pon {overPhase.limit} salvo que lo hayas comprobado en las condiciones oficiales.
             </Callout>
           ) : null}
           {capacity ? <div className="small">{capacity}</div> : null}

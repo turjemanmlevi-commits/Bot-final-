@@ -39,12 +39,15 @@ export function ClaudeEventPicker({
   provider,
   picked,
   onPicked,
+  onBusy,
   autoPick,
 }: {
   provider: ProviderAuthorization;
   /** Nombre del evento ya elegido (para marcarlo en la lista). */
   picked: string | null;
   onPicked: (details: AiEventDetails) => void;
+  /** Claude está buscando la lista o leyendo un evento. */
+  onBusy?: (busy: boolean) => void;
   /** Evento ya elegido fuera (un gran partido): Claude lee sus datos directamente, sin lista. */
   autoPick?: AiEventSummary | null;
 }) {
@@ -57,13 +60,29 @@ export function ClaudeEventPicker({
   const [filter, setFilter] = useState('');
   const [open, setOpen] = useState(picked === null);
   const run = useRef(0);
+  // Una web sin enlace en la sala («Otra web oficial»): Claude necesita saber dónde mirar.
+  const [site, setSite] = useState('');
+  const needsSite = !provider.url;
+  const siteOk = /^https?:\/\/\S+$/i.test(site.trim());
+  const canSearch = !needsSite || siteOk;
+
+  useEffect(() => {
+    onBusy?.(busy !== null);
+  }, [busy, onBusy]);
+  useEffect(() => () => onBusy?.(false), [onBusy]);
 
   const search = async (fresh: boolean, windowDays = days) => {
+    if (!canSearch) return;
     const id = ++run.current;
     setBusy({ what: 'list', since: Date.now() });
     setError(null);
     try {
-      const r = await Api.aiEvents({ providerId: provider.providerId, days: windowDays, ...(fresh ? { fresh: true } : {}) });
+      const r = await Api.aiEvents({
+        providerId: provider.providerId,
+        days: windowDays,
+        ...(needsSite ? { siteUrl: site.trim() } : {}),
+        ...(fresh ? { fresh: true } : {}),
+      });
       if (id === run.current) setList(r);
     } catch (e) {
       if (id === run.current) setError(e instanceof Error ? e.message : String(e));
@@ -80,7 +99,7 @@ export function ClaudeEventPicker({
         run.current++;
       };
     }
-    if (picked === null) void search(false);
+    if (picked === null && canSearch) void search(false);
     return () => {
       run.current++;
     };
@@ -137,7 +156,15 @@ export function ClaudeEventPicker({
           <span>
             <b>🤖 Datos de Claude:</b> {picked}. Revisa abajo y elige dónde queréis las entradas.
           </span>
-          <button type="button" className="btn sm" onClick={() => setOpen(true)}>
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => {
+              setOpen(true);
+              // Si la lista aún no se ha buscado (gran partido leído directamente), se trae (la guardada es gratis).
+              if (!list && busy === null) void search(false);
+            }}
+          >
             Elegir otro evento
           </button>
         </div>
@@ -168,11 +195,38 @@ export function ClaudeEventPicker({
               </option>
             ))}
           </select>
-          <button type="button" className="btn sm" disabled={busy !== null} onClick={() => void search(true)} title="Volver a preguntar a Claude (cuesta otra consulta)">
+          <button type="button" className="btn sm" disabled={busy !== null || !canSearch} onClick={() => void search(true)} title="Volver a preguntar a Claude (cuesta otra consulta)">
             <Icon name="refresh" size={13} /> Buscar otra vez
           </button>
         </div>
       </div>
+
+      {needsSite ? (
+        <div className="field">
+          <label htmlFor="ai-site">Enlace de la web de venta</label>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              id="ai-site"
+              className="input mono"
+              type="url"
+              inputMode="url"
+              style={{ flex: '1 1 240px', minWidth: 0 }}
+              placeholder="https://…"
+              value={site}
+              onChange={(e) => setSite(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && siteOk && busy === null) void search(false);
+              }}
+            />
+            <button type="button" className="btn sm primary" disabled={busy !== null || !siteOk} onClick={() => void search(false)}>
+              Buscar sus eventos
+            </button>
+          </div>
+          <span className="hint">
+            «{provider.name}» no tiene web en la sala: pega el enlace de la web oficial que vende las entradas (el club, el recinto o el promotor) y Claude mira sus eventos.
+          </span>
+        </div>
+      ) : null}
 
       {busy?.what === 'list' ? (
         <Callout icon="info">

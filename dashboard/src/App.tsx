@@ -25,6 +25,9 @@ import { VenueDetailPage, VenuesPage } from './pages/Venues';
 
 type Theme = 'auto' | 'light' | 'dark';
 
+/** Escenarios del simulador si el estado aún no los ha traído. */
+const DEMO_SCENARIOS = ['demo', 'alta-demanda', 'caos', 'tranquilo', 'sin-cola'];
+
 function applyTheme(t: Theme) {
   const root = document.documentElement;
   if (t === 'auto') root.removeAttribute('data-theme');
@@ -137,10 +140,16 @@ function Shell() {
   };
 
   const newDemo = async () => {
+    // Solo los escenarios que tiene el simulador (un nombre mal escrito dejaba una operación a medias).
+    const scenarios = s.scenarios.length > 0 ? s.scenarios : DEMO_SCENARIOS.map((id) => ({ id, name: id, description: '' }));
     const scenario = await ask({
       title: 'Nueva demo contra el simulador',
-      body: 'Crea cuentas ficticias y una operación que arranca en 60 s. Escenarios: demo, alta-demanda, caos, tranquilo.',
-      input: { label: 'Escenario', defaultValue: 'demo' },
+      body: 'Crea cuentas ficticias y una operación que arranca en 60 s.',
+      input: {
+        label: 'Escenario',
+        defaultValue: scenarios.some((x) => x.id === 'demo') ? 'demo' : (scenarios[0]?.id ?? 'demo'),
+        options: scenarios.map((x) => ({ value: x.id, label: x.name, hint: x.description || undefined })),
+      },
       confirmText: 'Crear demo',
     });
     if (typeof scenario !== 'string') return;

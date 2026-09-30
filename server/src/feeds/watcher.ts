@@ -13,7 +13,7 @@
  * Solo lee datos públicos de la fuente: nunca entra en la web de venta.
  */
 
-import { FEED_EVENT_STATUS_LABEL, FEED_LABEL, type CatalogEvent, type EventWatch, type FeedEvent, type FeedSnapshot } from '@to/shared';
+import { FEED_EVENT_STATUS_LABEL, FEED_LABEL, watchStartMs, type CatalogEvent, type EventWatch, type FeedEvent, type FeedSnapshot } from '@to/shared';
 import type { App } from '../app';
 import type { AlertSeverity } from '@to/shared';
 import type { TimerHandle } from '../util/clock';
@@ -131,7 +131,8 @@ export class EventWatcher {
     const now = ctx.now();
     const anchorKind: EventWatch['anchorKind'] = event.onSaleAt ? 'SALE' : 'EVENT';
     const anchorMs = Date.parse(event.onSaleAt ?? event.startsAt);
-    const fromMs = anchorMs - days * DAY;
+    // A la misma hora de reloj aunque entre medias cambie la hora.
+    const fromMs = watchStartMs(anchorMs, days, this.opts.timeZone);
     const w: EventWatch = {
       eventId: event.id,
       eventName: event.name,

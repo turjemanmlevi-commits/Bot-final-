@@ -260,6 +260,7 @@ export function CartsPage() {
   const real = pending.filter((c) => !isSimCart(c, s));
   const simCount = pending.length - real.length;
   const total = real.reduce((n, c) => n + c.total, 0);
+  const realQty = real.reduce((n, c) => n + c.qty, 0);
   const timeUp = real.filter((c) => isTimeUp(c, now));
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -283,7 +284,7 @@ export function CartsPage() {
           <b>
             {real.length} carrito{real.length === 1 ? '' : 's'} por pagar
           </b>{' '}
-          · {real.reduce((n, c) => n + c.qty, 0)} entradas · {formatMoney(total, real[0]?.currency ?? 'EUR')}. Ordenados por caducidad.
+          · {realQty} entrada{realQty === 1 ? '' : 's'} · {formatMoney(total, real[0]?.currency ?? 'EUR')}. Ordenados por caducidad.
           {simCount > 0 ? ` Además, ${simCount} de simulación (no se pagan).` : ''} <Link to="/alertas">Ver alertas</Link>
         </Callout>
       ) : simCount > 0 ? (

@@ -256,6 +256,22 @@ export function aiDefaultSale(sales: AiEventDetails['sales'], nowLocal: string):
   return future.find((s) => /general/i.test(s.name)) ?? future[0] ?? sales.at(-1) ?? null;
 }
 
+/**
+ * ¿Deja el límite puesto comprar más que el de la fase de venta («máx. 1 por
+ * persona» en la de socios)? Mira «Por cuenta» y, si el límite se cuenta por
+ * titular, hogar o tarjeta, también «Por grupo» (es lo que puede comprar una
+ * persona sumando sus cuentas). null si cabe.
+ */
+export function limitAbovePhase(
+  limits: { perAccount: number; perGroup: number; semantics: LimitSemantics },
+  phaseLimit: number | null,
+): { field: 'perAccount' | 'perGroup'; value: number } | null {
+  if (phaseLimit === null) return null;
+  if (limits.perAccount > phaseLimit) return { field: 'perAccount', value: limits.perAccount };
+  if (limits.semantics !== 'PER_ACCOUNT' && limits.perGroup > phaseLimit) return { field: 'perGroup', value: limits.perGroup };
+  return null;
+}
+
 /** Datos del evento listos para el formulario o para crearlo desde Telegram. */
 export interface AiEventDraft {
   name: string;
@@ -292,8 +308,16 @@ function host(url: string | null): string | null {
  * «verificado» solo si Claude cita la frase de la web de venta oficial; si sale
  * de otra fuente, se rellena pero hay que confirmarlo.
  */
-export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null; today: string; nowLocal: string }): AiEventDraft {
-  const sale = opts.saleName === undefined ? aiDefaultSale(d.sales, opts.nowLocal) : (d.sales.find((s) => s.name === opts.saleName) ?? null);
+export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null; saleIndex?: number | null; today: string; nowLocal: string }): AiEventDraft {
+  // Por posición manda sobre el nombre: dos fases pueden llamarse igual («Venta socios» del 1 y del 2).
+  const sale =
+    opts.saleIndex !== undefined
+      ? opts.saleIndex === null
+        ? null
+        : (d.sales[opts.saleIndex] ?? null)
+      : opts.saleName === undefined
+        ? aiDefaultSale(d.sales, opts.nowLocal)
+        : (d.sales.find((s) => s.name === opts.saleName) ?? null);
   // El límite de la fase elegida (socios, general…) manda sobre el general.
   const n = sale?.limit ?? d.limit.perPerson;
   const quote = sale?.limit && sale.limit !== d.limit.perPerson ? `${sale.limit} por persona en «${sale.name}»` : d.limit.quote ? `«${d.limit.quote}»` : `${n} por persona`;

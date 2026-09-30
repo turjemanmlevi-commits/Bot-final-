@@ -10,6 +10,7 @@
 
 import { z } from 'zod';
 import type { Id, IsoDateTime, LimitSemantics } from './domain';
+import { localIn } from './page-import';
 
 export const FEEDS = ['ticketmaster', 'football'] as const;
 export type FeedId = (typeof FEEDS)[number];
@@ -162,4 +163,16 @@ export interface EventWatch {
   /** Avisos ya enviados, para no repetirlos (también tras reiniciar). */
   sent: string[];
   updatedAt: IsoDateTime;
+}
+
+/**
+ * Desde cuándo se vigila: `days` días antes de `anchorMs` (apertura o evento) a
+ * la misma hora de reloj en `timeZone`, aunque entre medias cambie la hora
+ * (venta el 28 de octubre a las 10:00 → desde el 14 a las 10:00, no a las 11:00).
+ */
+export function watchStartMs(anchorMs: number, days: number, timeZone: string): number {
+  const offsetAt = (ms: number) => Date.parse(`${localIn(ms, timeZone)}:00Z`) - Math.floor(ms / 60_000) * 60_000;
+  const wall = anchorMs + offsetAt(anchorMs) - days * 86_400_000;
+  const first = wall - offsetAt(wall);
+  return wall - offsetAt(first);
 }

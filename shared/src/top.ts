@@ -28,6 +28,16 @@ export const TOP_WATCH_DAYS = 14;
 /** En los grandes partidos, 1 entrada por cuenta: todas las cuentas a la vez, para asegurar la compra. */
 export const TOP_PER_ACCOUNT = 1;
 
+/**
+ * Entradas que pide una operación con «N por cuenta»: N por cada cuenta, sin
+ * pasar del límite por operación del evento (con 10 cuentas y un tope de 8,
+ * 8: las otras dos cuentas quedan de reserva por si alguna falla).
+ */
+export function perAccountRequestedQty(accounts: number, perAccountQty: number, perOperation: number): number {
+  const wanted = Math.max(1, accounts * perAccountQty);
+  return perOperation >= 1 ? Math.min(wanted, perOperation) : wanted;
+}
+
 /** Un gran partido tal y como lo entrega Claude (ya validado). */
 export interface AiTopMatch {
   name: string;

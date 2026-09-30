@@ -5,7 +5,8 @@ interface AskOptions {
   body?: ReactNode;
   confirmText?: string;
   danger?: boolean;
-  input?: { label: string; type?: 'text' | 'number'; defaultValue?: string; placeholder?: string; hint?: string };
+  /** Con `options` es un desplegable (solo se puede elegir uno de ellos; su `hint` sale debajo). */
+  input?: { label: string; type?: 'text' | 'number'; defaultValue?: string; placeholder?: string; hint?: string; options?: Array<{ value: string; label: string; hint?: string }> };
 }
 
 type Resolver = (value: string | boolean | null) => void;
@@ -60,17 +61,29 @@ export function DialogProvider({ children }: { children: ReactNode }) {
               {opts.input ? (
                 <div className="field">
                   <label htmlFor="dlg-input">{opts.input.label}</label>
-                  <input
-                    id="dlg-input"
-                    className="input"
-                    autoFocus
-                    type={opts.input.type ?? 'text'}
-                    value={value}
-                    placeholder={opts.input.placeholder}
-                    onChange={(e) => setValue(e.target.value)}
-                    step="any"
-                  />
-                  {opts.input.hint ? <span className="hint">{opts.input.hint}</span> : null}
+                  {opts.input.options ? (
+                    <select id="dlg-input" className="input" autoFocus value={value} onChange={(e) => setValue(e.target.value)}>
+                      {opts.input.options.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      id="dlg-input"
+                      className="input"
+                      autoFocus
+                      type={opts.input.type ?? 'text'}
+                      value={value}
+                      placeholder={opts.input.placeholder}
+                      onChange={(e) => setValue(e.target.value)}
+                      step="any"
+                    />
+                  )}
+                  {(opts.input.options?.find((o) => o.value === value)?.hint ?? opts.input.hint) ? (
+                    <span className="hint">{opts.input.options?.find((o) => o.value === value)?.hint ?? opts.input.hint}</span>
+                  ) : null}
                 </div>
               ) : null}
             </div>

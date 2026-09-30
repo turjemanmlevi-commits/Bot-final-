@@ -1,7 +1,7 @@
-import { allowedCommands, COMMAND_LABEL, type OperationCommand, type OperationSummary } from '@to/shared';
+import { allowedCommands, COMMAND_LABEL, type CommandResult, type OperationCommand, type OperationSummary } from '@to/shared';
 import { Api } from '../lib/api';
 import { eurosEs, parseEuros } from '../lib/format';
-import { useAction } from '../lib/hooks';
+import { useAction, useToast } from '../lib/hooks';
 import { useDialog } from './Dialog';
 import { Icon, type IconName } from './Icon';
 
@@ -21,6 +21,15 @@ const ICONS: Partial<Record<OperationCommand, IconName>> = {
 };
 
 const PRIMARY: OperationCommand[] = ['validate', 'arm', 'resume', 'close'];
+
+/** Qué ha pasado, en un aviso: el resultado de la comprobación previa se ve aunque se esté en «En directo». */
+function doneText(command: OperationCommand, r: CommandResult): string {
+  if (command !== 'readiness' || !r.readiness) return r.message;
+  const { overall, checks } = r.readiness;
+  const bad = checks.filter((c) => c.status === overall).map((c) => c.label);
+  if (overall === 'PASS') return 'Comprobación previa: todo listo.';
+  return `Comprobación previa: ${overall === 'FAIL' ? 'falla' : 'con avisos'} (${bad.join(', ')}). El detalle, en «Preparación».`;
+}
 const DANGER: OperationCommand[] = ['stop', 'cancel'];
 
 /** Botones de comando: solo los que acepta el estado actual (misma regla que el servidor). */
@@ -38,6 +47,7 @@ export function OperationActions({
   onDone?: () => void;
 }) {
   const { run, busy } = useAction();
+  const toast = useToast();
   const ask = useDialog();
   const commands = allowedCommands(op.state).filter((c) => (only ? only.includes(c) : true));
 
@@ -85,7 +95,8 @@ export function OperationActions({
     }
     const r = await run(() => Api.command(op.id, { command, value, reason }));
     if (r) {
-      if (!r.ok) {
+      if (r.ok) toast(doneText(command, r), command === 'readiness' && r.readiness?.overall === 'FAIL' ? 'error' : 'info');
+      else {
         const issues = r.validation?.issues.filter((i) => i.severity === 'ERROR').map((i) => `• ${i.message}`) ?? [];
         await ask({ title: r.message, body: issues.length ? <div style={{ whiteSpace: 'pre-line' }}>{issues.join('\n')}</div> : undefined, confirmText: 'Entendido' });
       }
