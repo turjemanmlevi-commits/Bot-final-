@@ -39,13 +39,17 @@ export function initAllocation(params: {
   accounts: Array<{ id: Id; groupKey: string }>;
   /** Tope por cuenta de esta operación (más estricto que el oficial), o null. */
   perAccountCap?: number | null;
+  /** Lo que ya tienen otras operaciones del mismo evento, por cuenta y por grupo: el tope es lo que queda. */
+  usedInEvent?: { perAccount: ReadonlyMap<Id, number>; perGroup: ReadonlyMap<string, number> };
 }): AllocationState {
   const perAccount: AllocationState['perAccount'] = {};
   const perGroup: AllocationState['perGroup'] = {};
+  const used = params.usedInEvent;
   for (const a of params.accounts) {
-    const cap = params.perAccountCap && params.perAccountCap > 0 ? Math.min(params.limits.perAccount, params.perAccountCap) : params.limits.perAccount;
+    const official = Math.max(0, params.limits.perAccount - (used?.perAccount.get(a.id) ?? 0));
+    const cap = params.perAccountCap && params.perAccountCap > 0 ? Math.min(official, params.perAccountCap) : official;
     perAccount[a.id] = { cap, used: 0, groupKey: a.groupKey };
-    perGroup[a.groupKey] ??= { cap: params.limits.perGroup, used: 0 };
+    perGroup[a.groupKey] ??= { cap: Math.max(0, params.limits.perGroup - (used?.perGroup.get(a.groupKey) ?? 0)), used: 0 };
   }
   const requestedQty = Math.min(params.requestedQty, params.limits.perOperation);
   return {

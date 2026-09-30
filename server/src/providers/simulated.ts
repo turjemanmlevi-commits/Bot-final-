@@ -221,12 +221,17 @@ export class SimulatedProvider implements ProviderAdapter {
     return this.sessionInfo(accountId);
   }
 
-  /** Acción HUMANA simulada: la persona resolvió el reto en la web del proveedor. */
+  /** Acción HUMANA simulada: la persona resolvió el reto (o volvió a entrar en la cola) en la web del proveedor. */
   humanCompletedChallenge(accountId: Id): void {
     const s = this.session(accountId);
     s.state = 'READY';
     s.challenge = null;
     s.detail = null;
+    // Una cola caducada se vuelve a hacer desde el final (se sortea de nuevo al consultarla).
+    for (const ev of this.events.values()) {
+      const a = ev.accounts.get(accountId);
+      if (a?.queue?.state === 'EXPIRED') a.queue = null;
+    }
   }
 
   /** Simula que el proveedor caduca una sesión (tests y escenarios). */
@@ -234,6 +239,14 @@ export class SimulatedProvider implements ProviderAdapter {
     const s = this.session(accountId);
     s.state = 'EXPIRED';
     s.detail = 'Sesión caducada por el proveedor.';
+  }
+
+  /** Simula que al proveedor se le caduca la cola de una cuenta que aún espera (tests). */
+  expireQueue(accountId: Id): void {
+    for (const ev of this.events.values()) {
+      const q = ev.accounts.get(accountId)?.queue;
+      if (q?.state === 'WAITING') q.state = 'EXPIRED';
+    }
   }
 
   async queueStatus(accountId: Id, eventRef: string): Promise<QueueInfo> {

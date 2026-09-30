@@ -11,7 +11,7 @@ tags:
 | **Reto de sesión** | El proveedor pide CAPTCHA / SMS / 2FA | Entra con esa cuenta, resuélvelo y pulsa *Sesión lista* |
 | **Sesión caducada** | El proveedor cerró la sesión | En el simulador, el sistema intenta reabrir; si pide reto, resuélvelo. En asistencia manual, vuelve a iniciar sesión en la web oficial y pulsa *Sesión lista* |
 | **Sesión no lista** | La web bloqueó la cuenta o dice que ya alcanzó su límite | Esa cuenta deja de participar. Revísala en la web oficial (¿compras previas?) |
-| **Problema de cola** | La cola caducó o se bloqueó para esa cuenta | Vuelve a entrar en la cola con esa cuenta si procede |
+| **Problema de cola** | La cola caducó o se bloqueó para esa cuenta | Vuelve a entrar en la cola con esa cuenta si procede y pulsa **De vuelta en la cola** en *Cuentas*: el sistema la vuelve a consultar y la cuenta sigue en la operación |
 | **Carrito confirmado** | Entradas en un carrito | En asistencia manual, **paga ya** en la web oficial (los carritos caducan en minutos) y pulsa *Ya lo he pagado* |
 | **Carrito asegurado** | Toda la cantidad está en carritos | **Paga cada carrito ya**. Si luego se libera un carrito y la ventana sigue abierta, la operación vuelve a *En ejecución* y reparte lo que falta |
 | **Carrito a punto de caducar** («el carrito caduca a las…») | Queda poco del tiempo indicado (solo si se indicaron los minutos del carrito; avisos a 5, 2 y 1 min por defecto) | Paga y pulsa *Ya lo he pagado*. Si la web te da más tiempo, **⏱ Quedan N min** en Telegram o *Minutos que quedan* en *Carritos*. Si no lo quieres, libéralo |

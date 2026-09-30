@@ -31,6 +31,15 @@ Ejemplo del evento de demo: 4 por titular. «Ana · principal» y «Ana · segun
 
 **Capacidad legal** = min(pedida, tope por operación, Σ grupos min(límite de grupo, Σ límites de sus cuentas)). Se muestra al validar.
 
+## El cupo es del evento
+
+Los límites por cuenta y por grupo son del **evento**, no de cada operación: dos operaciones del mismo evento nunca dan a una cuenta o a un titular más que su límite. Al validar y al armar se suma lo que ya tienen las demás operaciones de ese evento:
+
+- carritos activos, en revisión o pagados, y claims en vuelo o dudosos («No sé» sin comprobar);
+- si la otra operación aún puede comprar (armada, en marcha, en pausa o en *Carrito asegurado*), también lo que su asignación le deja comprar, aunque todavía no haya comprado nada. La primera que se arma se queda con ese cupo.
+
+La asignación arranca con lo que queda. Si a una cuenta no le queda cupo (o le queda menos que el grupo mínimo), al validar sale un aviso y al armar un error `EVENT_QUOTA_USED` con el nombre de la operación que lo tiene. Lo liberado, caducado o rechazado no cuenta. Para recuperar ese cupo: cierra o cancela la otra operación, o libera en *Carritos* lo que no se vaya a pagar.
+
 ## Operaciones sobre la asignación
 
 | Paso | Cuándo |
@@ -40,7 +49,7 @@ Ejemplo del evento de demo: 4 por titular. «Ana · principal» y «Ana · segun
 | `RELEASE` | claim rechazado |
 | `FREEZE` / `UNFREEZE` | claim ambiguo mientras se reconcilia |
 | `COMMIT_EXTERNAL` | una persona marca como pagado un carrito que ya había caducado («Lo pagué a tiempo»): vuelve a contar |
-| `UNCOMMIT` | carrito caducado o liberado con la operación aún viva (si estaba en *Carrito asegurado* y la ventana sigue abierta, vuelve a *En ejecución*) |
+| `UNCOMMIT` | carrito caducado o liberado con la operación aún viva (si estaba en *Carrito asegurado* y la ventana sigue abierta, vuelve a *En ejecución*; si la ventana ya terminó y no queda nada en carrito, queda *Finalizada*) |
 | `SET_REQUESTED` / `SET_MAX_PRICE` | enmiendas (solo a la baja) |
 
 Cada paso incrementa la versión, se guarda con su hash en el journal y el replay los vuelve a aplicar uno a uno.
@@ -48,3 +57,7 @@ Cada paso incrementa la versión, se guarda con su hash en el journal y el repla
 ## Reparto en asistencia manual
 
 En cada ciclo, y en cuanto llega una respuesta, cada cuenta con «Sesión lista», sin kill switch y sin tarea abierta recibe una tarea de su zona actual con `min(lo que le cabe a la cuenta y a su grupo, lo que falta, lo que permite el presupuesto al precio máximo)`. Si con esa cantidad lo que queda sin asignar fuera mayor que 0 pero menor que el grupo mínimo, la tarea se reduce para dejar un grupo mínimo completo a otra cuenta, siempre que ella misma siga llegando al grupo mínimo. Así varias personas compran a la vez: 4 entradas, límite 3 por persona y grupo mínimo 2 → **2 + 2**, no 3 + 1. Una tarea por debajo del grupo mínimo no se crea.
+
+La zona actual de cada cuenta sale de su último claim en la operación: si acabó rechazado («No pude» o «no está» al verificar) pasa a la siguiente zona; si no, sigue en la misma. Así una pausa, un kill switch, un carrito perdido o un reinicio del servidor no devuelven a nadie a una zona que ya descartó.
+
+Si se baja el precio máximo o la cantidad, se avisa a todas las personas de la operación con el plan nuevo («plan cambiado»).

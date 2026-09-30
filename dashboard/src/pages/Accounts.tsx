@@ -354,6 +354,16 @@ export function AccountsPage() {
                                 <Icon name="check" size={13} /> Lista
                               </button>
                             </>
+                          ) : op && !manual && (a.session.queue.state === 'EXPIRED' || a.session.queue.state === 'BLOCKED') ? (
+                            <button
+                              type="button"
+                              className="btn sm primary"
+                              disabled={busy}
+                              onClick={() => void run(() => Api.sessionReady(a.id, 'Ha vuelto a entrar en la cola'), 'La cuenta vuelve a la cola')}
+                              title="La persona ha vuelto a entrar en la cola de la web: el sistema la vuelve a consultar"
+                            >
+                              <Icon name="check" size={13} /> De vuelta en la cola
+                            </button>
                           ) : null}
                           <button type="button" className="btn sm ghost" onClick={() => setEditing(a)} title="Editar">
                             <Icon name="edit" size={14} />

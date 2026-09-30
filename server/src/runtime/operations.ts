@@ -14,6 +14,7 @@ import {
   type CommandResult,
   type EndReason,
   type Id,
+  type LimitSemantics,
   type OperationConfig,
   type OperationDetail,
   type OperationState,
@@ -25,7 +26,7 @@ import {
 } from '@to/shared';
 import { formatMoney } from '@to/shared';
 import { initAllocation } from '../domain/allocation';
-import { groupKeyFor } from '../domain/limits';
+import { eventUsage, groupKeyFor, type EventUsage } from '../domain/limits';
 import { POLICY_VERSION } from '../domain/policy';
 import { evaluateReadiness } from '../domain/readiness';
 import { validateConfig } from '../domain/validation';
@@ -77,6 +78,9 @@ const READINESS_PHASES: Array<{ phase: ReadinessPhase; beforeMs: number }> = [
   { phase: 'T-1h', beforeMs: 3600_000 },
   { phase: 'T-5m', beforeMs: 5 * 60_000 },
 ];
+
+/** Estados en los que una operación aún puede comprar: retiene su parte del cupo del evento. */
+const BUYING_STATES = new Set<OperationState>(['ARMED', 'FROZEN', 'RUNNING', 'PAUSED', 'RECOVERING', 'CART_SECURED']);
 
 const escHtml = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -354,14 +358,20 @@ export class OperationService {
   /**
    * Un carrito de una operación ya «asegurada» se ha perdido (liberado o
    * caducado): si la ventana sigue abierta vuelve a EN MARCHA y el runner
-   * reparte de nuevo lo que falta.
+   * reparte de nuevo lo que falta. Con la ventana ya cerrada no se reparte
+   * nada: si no queda ninguna entrada en carrito, queda finalizada.
    */
   reopenAfterLoss(id: Id, cart: { accountId: Id; qty: number }): void {
     const r = this.ctx.store.operations.get(id);
     if (!r || r.state !== 'CART_SECURED') return;
     this.ctx.alerts.resolveKey(`op:${id}:secured`);
-    if (this.ctx.now() >= this.windowEnd(r)) return;
     const label = this.ctx.store.accounts.get(cart.accountId)?.label ?? cart.accountId;
+    if (this.ctx.now() >= this.windowEnd(r)) {
+      if ((this.ctx.store.allocations.get(id)?.cartedQty ?? 0) === 0) {
+        this.transition(r, 'ENDED', { actor: 'system', endReason: 'RUN_WINDOW_ELAPSED', reason: `Carrito perdido (${label}, ${cart.qty}) con la ventana ya cerrada` });
+      }
+      return;
+    }
     this.transition(r, 'RUNNING', { actor: 'system', reason: `Carrito perdido (${label}, ${cart.qty}): se vuelve a repartir` });
   }
 
@@ -388,7 +398,24 @@ export class OperationService {
         const other = store.operations.get(leased);
         return { id: leased, name: other?.config.name ?? leased, state: other?.state ?? null };
       },
+      eventUsage: event ? this.usedByOthers(r, event.limits.semantics) : undefined,
       forArm,
+    });
+  }
+
+  /**
+   * Cupo del evento que ya ocupan las demás operaciones del mismo evento: sus carritos
+   * y claims y, si aún pueden comprar, lo que su asignación les deja (§17).
+   */
+  private usedByOthers(r: OperationRecord, semantics: LimitSemantics): EventUsage {
+    const { store } = this.ctx;
+    const others = [...store.operations.values()].filter((o) => o.id !== r.id && o.config.eventId === r.config.eventId);
+    return eventUsage({
+      semantics,
+      accounts: store.accounts,
+      operations: others.map((o) => ({ id: o.id, name: o.config.name, allocation: BUYING_STATES.has(o.state) ? (store.allocations.get(o.id) ?? null) : null })),
+      carts: store.carts.values(),
+      claims: store.claims.values(),
     });
   }
 
@@ -530,6 +557,8 @@ export class OperationService {
           limits,
           accounts: accounts.map((a) => ({ id: a.id, groupKey: groupKeyFor(a, limits.semantics) ?? `cuenta:${a.id}` })),
           perAccountCap: r.config.preferences.maxPerAccount ?? null,
+          // El límite es del evento: se empieza con lo que dejan las demás operaciones.
+          usedInEvent: this.usedByOthers(r, limits.semantics),
         });
         this.ctx.store.putAllocation(alloc);
         this.ctx.journal.audit('allocation.init', { state: alloc, hash: hashOf(alloc) }, { operationId: r.id });
@@ -618,6 +647,7 @@ export class OperationService {
         const res = this.ctx.claims.applyAllocation(id, { op: 'SET_REQUESTED', qty: value });
         if (!res.ok) return fail(res.error);
         this.amend(id, actor, 'reduce-qty', alloc.requestedQty, value, req.reason);
+        this.announcePlanChange(r, `Ahora se compran ${value} entradas en total (antes ${alloc.requestedQty}).`);
         this.onProgress(id);
         return ok(`Cantidad reducida a ${value}.`);
       }
@@ -629,6 +659,8 @@ export class OperationService {
         const res = this.ctx.claims.applyAllocation(id, { op: 'SET_MAX_PRICE', maxUnitPrice: value });
         if (!res.ok) return fail(res.error);
         this.amend(id, actor, 'lower-max-price', alloc.maxUnitPrice, value, req.reason);
+        const money = (m: number) => formatMoney(m, r.config.currency);
+        this.announcePlanChange(r, `Precio máximo: ${money(value)} por entrada con gastos (antes ${money(alloc.maxUnitPrice)}). No pongáis en el carrito nada más caro.`);
         return ok(`Precio máximo bajado a ${formatMoney(value, r.config.currency)}.`);
       }
 
@@ -656,6 +688,12 @@ export class OperationService {
     const r = this.get(id);
     this.save({ ...r, amendments: [...r.amendments, { at: iso(this.ctx.now()), actor, kind, from, to, reason: reason ?? null }] });
     this.ctx.journal.audit('operation.amended', { kind, from, to }, { operationId: id, actor });
+  }
+
+  /** Asistencia manual: cada persona ya tiene su plan (en «Inicia sesión» o en su tarea) y hay que decirle que cambió. */
+  private announcePlanChange(r: OperationRecord, text: string): void {
+    if (!this.manual(r)) return;
+    this.ctx.notifier?.announce?.(`📝 <b>${escHtml(r.config.name)}: plan cambiado</b>\n${text}`, r.config.accountIds, null);
   }
 
   // -------------------------------------------------------------------------
