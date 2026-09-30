@@ -10,6 +10,7 @@
  * Nunca lanza por una nota mal escrita: la registra como error y sigue.
  */
 
+import type { Stats } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -121,28 +122,55 @@ async function walk(root: string, rel = ''): Promise<string[]> {
   return out;
 }
 
+/** Lecturas a la vez al compilar (una a una, el disco espera más de lo que se tarda en interpretar). */
+const READ_CONCURRENCY = 32;
+/** Propiedades ya interpretadas por contenido (sha256): una nota que no ha cambiado no se vuelve a parsear. */
+const parsedByContent = new Map<string, Record<string, unknown>>();
+const PARSED_MAX = 20_000;
+
 export async function readVaultNotes(vaultDir: string, issues: VaultIssue[]): Promise<VaultNote[]> {
   const files = await walk(vaultDir);
+  const loaded: Array<{ text: string; st: Stats } | { error: Error }> = new Array(files.length);
+  let next = 0;
+  const reader = async () => {
+    for (let i = next++; i < files.length; i = next++) {
+      const abs = path.join(vaultDir, files[i] as string);
+      try {
+        const [text, st] = await Promise.all([readFile(abs, 'utf8'), stat(abs)]);
+        loaded[i] = { text, st };
+      } catch (err) {
+        loaded[i] = { error: err as Error };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, files.length) }, reader));
+  // Se interpretan en el orden de siempre: mismos avisos y misma salida que leyendo una a una.
   const notes: VaultNote[] = [];
-  for (const file of files) {
-    const abs = path.join(vaultDir, file);
-    let text: string;
-    let st;
-    try {
-      [text, st] = await Promise.all([readFile(abs, 'utf8'), stat(abs)]);
-    } catch (err) {
-      issues.push({ file, severity: 'ERROR', message: `No se pudo leer: ${(err as Error).message}` });
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i] as string;
+    const r = loaded[i] as { text: string; st: Stats } | { error: Error };
+    if ('error' in r) {
+      issues.push({ file, severity: 'ERROR', message: `No se pudo leer: ${r.error.message}` });
       continue;
     }
-    const { yaml } = splitFrontmatter(text);
+    const { text, st } = r;
+    const hash = sha256(text);
     let data: Record<string, unknown> = {};
-    if (yaml !== null) {
-      try {
-        data = parseFrontmatter(yaml);
-      } catch (err) {
-        issues.push({ file, severity: 'ERROR', message: `Frontmatter YAML inválido: ${(err as Error).message.split('\n')[0]}` });
-        continue;
+    const cached = parsedByContent.get(hash);
+    if (cached) {
+      data = structuredClone(cached);
+    } else {
+      const { yaml } = splitFrontmatter(text);
+      if (yaml !== null) {
+        try {
+          data = parseFrontmatter(yaml);
+        } catch (err) {
+          issues.push({ file, severity: 'ERROR', message: `Frontmatter YAML inválido: ${(err as Error).message.split('\n')[0]}` });
+          continue;
+        }
       }
+      if (parsedByContent.size >= PARSED_MAX) parsedByContent.clear();
+      parsedByContent.set(hash, structuredClone(data));
     }
     const posix = toPosix(file);
     const dir = posix.includes('/') ? posix.slice(0, posix.lastIndexOf('/')) : '';
@@ -153,7 +181,7 @@ export async function readVaultNotes(vaultDir: string, issues: VaultIssue[]): Pr
       data,
       mtimeMs: st.mtimeMs,
       birthtimeMs: st.birthtimeMs > 0 ? st.birthtimeMs : st.mtimeMs,
-      contentHash: sha256(text).slice(0, 16),
+      contentHash: hash.slice(0, 16),
     });
   }
   return notes;
