@@ -169,6 +169,8 @@ export const Api = {
   gates: () => api<GatesReport | null>('/api/gates'),
   runGates: (full = false) => post<GatesReport>(`/api/gates/run${full ? '?full=1' : ''}`),
   seedDemo: (body: { startInSeconds?: number; scenarioId?: string }) => post<{ operationId: string; message: string }>('/api/demo/seed', body),
+  /** Prueba real con el Real Madrid: arma una operación de prueba con las cuentas del Real Madrid. */
+  realTest: (body: { startInSeconds?: number }) => post<{ operationId: string; eventName: string; t0: string; telegram: boolean; message: string }>('/api/demo/real-test', body),
   /** Crea la nota del evento en el vault (20 Eventos) y recompila. */
   createEventNote: (input: EventNoteInput) => post<EventNoteResult>('/api/vault/events', input),
   /** Actualiza las propiedades de la nota del evento conservando el resto. */

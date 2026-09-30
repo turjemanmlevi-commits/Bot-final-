@@ -19,6 +19,7 @@ import https from 'node:https';
 import type { Account, AiStatus, Alert, Cart, HumanTask, TelegramChatSeen, TelegramStatus } from '@to/shared';
 import { formatMoney, OPERATION_STATE_LABEL } from '@to/shared';
 import type { Notifier } from '../runtime/context';
+import { seedRealTest } from '../runtime/prueba';
 import type { Runtime } from '../runtime/runtime';
 import { log } from '../util/log';
 import { TelegramEventFlow } from './event-flow';
@@ -89,6 +90,7 @@ export const HELP =
   '<b>Comandos</b>\n' +
   '/evento — crear un evento con Claude: web de venta → evento → dónde sentaros (chat principal)\n' +
   '/top — los grandes partidos del año (Clásico, Champions, finales…), listos para preparar (chat principal)\n' +
+  '/prueba — prueba real con el Real Madrid: tus cuentas, 1 entrada cada una, la venta abre en 2 min (chat principal)\n' +
   '/tareas — tus tareas abiertas, con botones\n' +
   '/estado — cómo va cada operación y si Claude está conectado\n' +
   '/pausa — pausar lo que está en marcha (chat principal)\n' +
@@ -99,6 +101,7 @@ export const HELP =
 export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: 'evento', description: 'Crear un evento con Claude (chat principal)' },
   { command: 'top', description: 'Grandes partidos del año (chat principal)' },
+  { command: 'prueba', description: 'Prueba real con el Real Madrid: abre en 2 min (chat principal)' },
   { command: 'tareas', description: 'Tus tareas abiertas, con botones' },
   { command: 'estado', description: 'Cómo va cada operación y si Claude está conectado' },
   { command: 'ayuda', description: 'Cómo responder rápido' },
@@ -1112,6 +1115,17 @@ export class TelegramNotifier implements Notifier {
       } else {
         rt.ctx.safety.setKillSwitch('GLOBAL', null, true, 'Telegram /parar_todo', 'telegram');
         this.send(chat, '🛑 Kill switch GLOBAL activado: no se envía ninguna acción automática. Suéltalo desde el dashboard (Seguridad).');
+      }
+    } else if (cmd === '/prueba') {
+      if (!main) {
+        this.send(chat, 'Solo el chat principal puede lanzar la prueba.');
+        return;
+      }
+      try {
+        const r = await seedRealTest(rt, { actor: 'telegram' });
+        this.send(chat, `🧪 ${esc(r.message)}`);
+      } catch (err) {
+        this.send(chat, `❌ ${esc((err as Error).message)}`);
       }
     } else if (cmd === '/ayuda' || cmd === '/start' || cmd === '/help') {
       this.send(chat, HELP);

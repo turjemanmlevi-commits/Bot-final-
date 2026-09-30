@@ -97,6 +97,17 @@ Con estas ticketeras el sistema trabaja en **asistencia manual**. En el dashboar
 
 Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
+### Prueba real con el Real Madrid en un clic
+
+Botón **Prueba Real Madrid** (menú de la izquierda y Resumen), o **`/prueba`** en el chat principal de Telegram. Usa **tus cuentas del Real Madrid** de *Cuentas* (no crea cuentas de mentira; las de otras webs no se tocan), elige un partido de prueba del vault (etiqueta `prueba`) que **ya esté a la venta** y en el que a esas cuentas les quede cupo, y arma una operación de **1 entrada por cuenta**, máximo 60 € por entrada, que abre en 2 minutos (en el dashboard eliges los minutos).
+
+1. Al momento te llega por Telegram el **plan** con **✅ Sesión lista**: entra en realmadrid.com con tu cuenta y púlsalo.
+2. A la hora llega **«🚦 ¡Abre la venta!»** y tu tarea (zona, 1 entrada, precio máximo) con el botón a la web oficial. O pulsa **Empezar ya** en la operación.
+3. Añade la entrada al carrito en la web oficial y pulsa **✅ 1 en carrito** (o **❌ No pude**: te llega la siguiente zona).
+4. Si no la quieres, **no pagues** y pulsa **Liberar** en *Carritos*; si la pagas, **💳 Ya lo he pagado**. Después, **Parar** y **Cerrar** la operación (una prueba ya terminada se cierra sola al lanzar la siguiente).
+
+El cupo es de 1 entrada por persona y partido: cada prueba con carrito ocupa el de ese partido y la siguiente va a otro partido de prueba. Si una cuenta está en una compra de verdad, la prueba no la usa.
+
 > La directiva europea Ómnibus prohíbe revender entradas compradas con medios automatizados que eludan los límites o controles del vendedor. Aquí todo lo hace una persona. Cada cuenta debe ser de una persona real que va a asistir; las entradas de socio del Real Madrid son personales e intransferibles.
 
 ## ⭐ Grandes partidos
@@ -144,7 +155,7 @@ Cada persona que vaya a comprar pulsa **Iniciar** en el bot y se le asigna su cu
 
 Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad**, de la cantidad pedida a 1 (`✅ 2 en carrito`, `✅ 1 en carrito`; en filas de 5, hasta 20), **❌ No pude** y **❓ No sé**. Tras «N en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (`5`, `8`, `10`, `15` o `20 min`) junto a **💳 Ya lo he pagado**. Los avisos de carrito a punto de caducar y el de «se acabó el tiempo del carrito, ¿lo has pagado?» llegan con **💳 Ya lo he pagado** y **⏱ Quedan 5 / 10 / 15 min**. Cuando una tarea se responde (en Telegram o en el dashboard), sus botones desaparecen en todos los chats. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard. Cada «**N entradas en carrito**» y el «**¡N entradas aseguradas en carrito!**» llegan con el botón **🛒 Ir al carrito en la web oficial** (la página de compra del evento). Con el simulador, el enlace del carrito va como texto (`http://localhost:8787/sim/cart/…`): Telegram no admite botones a direcciones del propio PC; ábrelo en el navegador del ordenador.
 
-Cada cuenta puede tener su propio chat (**Ajustes · Telegram → Asignar a una cuenta**, o **Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos (salen en el menú del bot): `/tareas`, `/estado` (en el chat principal dice además si **Claude está conectado**, con qué modelo y lo gastado: el bot usa la misma clave que el dashboard), `/ayuda`, `/id`; y solo en el chat principal, `/evento` (crear un evento con Claude), `/pausa` y `/parar_todo`.
+Cada cuenta puede tener su propio chat (**Ajustes · Telegram → Asignar a una cuenta**, o **Cuentas → editar → Chat de Telegram**): esa persona solo recibe y responde sus tareas. Comandos (salen en el menú del bot): `/tareas`, `/estado` (en el chat principal dice además si **Claude está conectado**, con qué modelo y lo gastado: el bot usa la misma clave que el dashboard), `/ayuda`, `/id`; y solo en el chat principal, `/evento` (crear un evento con Claude), `/prueba` (prueba real con el Real Madrid en un clic), `/pausa` y `/parar_todo`.
 
 Guía: `vault/00 Guía/Configurar Telegram.md`.
 

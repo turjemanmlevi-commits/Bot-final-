@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { DialogProvider, useDialog } from './components/Dialog';
 import { Icon, type IconName } from './components/Icon';
+import { RealTestButton } from './components/RealTestButton';
 import { Api, getActor, setActor, setToken } from './lib/api';
 import { fmtTime } from './lib/format';
 import { ToastProvider, useAction, useNow } from './lib/hooks';
@@ -196,6 +197,7 @@ function Shell() {
             <NavItem to="/ajustes" icon="gear" label="Ajustes · Telegram" hot={Boolean(s.system && !s.system.telegram.enabled)} />
           </div>
           <div className="nav-foot">
+            <RealTestButton />
             <button type="button" className="btn" onClick={() => void newDemo()} disabled={busy}>
               <Icon name="demo" size={15} /> Nueva demo
             </button>

@@ -148,6 +148,11 @@ export const DemoSeedSchema = z.object({
   seed: z.number().int().optional(),
 });
 
+/** Prueba real con el Real Madrid en un clic: minutos hasta la venta de prueba. */
+export const RealTestSchema = z.object({
+  startInSeconds: z.number().int().min(20).max(3600).optional(),
+});
+
 export type OperationConfigInput = z.infer<typeof OperationConfigSchema>;
 export type AccountInput = z.infer<typeof AccountInputSchema>;
 export type AccountPatch = z.infer<typeof AccountPatchSchema>;

@@ -19,6 +19,7 @@ import {
   CartMarkSchema,
   CommandRequestSchema,
   DemoSeedSchema,
+  RealTestSchema,
   EventNoteInputSchema,
   FEEDS,
   FeedKeySchema,
@@ -53,6 +54,7 @@ import { AccountError } from '../runtime/accounts';
 import { CartError } from '../runtime/carts';
 import { seedDemo } from '../runtime/demo';
 import { OperationError } from '../runtime/operations';
+import { seedRealTest } from '../runtime/prueba';
 import { TaskError } from '../runtime/tasks';
 import type { TelegramControl } from '../telegram/control';
 import { log } from '../util/log';
@@ -689,6 +691,15 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
       return c.json(await seedDemo(runtime, { ...b, actor: actorOf(c) }));
     } catch (err) {
       throw new ApiError(409, 'DEMO_FAILED', (err as Error).message);
+    }
+  });
+
+  http.post('/api/demo/real-test', async (c) => {
+    const b = await body(c, RealTestSchema);
+    try {
+      return c.json(await seedRealTest(runtime, { ...b, actor: actorOf(c) }));
+    } catch (err) {
+      throw new ApiError(409, 'REAL_TEST_FAILED', (err as Error).message);
     }
   });
 

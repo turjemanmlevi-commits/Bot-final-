@@ -30,6 +30,10 @@ Las entradas de socio y de Madridista son personales: en la prueba, que cada per
 3. **Cuentas** (*Cuentas → Nueva cuenta*): una por persona que participa, con un alias. Para la prueba bastan 2 o 3 (o las 5 que vayáis a usar).
 4. **¿El bot tiene Claude?** Escribe `/estado` en tu chat principal: la primera línea dice **«🤖 Claude: conectado»** (con el modelo y lo gastado) o **«sin conectar»**. El bot usa la misma clave que el dashboard (*Ajustes · Claude (IA)*); sin ella, `/evento` y `/top` no funcionan, pero los avisos y las tareas sí.
 
+## En un clic
+
+Botón **Prueba Real Madrid** en el dashboard (menú de la izquierda o *Resumen*), o **`/prueba`** en tu chat principal de Telegram. Con **tus cuentas del Real Madrid** de *Cuentas*, elige un partido de prueba que ya esté a la venta y con cupo, y arma **1 entrada por cuenta** (máximo 60 €) con la venta de prueba dentro de 2 minutos. Te llega al momento el plan por Telegram: entra en realmadrid.com, pulsa **✅ Sesión lista** y sigue desde el paso 7. Si quieres elegir tú el partido, las zonas o el precio, hazlo a mano:
+
 ## Paso a paso
 
 1. **El evento**: *Eventos → Nuevo evento* → web **Real Madrid** → Claude busca sus eventos → elige el partido. Debajo sale lo que ha costado la consulta.

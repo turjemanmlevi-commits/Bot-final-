@@ -4,6 +4,7 @@ import { AlertRow, sortAlerts } from '../components/AlertList';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { OperationHero } from '../components/OperationHero';
+import { RealTestButton } from '../components/RealTestButton';
 import { Callout, Card, CartPill, Empty, Pill, Stat } from '../components/ui';
 import { Api } from '../lib/api';
 import { fmtCountdown, formatMoney, fmtDateTime, fmtRel } from '../lib/format';
@@ -72,7 +73,8 @@ export function OverviewPage() {
             title="Nada en marcha"
             action={
               <div className="row" style={{ justifyContent: 'center' }}>
-                <button type="button" className="btn primary lg" onClick={() => void newDemo()} disabled={busy}>
+                <RealTestButton className="btn primary lg" size={17} />
+                <button type="button" className="btn lg" onClick={() => void newDemo()} disabled={busy}>
                   <Icon name="demo" size={17} /> Crear demo (arranca en 60 s)
                 </button>
                 <Link className="btn lg" to="/operaciones/nueva">
@@ -102,6 +104,7 @@ export function OverviewPage() {
           </div>
         </div>
         <div className="actions">
+          <RealTestButton />
           <button type="button" className="btn" onClick={() => void newDemo()} disabled={busy}>
             <Icon name="demo" size={15} /> Nueva demo
           </button>
