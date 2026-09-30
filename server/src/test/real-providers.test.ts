@@ -346,7 +346,10 @@ describe('compra real coordinada (API + asistencia manual)', () => {
     const running = await call<OperationDetail>('GET', `/api/operations/${opId}`);
     assert.equal(running.json.summary.state, 'RUNNING');
     const opening = announced.filter((a) => /Abre la venta/.test(a.text));
-    assert.equal(opening.length, 1, 'aviso de apertura a todo el grupo');
+    // Primero al chat principal y después a quien no recibe tarea (aquí las dos: ninguna tiene la sesión lista).
+    assert.equal(opening.length, 2, 'aviso de apertura a todo el grupo');
+    assert.deepEqual(opening[0]?.accountIds, []);
+    assert.deepEqual(opening[1]?.accountIds, [ana.json.id, bea.json.id]);
     assert.match(opening[0]?.text ?? '', /2 cuentas sin «Sesión lista»/);
     assert.equal(opening[0]?.link, rmEvent.url);
     // Antes de abrir: «entrad ya en la web» a quien no tenía la sesión lista (al armar, a T−5, y a T−2).

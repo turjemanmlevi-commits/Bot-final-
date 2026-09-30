@@ -69,6 +69,9 @@ const STALE_AFTER_AUTOMATION = new Set<AlertKind>([
  */
 const ENTRY_REMINDERS_MIN = [30, 10, 2];
 
+/** Antelación con la que se abren las conexiones de Telegram antes de T0 (ms). */
+const PREWARM_MS = 3000;
+
 const READINESS_PHASES: Array<{ phase: ReadinessPhase; beforeMs: number }> = [
   { phase: 'T-12h', beforeMs: 12 * 3600_000 },
   { phase: 'T-1h', beforeMs: 3600_000 },
@@ -249,19 +252,13 @@ export class OperationService {
         break;
       case 'RUNNING':
         ctx.metrics.start(r.id);
+        // Primera vez en marcha en asistencia manual: «¡Abre la venta!» y las tareas (openSale arranca el runner).
+        if (firstStart && this.manual(r)) {
+          this.openSale(r);
+          break;
+        }
         ctx.runners.start(r.id);
-        if (firstStart && ctx.runners.kind(r.id) === 'MANUAL') {
-          const event = ctx.store.events.get(r.config.eventId);
-          const provider = ctx.registry.descriptor(r.config.providerId)?.name ?? r.config.providerId;
-          const notReady = r.config.accountIds.filter((id) => ctx.store.accounts.get(id)?.session.state !== 'READY').length;
-          const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          ctx.notifier?.announce?.(
-            `🚦 <b>¡Abre la venta! ${esc(r.config.name)}</b>\nEntrad ya en la web oficial de ${esc(provider)} (cola incluida). Las tareas con la zona, la cantidad y el precio máximo llegan ahora.` +
-              (notReady > 0 ? `\n⚠️ ${notReady} cuenta${notReady === 1 ? '' : 's'} sin «Sesión lista»: inicia sesión y púlsalo para recibir tu tarea.` : ''),
-            r.config.accountIds,
-            event?.url ?? ctx.registry.authorization(r.config.providerId)?.url ?? null,
-          );
-        } else if (from === 'PAUSED' && this.manual(r)) {
+        if (from === 'PAUSED' && this.manual(r)) {
           ctx.notifier?.announce?.(`▶️ <b>${escHtml(r.config.name)}: seguimos</b>\nLa operación vuelve a estar en marcha: continuad con vuestra tarea.`, r.config.accountIds, null);
         }
         break;
@@ -678,6 +675,8 @@ export class OperationService {
   }
 
   private readonly wakeTimers = new Map<string, TimerHandle>();
+  /** Operaciones cuyas conexiones de Telegram ya se abrieron para T0 («operación@t0»). */
+  private readonly prewarmed = new Set<string>();
 
   /**
    * Ejecuta el scheduler justo en `atMs` (congelado y T0 al milisegundo, sin
@@ -712,6 +711,11 @@ export class OperationService {
           // el despertador sigue siempre al T0 efectivo vigente (no crea timers repetidos).
           if (r.state === 'ARMED') this.wakeAt(r.id, t0 - r.config.freezeLeadSeconds * 1000);
           if (now < t0) this.wakeAt(r.id, t0);
+          // Unos segundos antes de T0 se abren las conexiones con Telegram que se usarán en la apertura.
+          if (now >= t0 - PREWARM_MS && now < t0 && !this.prewarmed.has(`${r.id}@${r.config.t0}`)) {
+            this.prewarmed.add(`${r.id}@${r.config.t0}`);
+            this.ctx.notifier?.prewarm?.(r.config.accountIds);
+          }
           const last = this.lastClockSync.get(r.config.providerId) ?? 0;
           if (now - last > this.ctx.cfg.clockSyncMs) {
             this.lastClockSync.set(r.config.providerId, now);
@@ -755,6 +759,31 @@ export class OperationService {
         this.ctx.journal.audit('scheduler.error', { error: (err as Error).message }, { operationId: r.id });
       }
     }
+  }
+
+  /**
+   * T0 en asistencia manual (o la reanudación de una operación retenida en T0). Primero
+   * «¡Abre la venta!» en el chat principal y después las tareas: cada persona recibe UN mensaje,
+   * su tarea con el aviso dentro (sin esperar a otro mensaje). El aviso aparte va también a
+   * quien no recibe tarea (sesión sin confirmar o sin entradas que repartirle).
+   */
+  private openSale(r: OperationRecord): void {
+    const { ctx } = this;
+    const event = ctx.store.events.get(r.config.eventId);
+    const provider = ctx.registry.descriptor(r.config.providerId)?.name ?? r.config.providerId;
+    const notReady = r.config.accountIds.filter((id) => ctx.store.accounts.get(id)?.session.state !== 'READY').length;
+    const text =
+      `🚦 <b>¡Abre la venta! ${escHtml(r.config.name)}</b>\nEntrad ya en la web oficial de ${escHtml(provider)} (cola incluida). Las tareas con la zona, la cantidad y el precio máximo llegan ahora.` +
+      (notReady > 0 ? `\n⚠️ ${notReady} cuenta${notReady === 1 ? '' : 's'} sin «Sesión lista»: inicia sesión y púlsalo para recibir tu tarea.` : '');
+    const link = event?.url ?? ctx.registry.authorization(r.config.providerId)?.url ?? null;
+    ctx.notifier?.announce?.(text, [], link);
+    ctx.runners.start(r.id);
+    const withTask = new Set<Id>();
+    for (const t of ctx.store.humanTasks.values()) {
+      if (t.operationId === r.id && t.kind === 'ADD_TO_CART' && t.state === 'OPEN') withTask.add(t.accountId);
+    }
+    const rest = r.config.accountIds.filter((id) => !withTask.has(id));
+    if (rest.length > 0) ctx.notifier?.announce?.(text, rest, link, { mainChat: false });
   }
 
   /** «Entrad ya en la web oficial» a las cuentas sin «Sesión lista», 30, 10 y 2 minutos antes de T0. */

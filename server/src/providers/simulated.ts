@@ -501,8 +501,12 @@ export class SimulatedProvider implements ProviderAdapter {
   }
 
   async serverTime(): Promise<number> {
-    await this.clock.sleep(10);
-    return this.clock.now() + this.skewMs;
+    // Como un servidor real, la hora se lee a mitad del viaje de ida y vuelta: el desfase que mide
+    // el runtime no lleva el sesgo de media latencia que adelantaba el arranque ~5 ms a T0.
+    await this.clock.sleep(5);
+    const t = this.clock.now() + this.skewMs;
+    await this.clock.sleep(5);
+    return t;
   }
 
   // -------------------------------------------------------------------------

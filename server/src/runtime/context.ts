@@ -28,8 +28,10 @@ export interface Notifier {
   sendTest?(chatId?: string | null): Promise<{ ok: boolean; message: string }>;
   /** Una tarea se ha cerrado (por cualquier vía): quitar sus botones donde se enviaron. */
   taskClosed?(task: import('@to/shared').HumanTask): void;
-  /** Aviso a todo el grupo (chat principal + chats de esas cuentas), con enlace opcional. */
-  announce?(text: string, accountIds: import('@to/shared').Id[], link?: string | null): void;
+  /** Aviso a todo el grupo (chat principal + chats de esas cuentas), con enlace opcional. `mainChat: false`: sin el principal. */
+  announce?(text: string, accountIds: import('@to/shared').Id[], link?: string | null, opts?: { mainChat?: boolean }): void;
+  /** Unos segundos antes de T0: abre las conexiones con Telegram que se usarán en la apertura. */
+  prewarm?(accountIds: import('@to/shared').Id[]): void;
   /** Una cuenta acaba de quedar vinculada a su chat de Telegram. */
   accountLinked?(account: import('@to/shared').Account): void;
 }

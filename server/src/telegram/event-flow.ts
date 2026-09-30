@@ -67,7 +67,14 @@ const MAX_SESSIONS = 20;
 const SESSION_MS = 3 * 3_600_000;
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+/** Recorta sin partir un emoji: medio par sustituto de UTF-16 no es UTF-8 válido y Telegram rechazaría el mensaje entero. */
+const cut = (s: string, n: number) => {
+  if (s.length <= n) return s;
+  let end = n - 1;
+  const last = s.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${s.slice(0, end)}…`;
+};
 
 const DAY_FMT = new Intl.DateTimeFormat('es-ES', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 const LONG_FMT = new Intl.DateTimeFormat('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
