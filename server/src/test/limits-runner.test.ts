@@ -3,7 +3,8 @@
  * titular es del evento (se reparte entre sus operaciones), cada persona sigue
  * por su zona aunque la operación se pause, se reanude o el servidor se reinicie,
  * una operación asegurada que lo pierde todo con la ventana cerrada queda
- * finalizada y bajar el precio o la cantidad se avisa a las personas.
+ * finalizada, bajar el precio o la cantidad se avisa a las personas y, en el
+ * simulador, quien vuelve a entrar en una cola caducada sigue comprando.
  */
 
 import assert from 'node:assert/strict';
@@ -14,7 +15,7 @@ import { after, before, describe, it } from 'node:test';
 import type { HumanTask, Id, OperationConfig } from '@to/shared';
 import { formatMoney } from '@to/shared';
 import { writeFixtureVault } from '../gates/fixtures';
-import { createHarness, type Harness } from '../gates/harness';
+import { createHarness, simConfig, type Harness } from '../gates/harness';
 import { MemoryDriver } from '../store/drivers';
 import { iso } from '../util/time';
 
@@ -359,6 +360,34 @@ describe('enmiendas', () => {
       const adds = openTasks(h, 'ADD_TO_CART');
       assert.deepEqual(adds.map((t) => t.target?.maxUnitPrice), [6_000]);
       assert.equal(adds.reduce((n, t) => n + (t.target?.qty ?? 0), 0), 2);
+    } finally {
+      await h.stop();
+    }
+  });
+});
+
+describe('colas del simulador', () => {
+  it('quien vuelve a entrar en una cola caducada y lo confirma sigue en la operación', async () => {
+    const h = await createHarness(dir, { seed: 3 });
+    const rt = h.app.runtime;
+    try {
+      const sim = (label: string, holderRef: string) => rt.ctx.accounts.create({ label, providerId: 'sim', holderRef, verification: 'VERIFIED' }, 't');
+      const [ana, eva] = [sim('Ana', 'ana'), sim('Eva', 'eva')];
+      // 8 entradas y 4 por titular: sin Eva no se llega.
+      const op = await armed(h, simConfig([ana.id, eva.id], h.clock.now(), { requestedQty: 8, simulation: { scenarioId: 'tranquilo', seed: 3 } }));
+      const queue = () => rt.store.accounts.get(eva.id)?.session.queue.state;
+      assert.ok(await h.clock.runUntil(() => queue() === 'WAITING', 120_000, 10), 'Eva entra en la cola en T0');
+      rt.ctx.sim?.expireQueue(eva.id);
+      assert.ok(await h.clock.runUntil(() => queue() === 'EXPIRED', 5_000, 10));
+      const problem = () => [...rt.store.alerts.values()].find((a) => a.kind === 'QUEUE_PROBLEM' && a.accountId === eva.id);
+      assert.equal(problem()?.state, 'OPEN');
+
+      rt.ctx.accounts.humanReady(eva.id, 'eva', 'He vuelto a entrar en la cola');
+      assert.notEqual(queue(), 'EXPIRED');
+      assert.equal(problem()?.state, 'RESOLVED');
+      const evaCarted = () => [...rt.store.carts.values()].filter((c) => c.accountId === eva.id).reduce((n, c) => n + c.qty, 0);
+      assert.ok(await h.clock.runUntil(() => evaCarted() > 0, 60_000, 50), `Eva vuelve a comprar (cola ${queue()}, operación ${rt.ctx.ops.get(op.id).state})`);
+      assert.deepEqual(h.violations, []);
     } finally {
       await h.stop();
     }

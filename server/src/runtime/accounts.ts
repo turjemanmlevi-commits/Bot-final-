@@ -181,14 +181,14 @@ export class AccountService {
     });
   }
 
-  /** Una persona confirma que la sesión está lista (resolvió el reto o inició sesión). */
+  /** Una persona confirma que la sesión está lista (resolvió el reto, inició sesión o volvió a entrar en la cola). */
   humanReady(accountId: Id, actor: string, note?: string): Account {
     const a = this.get(accountId);
     this.ctx.sim?.humanCompletedChallenge(accountId);
     this.ctx.journal.audit('session.human_ready', { accountId, note: note ?? null }, { operationId: this.activeOperation(accountId), actor });
     const manual = !this.ctx.registry.automated(a.providerId, 'queue.status');
     const opId = this.activeOperation(accountId);
-    const next = this.setSession(accountId, {
+    let next = this.setSession(accountId, {
       state: 'READY',
       challenge: null,
       detail: note ?? 'Confirmada por una persona',
@@ -196,6 +196,12 @@ export class AccountService {
       // En asistencia manual la cola la gestiona la persona: se considera dentro.
       ...(manual ? { queue: { state: 'PASSED', position: null, etaMs: null, updatedAt: iso(this.ctx.now()) } } : {}),
     });
+    // Cola automática caducada o bloqueada: la persona ha vuelto a entrar y se consulta de nuevo.
+    if (!manual && opId && (a.session.queue.state === 'EXPIRED' || a.session.queue.state === 'BLOCKED')) {
+      this.resetQueue(accountId);
+      this.ctx.alerts.resolveWhere((al) => al.accountId === accountId && al.kind === 'QUEUE_PROBLEM', actor);
+      next = this.get(accountId);
+    }
     if (opId) this.ctx.runners.nudge(opId);
     return next;
   }
@@ -235,7 +241,7 @@ export class AccountService {
         kind: 'QUEUE_PROBLEM',
         severity: 'WARNING',
         title: `${a.label}: cola ${q.state === 'EXPIRED' ? 'caducada' : 'bloqueada'}`,
-        message: 'Esta cuenta no seguirá en la operación salvo que una persona vuelva a entrar en la cola.',
+        message: 'Esta cuenta no sigue en la operación hasta que una persona vuelva a entrar en la cola y lo confirme en Cuentas («De vuelta en la cola»).',
         actions: ['OPEN_SESSION'],
         operationId,
         accountId,
