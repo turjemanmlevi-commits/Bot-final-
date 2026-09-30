@@ -333,14 +333,22 @@ export function ViewDots({ value }: { value: number | undefined }) {
 // Tablero de salidas: cuenta atrás a T0
 // ---------------------------------------------------------------------------
 
-export function T0Board({ t0, now, size = 'lg', caption }: { t0: string; now: number; size?: 'lg' | 'sm'; caption?: string }) {
+/** mode 'window': con la operación en marcha, `t0` es el fin de la ventana y el tablero cuenta lo que queda de ella (no a T0). */
+export function T0Board({ t0, now, size = 'lg', caption, mode = 't0' }: { t0: string; now: number; size?: 'lg' | 'sm'; caption?: string; mode?: 't0' | 'window' }) {
   const diff = Date.parse(t0) - now;
   const text = formatClock(Math.abs(diff)).padStart(5, '0');
+  const label =
+    mode === 'window'
+      ? diff >= 0
+        ? `Quedan ${text} de ventana`
+        : `La ventana terminó hace ${text}`
+      : `${diff >= 0 ? 'Faltan' : 'Han pasado'} ${text} ${diff >= 0 ? 'para' : 'desde'} T0`;
   return (
     <div className="stack" style={{ gap: 6 }}>
-      <div className={`board ${size === 'sm' ? 'sm' : ''}`} role="timer" aria-label={`${diff >= 0 ? 'Faltan' : 'Han pasado'} ${text} ${diff >= 0 ? 'para' : 'desde'} T0`}>
+      <div className={`board ${size === 'sm' ? 'sm' : ''}`} role="timer" aria-label={label}>
         <span className="board-prefix" aria-hidden>
-          T{diff >= 0 ? '−' : '+'}
+          {mode === 'window' ? 'FIN' : 'T'}
+          {diff >= 0 ? '−' : '+'}
         </span>
         {text.split('').map((c, i) => (
           <span key={i} className={`flap ${c === ':' ? 'sep' : ''}`} aria-hidden>

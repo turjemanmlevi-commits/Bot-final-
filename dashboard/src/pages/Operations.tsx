@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { END_REASON_LABEL } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { Card, Empty, Meter, OpStatePill } from '../components/ui';
 import { fmtDateTime, fmtRel } from '../lib/format';
@@ -67,6 +68,11 @@ export function OperationsPage() {
                   <tr key={o.id} className="clickable" onClick={() => navigate(`/operaciones/${o.id}`)}>
                     <td>
                       <OpStatePill state={o.state} />
+                      {o.state === 'ENDED' && o.endReason ? (
+                        <div className="small muted" style={{ marginTop: 4, minWidth: 140 }}>
+                          {END_REASON_LABEL[o.endReason]}
+                        </div>
+                      ) : null}
                     </td>
                     <td>
                       <Link to={`/operaciones/${o.id}`} onClick={(e) => e.stopPropagation()}>

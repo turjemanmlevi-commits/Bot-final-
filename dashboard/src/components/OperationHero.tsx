@@ -1,11 +1,11 @@
 import { Link } from 'react-router';
-import type { OperationSummary } from '@to/shared';
+import { END_REASON_LABEL, pausedReasonText, type OperationSummary } from '@to/shared';
 import { formatMoney } from '../lib/format';
 import { useNow } from '../lib/hooks';
 import { useLive } from '../lib/store';
 import { Icon } from './Icon';
 import { OperationActions } from './OperationActions';
-import { Meter, OpStatePill, StateRail, T0Board } from './ui';
+import { Callout, Meter, OpStatePill, StateRail, T0Board } from './ui';
 
 const PRE_T0 = ['DRAFT', 'VALIDATED', 'ARMED', 'FROZEN'];
 
@@ -28,6 +28,13 @@ export function OperationHero({ op, link = false, compact = false, onChanged }: 
     : running
       ? 'Tiempo que queda de ventana'
       : null;
+  /** Nombre de lo parado por un kill switch (web de venta, operación o cuenta) para el motivo de pausa. */
+  const nameOf = (scope: 'PROVIDER' | 'OPERATION' | 'ACCOUNT', id: string): string | null =>
+    scope === 'OPERATION'
+      ? (s.operations[id]?.name ?? null)
+      : scope === 'ACCOUNT'
+        ? (s.accounts[id]?.label ?? null)
+        : (s.providerAuthorizations.find((p) => p.providerId === id)?.name ?? s.system?.providers.find((p) => p.id === id)?.name ?? null);
 
   return (
     <section className="card hero">
@@ -41,7 +48,6 @@ export function OperationHero({ op, link = false, compact = false, onChanged }: 
           <h2 style={{ fontSize: 15, letterSpacing: '0.04em' }}>{op.name}</h2>
         )}
         {compact ? null : <span className="small muted">{event?.name ?? op.eventName}</span>}
-        {op.pausedReason ? <span className="tag">Motivo: {op.pausedReason}</span> : null}
         <div className="actions">
           {link ? (
             <Link className="btn sm" to={`/operaciones/${op.id}`}>
@@ -51,10 +57,20 @@ export function OperationHero({ op, link = false, compact = false, onChanged }: 
         </div>
       </header>
       <div className="card-body stack" style={{ gap: 18 }}>
+        {op.pausedReason ? (
+          <Callout tone="warning" icon="pause">
+            <b>Motivo:</b> {pausedReasonText(op.pausedReason, nameOf)}
+          </Callout>
+        ) : null}
+        {op.state === 'ENDED' && op.endReason ? (
+          <Callout icon="info">
+            <b>Finalizada:</b> {END_REASON_LABEL[op.endReason]}.
+          </Callout>
+        ) : null}
         <StateRail state={op.state} />
         <div className="grid hero-grid">
           <div className="stack hero-clock" style={{ gap: 10 }}>
-            {boardTarget ? <T0Board t0={boardTarget} now={now} caption={caption ?? undefined} /> : null}
+            {boardTarget ? <T0Board t0={boardTarget} now={now} caption={caption ?? undefined} mode={running ? 'window' : 't0'} /> : null}
             <div className="small ink2 hero-note">
               T0 <b className="mono">{new Date(op.t0).toLocaleString('es-ES')}</b> · ventana {op.runWindowMinutes} min
             </div>

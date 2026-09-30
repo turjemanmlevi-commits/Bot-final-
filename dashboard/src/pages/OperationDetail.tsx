@@ -474,9 +474,21 @@ function LiveTab({ id, detail, artifact }: { id: string; detail: OperationDetail
                       {a.session.state === 'CHALLENGE_REQUIRED' || a.session.state === 'LOGGED_OUT' || a.session.state === 'EXPIRED' || a.session.state === 'UNKNOWN' ? (
                         <div className="row" style={{ justifyContent: 'flex-end' }}>
                           {a.session.state !== 'CHALLENGE_REQUIRED' ? (
-                            <button type="button" className="btn sm" disabled={busy} onClick={() => void run(() => Api.openSession(aid), 'Abriendo sesión…')}>
-                              Abrir sesión
-                            </button>
+                            manual ? (
+                              <button
+                                type="button"
+                                className="btn sm"
+                                disabled={busy}
+                                onClick={() => void run(() => Api.openSession(aid), 'Tarea enviada: inicia sesión en la web oficial y pulsa «Sesión lista»')}
+                                title="Crea la tarea para que la persona inicie sesión en la web oficial"
+                              >
+                                Pedir inicio de sesión
+                              </button>
+                            ) : (
+                              <button type="button" className="btn sm" disabled={busy} onClick={() => void run(() => Api.openSession(aid), 'Abriendo sesión…')}>
+                                Abrir sesión
+                              </button>
+                            )
                           ) : null}
                           <button type="button" className="btn sm primary" disabled={busy} onClick={() => void run(() => Api.sessionReady(aid), 'Sesión marcada como lista')}>
                             <Icon name="check" size={13} /> Sesión lista

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { LIMIT_SEMANTICS_LABEL, PREFERENCE_COLORS, type Account, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
+import { LIMIT_SEMANTICS_LABEL, perAccountRequestedQty, PREFERENCE_COLORS, type Account, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { VenueMap } from '../components/VenueMap';
-import { Callout, Card, Pill } from '../components/ui';
+import { Callout, Card, Empty, Pill } from '../components/ui';
 import { Api } from '../lib/api';
 import { eurosEs, formatMoney, parseEuros, toLocalInput } from '../lib/format';
 import { useAction, useAsync } from '../lib/hooks';
@@ -316,7 +316,7 @@ export function OperationFormPage() {
       t0: t0Iso,
       runWindowMinutes: Math.trunc(Number(f.runWindowMinutes)),
       freezeLeadSeconds: Math.trunc(Number(f.freezeLeadSeconds)),
-      requestedQty: perAccountQty ? Math.max(1, f.accountIds.length * perAccountQty) : Math.trunc(Number(f.requestedQty)),
+      requestedQty: perAccountQty ? perAccountRequestedQty(f.accountIds.length, perAccountQty, event.limits.perOperation) : Math.trunc(Number(f.requestedQty)),
       currency: event.currency,
       maxUnitPrice,
       budget,
@@ -350,7 +350,12 @@ export function OperationFormPage() {
     navigate(`/operaciones/${opId}`);
   };
 
-  const qty = perAccountQty ? f.accountIds.length * perAccountQty : Number(f.requestedQty);
+  // «N por cuenta»: N por cada cuenta elegida, sin pasar del tope por operación del evento.
+  const perAccountWanted = perAccountQty ? f.accountIds.length * perAccountQty : 0;
+  const qty = perAccountQty ? (f.accountIds.length > 0 && event ? perAccountRequestedQty(f.accountIds.length, perAccountQty, event.limits.perOperation) : 0) : Number(f.requestedQty);
+  const perAccountCapped = perAccountQty !== null && perAccountWanted > qty;
+  const spareAccounts = perAccountQty ? f.accountIds.length - Math.ceil(qty / perAccountQty) : 0;
+  const accountsFull = f.accountIds.length >= 10;
   // Con «N por cuenta», el grupo mínimo no pasa de N (1 por cuenta: entradas sueltas, una cada cuenta).
   const minGroup = perAccountQty ? Math.min(Number(f.minGroupSize) || 1, perAccountQty) : Number(f.minGroupSize);
   const maxPrice = maxCents ?? 0;
@@ -373,6 +378,14 @@ export function OperationFormPage() {
     : null;
   const budgetShort = Number.isFinite(qty) && qty > 0 && maxCents !== null && budgetCents !== null && budgetCents < Math.trunc(qty) * maxCents;
   const t0Past = t0Iso !== null && Date.parse(t0Iso) < Date.now();
+
+  if (id && existing.error) {
+    return (
+      <Empty title={s.operations[id] ? 'No se pudo cargar la operación' : 'Operación no encontrada'} action={<Link to="/operaciones">Volver a operaciones</Link>}>
+        {existing.error}
+      </Empty>
+    );
+  }
 
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -472,9 +485,10 @@ export function OperationFormPage() {
               <label htmlFor="op-qty">Entradas</label>
               {perAccountQty ? (
                 <>
-                  <input id="op-qty" className="input" type="number" value={f.accountIds.length * perAccountQty} readOnly disabled />
-                  <span className="hint">
-                    {perAccountQty} por cuenta × {f.accountIds.length} cuenta{f.accountIds.length === 1 ? '' : 's'}: todas van a la vez, cada una a por la suya.
+                  <input id="op-qty" className="input" type="number" value={qty} readOnly disabled />
+                  <span className={`hint ${perAccountCapped ? 'warn' : ''}`}>
+                    {perAccountQty} por cuenta × {f.accountIds.length} cuenta{f.accountIds.length === 1 ? '' : 's'}
+                    {perAccountCapped ? ` = ${perAccountWanted}, pero el evento permite ${qty} por operación.` : ': todas van a la vez, cada una a por la suya.'}
                   </span>
                 </>
               ) : (
@@ -502,6 +516,15 @@ export function OperationFormPage() {
               </div>
             )}
           </div>
+          {perAccountCapped && perAccountQty ? (
+            <div style={{ marginTop: 12 }}>
+              <Callout tone="warning">
+                Se piden <b>{qty} entradas</b>, el máximo por operación del evento (no {perAccountWanted}): van a la vez las cuentas que hacen falta para {qty} y
+                {spareAccounts === 1 ? ' la otra entra' : ` las otras ${spareAccounts} entran`} si alguna falla. Si las condiciones oficiales permiten más, súbelo en «Por
+                operación» del evento.
+              </Callout>
+            </div>
+          ) : null}
           {qtyWarn ? (
             <div style={{ marginTop: 12 }}>
               <Callout tone="warning">{qtyWarn}</Callout>
@@ -610,6 +633,11 @@ export function OperationFormPage() {
 
         <div className="form-section">
           <h3 className="sign">5 · Con qué cuentas (máx. 10)</h3>
+          {accountsFull && accounts.some((a) => a.enabled && !f.accountIds.includes(a.id)) ? (
+            <div className="small" role="status" style={{ color: 'var(--warning-ink)', marginBottom: 10 }}>
+              Ya hay 10 cuentas elegidas, el máximo por operación: desmarca una para elegir otra.
+            </div>
+          ) : null}
           {accounts.length === 0 ? (
             <Callout tone="warning">
               {event ? `No hay cuentas de ${providerName ?? event.providerId}. ` : 'Todavía no hay cuentas. '}
@@ -619,8 +647,18 @@ export function OperationFormPage() {
           ) : (
             <div className="form-grid">
               {accounts.map((a) => (
-                <label key={a.id} className="check" style={{ opacity: a.enabled ? 1 : 0.5 }}>
-                  <input type="checkbox" checked={f.accountIds.includes(a.id)} onChange={() => toggleAccount(a.id)} disabled={!a.enabled} />
+                <label
+                  key={a.id}
+                  className="check"
+                  style={{ opacity: a.enabled && (!accountsFull || f.accountIds.includes(a.id)) ? 1 : 0.5 }}
+                  title={a.enabled && accountsFull && !f.accountIds.includes(a.id) ? 'Máximo 10 cuentas: desmarca una para elegir esta' : undefined}
+                >
+                  <input
+                    type="checkbox"
+                    checked={f.accountIds.includes(a.id)}
+                    onChange={() => toggleAccount(a.id)}
+                    disabled={!a.enabled || (accountsFull && !f.accountIds.includes(a.id))}
+                  />
                   <span>
                     <b>{a.label}</b>
                     <br />

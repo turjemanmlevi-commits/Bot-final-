@@ -6,6 +6,7 @@ import {
   LIMIT_SEMANTICS_LABEL,
   parsePageCapture,
   PREFERENCE_EMOJI,
+  watchStartMs,
   type CatalogEvent,
   type EventWatch,
   type PageImport,
@@ -55,7 +56,8 @@ function WatchLine({ event, watch, now }: { event: CatalogEvent; watch: EventWat
   const source = event.officialFeed ? FEED_LABEL[event.officialFeed] : null;
   if (!watch || watch.state === 'WAITING') {
     const anchor = Date.parse(event.onSaleAt ?? event.startsAt);
-    const from = new Date(anchor - days * 86_400_000).toISOString();
+    // A la misma hora de reloj de Madrid aunque entre medias cambie la hora (como la vigilancia del servidor).
+    const from = new Date(watchStartMs(anchor, days, 'Europe/Madrid')).toISOString();
     if (anchor <= now) return <div className="small muted">Ya {event.onSaleAt ? 'abrió la venta' : 'pasó el evento'}: no hay nada que vigilar.</div>;
     if (Date.parse(from) <= now) {
       return (
@@ -325,7 +327,9 @@ export function EventsPage() {
                             {shortLink(e.url)}
                           </a>
                         ) : (
-                          <span style={{ color: 'var(--warning-ink)' }}>sin enlace oficial: ponlo en «Editar» (o «Analizar con Claude»)</span>
+                          <span style={{ color: 'var(--warning-ink)' }}>
+                            sin enlace oficial: ponlo en «Editar»{mode !== 'SIMULATED' && s.system?.ai.configured ? ' (o «Analizar con Claude»)' : ''}
+                          </span>
                         )}
                       </dd>
                       {e.saleZones.length > 0 ? (

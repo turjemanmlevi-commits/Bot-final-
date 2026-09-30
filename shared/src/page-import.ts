@@ -11,7 +11,7 @@
  */
 
 import type { LimitSemantics } from './domain';
-import { bestVenueMatch, parseTicketLimit, venueMentioned, type VenueRef } from './matching';
+import { bestVenueMatch, parseTicketLimit, plainText, venueMentioned, type VenueRef } from './matching';
 
 /** Lo que envía el marcador (versión 1). */
 export interface PageCapture {
@@ -329,6 +329,31 @@ export function cleanTitle(raw: string | null): string | null {
   return t.length >= 3 ? t.slice(0, 120) : null;
 }
 
+/** ¿Es el título el de la propia web (su marca o su dominio: «Ticketmaster España», «entradas.com») y no el de un evento? */
+function isSiteTitle(name: string, host: string): boolean {
+  const h = host.toLowerCase().replace(/^www\./, '');
+  if (!h) return false;
+  const squash = (x: string) => plainText(x).replace(/ /g, '');
+  const brand = h.split('.').slice(0, -1).join('.');
+  let t = squash(name);
+  // «Ticketmaster España», «Real Madrid CF Web oficial»: fuera lo que acompaña a la marca.
+  for (let prev = ''; prev !== t; ) {
+    prev = t;
+    t = t.replace(/(?:espana|spain|oficial|official|weboficial|cf|es|com)$/, '');
+  }
+  return t !== '' && (t === squash(h) || t === squash(brand) || squash(name) === squash(h));
+}
+
+/** La portada de la web (sin ruta, o solo el idioma: «/es-ES»), no la página de un evento. */
+function isHomePage(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.search === '' && /^\/(?:[a-z]{2}(?:[-_][a-z]{2})?\/?)?$/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function saleName(line: string, dateIndex: number): string {
   const head = line.slice(0, dateIndex);
   const colon = head.lastIndexOf(':');
@@ -342,7 +367,7 @@ function saleName(line: string, dateIndex: number): string {
   return 'Venta';
 }
 
-function fromText(c: PageCapture, ctx: ImportContext, refMs: number): ImportedEvent {
+function fromText(c: PageCapture, ctx: ImportContext, refMs: number, host: string): ImportedEvent {
   const lines = [...(c.selection ? c.selection.split(/\n+|\s{3,}/) : []), ...c.lines].map((l) => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
   // Fecha del evento: <time datetime> primero; si no, la primera fecha (con hora, mejor) que no es de la venta.
   let start: { local: string; timeTBA: boolean } | null = null;
@@ -378,8 +403,14 @@ function fromText(c: PageCapture, ctx: ImportContext, refMs: number): ImportedEv
   }
   // Una «venta» después del evento no es la apertura (p. ej. «venta hasta el día del partido»).
   const validSales = start ? sales.filter((s) => s.startsAtLocal < (start as { local: string }).local) : sales;
+  // El nombre de la web no es el del evento; en su portada, sin fecha, tampoco hay evento.
+  const title = (raw: string | null) => {
+    const t = cleanTitle(raw);
+    return t && !isSiteTitle(t, host) ? t : null;
+  };
+  const name = start || !isHomePage(c.url) ? (title(c.meta['og:title'] ?? null) ?? title(c.h1) ?? title(c.title)) : null;
   return {
-    name: cleanTitle(c.meta['og:title'] ?? null) ?? cleanTitle(c.h1) ?? cleanTitle(c.title),
+    name,
     url: httpOnly(c.meta['og:url'] ?? null) ?? httpOnly(c.canonical) ?? httpOnly(c.url),
     startsAtLocal: start?.local ?? null,
     timeTBA: start?.timeTBA ?? true,
@@ -434,7 +465,7 @@ export function parsePageCapture(c: PageCapture, ctx: ImportContext): PageImport
     seen.add(key);
     return true;
   });
-  const text = fromText(c, ctx, refMs);
+  const text = fromText(c, ctx, refMs, host);
   if (events.length === 0) events = [text];
   else {
     // Lo del texto completa lo que no trae la web (fases de venta, hora de apertura…).

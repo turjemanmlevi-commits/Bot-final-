@@ -720,6 +720,17 @@ h4 {
   font-size: 14px;
 }
 
+/* Botones con texto largo (fases de venta, «Instálalo…»): en pantallas estrechas pasan a varias líneas. */
+.btn.wrap {
+  white-space: normal;
+  height: auto;
+  min-height: 26px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  text-align: left;
+  max-width: 100%;
+}
+
 .btn .kbd {
   font-family: var(--font-mono);
   font-size: 11px;

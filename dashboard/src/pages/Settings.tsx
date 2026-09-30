@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
 import type { FeedId, FeedStatus, ProviderAuthorization, ProviderDescriptor, ProviderMode } from '@to/shared';
 import { Icon, type IconName } from '../components/Icon';
+import { useDialog } from '../components/Dialog';
 import { SendToSalaButton } from '../components/SendToSala';
 import { Callout, Card, Pill, type Tone } from '../components/ui';
 import { Api } from '../lib/api';
@@ -658,6 +659,7 @@ function extractAiKey(raw: string): string | null {
 function ClaudeCard() {
   const s = useLive();
   const toast = useToast();
+  const ask = useDialog();
   const status = s.system?.ai ?? null;
   const [input, setInput] = useState('');
   const [changing, setChanging] = useState(false);
@@ -682,6 +684,16 @@ function ClaudeCard() {
     } finally {
       setBusy(false);
     }
+  };
+  /** Quitar se confirma: la clave se borra del .env y habría que volver a pegarla. */
+  const remove = async () => {
+    const ok = await ask({
+      title: '¿Quitar la clave de Claude?',
+      body: 'Se borra del archivo .env de este ordenador y Claude deja de buscar y leer eventos hasta que pegues otra.',
+      confirmText: 'Quitar la clave',
+      danger: true,
+    });
+    if (ok) void save(null);
   };
   const connect = () => {
     const key = extractAiKey(input);
@@ -730,7 +742,7 @@ function ClaudeCard() {
               <button type="button" className="btn sm" disabled={busy} onClick={() => setChanging(true)}>
                 Cambiar la clave
               </button>
-              <button type="button" className="btn sm ghost" disabled={busy} onClick={() => void save(null)}>
+              <button type="button" className="btn sm ghost" disabled={busy} onClick={() => void remove()}>
                 Quitar
               </button>
             </div>
@@ -845,6 +857,7 @@ const FEED_STEPS: Record<FeedId, { title: string; what: string; steps: ReactNode
 
 function FeedBlock({ feed, status, configurable }: { feed: FeedId; status: FeedStatus; configurable: boolean }) {
   const toast = useToast();
+  const ask = useDialog();
   const info = FEED_STEPS[feed];
   const [input, setInput] = useState('');
   const [changing, setChanging] = useState(false);
@@ -870,6 +883,16 @@ function FeedBlock({ feed, status, configurable }: { feed: FeedId; status: FeedS
     } finally {
       setBusy(false);
     }
+  };
+
+  const remove = async () => {
+    const ok = await ask({
+      title: `¿Quitar la clave de ${info.title}?`,
+      body: 'Se borra del archivo .env de este ordenador: la lista oficial y la vigilancia con consultas dejan de funcionar hasta que pongas otra.',
+      confirmText: 'Quitar la clave',
+      danger: true,
+    });
+    if (ok) void save(null);
   };
 
   const connect = () => {
@@ -946,7 +969,7 @@ function FeedBlock({ feed, status, configurable }: { feed: FeedId; status: FeedS
           <button type="button" className="btn sm" disabled={busy} onClick={() => setChanging(true)}>
             Cambiar la clave
           </button>
-          <button type="button" className="btn sm ghost" disabled={busy} onClick={() => void save(null)}>
+          <button type="button" className="btn sm ghost" disabled={busy} onClick={() => void remove()}>
             Quitar
           </button>
         </div>

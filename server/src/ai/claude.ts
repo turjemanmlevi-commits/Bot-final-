@@ -846,7 +846,9 @@ export class ClaudeControl {
     } else if (err instanceof Anthropic.RateLimitError) {
       out = new AiError('RATE', 'Claude: demasiadas consultas seguidas o límite de gasto alcanzado. Espera un poco (o revisa el saldo en platform.claude.com).');
     } else if (err instanceof Anthropic.BadRequestError) {
-      const m = err.message ?? '';
+      // err.message es «400 {"type":"error","error":{…}}»: solo el texto de la API.
+      const body = err.error as { error?: { message?: unknown } } | undefined;
+      const m = typeof body?.error?.message === 'string' ? body.error.message : (err.message ?? '');
       out = /credit|balance|billing/i.test(m)
         ? new AiError('AUTH', 'Tu cuenta de Claude no tiene saldo: añade crédito en platform.claude.com → Billing.')
         : /image|download|url/i.test(m)

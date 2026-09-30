@@ -6,6 +6,7 @@ import type {
   AlertKind,
   CartState,
   ClaimState,
+  EndReason,
   GateId,
   HumanTaskKind,
   HumanTaskState,
@@ -163,6 +164,49 @@ export const GATE_NAME: Record<GateId, string> = {
   G5: 'Manual-assist y pago humano',
   G6: 'Resiliencia',
 };
+
+/** Por qué terminó una operación (se enseña junto a «Finalizada»). */
+export const END_REASON_LABEL: Record<EndReason, string> = {
+  RUN_WINDOW_ELAPSED: 'se agotó la ventana',
+  OPERATOR_STOP: 'la paró una persona',
+  READINESS_FAILED: 'falló la comprobación previa en T0 (el detalle está en «Preparación»)',
+  NOT_STARTED_IN_WINDOW: 'no llegó a arrancar dentro de la ventana',
+};
+
+/**
+ * Motivo de pausa legible y qué hacer. El servidor guarda códigos
+ * («KILL_SWITCH operation:op_…», «SCHEMA_DRIFT»…) o el texto de quien pausó.
+ * `nameOf` pone el nombre de la web de venta, la operación o la cuenta.
+ */
+export function pausedReasonText(reason: string, nameOf: (scope: 'PROVIDER' | 'OPERATION' | 'ACCOUNT', id: string) => string | null = () => null): string {
+  const resume = 'suéltala en Seguridad y pulsa «Reanudar»';
+  const ks = /^KILL_SWITCH (\S+)$/.exec(reason.trim());
+  if (ks) {
+    const key = ks[1] as string;
+    if (key === 'global') return `Parada global (kill switch): ${resume}.`;
+    const i = key.indexOf(':');
+    const scope = key.slice(0, i).toUpperCase();
+    const id = key.slice(i + 1);
+    if (scope === 'PROVIDER' || scope === 'OPERATION' || scope === 'ACCOUNT') {
+      const name = nameOf(scope, id);
+      const what = scope === 'PROVIDER' ? 'de la web de venta' : scope === 'OPERATION' ? 'de la operación' : 'de la cuenta';
+      return `Parada ${what}${name ? ` «${name}»` : ''} (kill switch): ${resume}.`;
+    }
+    return `Parada por kill switch (${key}): ${resume}.`;
+  }
+  switch (reason.trim()) {
+    case 'JOURNAL_DEGRADED':
+      return 'El journal no está guardando (sin auditoría no se automatiza): revisa el disco y pulsa «Reanudar» cuando vuelva.';
+    case 'ARTEFACTO_NO_DISPONIBLE':
+      return 'No está el recinto compilado de esta operación: revisa «Recintos · vault» y pulsa «Reanudar».';
+    case 'SCHEMA_DRIFT':
+      return 'La web de venta cambió el formato de sus respuestas: reinicia su circuito en Seguridad y pulsa «Reanudar».';
+    case 'RECOVERY':
+      return 'Reinicio del servidor: se están reconciliando los carritos en vuelo antes de seguir.';
+    default:
+      return reason;
+  }
+}
 
 const moneyFormatters = new Map<string, Intl.NumberFormat>();
 

@@ -67,7 +67,7 @@ export function SendToSalaButton({ compact = false }: { compact?: boolean }) {
   if (!open) {
     return (
       <div>
-        <button type="button" className="btn sm ghost" onClick={() => setOpen(true)}>
+        <button type="button" className="btn sm ghost wrap" onClick={() => setOpen(true)}>
           ¿No tienes el botón «📥 Enviar a la sala»? Instálalo (1 minuto)
         </button>
       </div>
