@@ -30,14 +30,14 @@ Qué hace el comando (`instalar.ps1`):
 | Paso | Qué hace |
 |---|---|
 | 1. Node.js | Si no lo tienes, instala **Node.js LTS** con `winget` (el instalador de Windows). Si tu Windows no tiene `winget`, abre nodejs.org y se para: instálalo y repite el comando |
-| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada**: nunca toca tu `.env` (configuración de Telegram) ni la carpeta `data` (cuentas, operaciones, carritos); no pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), y si ya existe `vault\.obsidian` (tu configuración de Obsidian) no la toca |
+| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada**: nunca toca tu `.env` (configuración y claves) ni tus datos (cuentas, operaciones, carritos: ver [Dónde están tus datos](#dónde-están-tus-datos)); no pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), y si ya existe `vault\.obsidian` (tu configuración de Obsidian) no la toca |
 | 3. Acceso directo | Crea **Sala de control** en el Escritorio (abre `INICIAR.bat`) |
 | 4. Obsidian | Opcional: lo instala con `winget` si respondes `s` |
 | 5. Arranque | Abre `INICIAR.bat`, que instala dependencias, compila y abre el navegador |
 
 **Las siguientes veces:** doble clic en **Sala de control** del Escritorio (o en `INICIAR.bat` dentro de `bot final`).
 
-**Para actualizar:** cierra la ventana negra y vuelve a pegar el mismo comando. Conserva `.env`, `data` y tu configuración de Obsidian (`vault\.obsidian`), y copia la versión nueva de los ficheros del proyecto. Las notas que tú creaste en el vault se quedan, y una nota que venía con el proyecto y **editaste** también, siempre que tu copia sea más reciente que la de la versión descargada (el instalador no pisa archivos más recientes). Si no estás seguro, cópiala antes.
+**Para actualizar:** cierra la ventana negra y vuelve a pegar el mismo comando. Conserva `.env`, tus datos y tu configuración de Obsidian (`vault\.obsidian`), y copia la versión nueva de los ficheros del proyecto. Las notas que tú creaste en el vault se quedan, y una nota que venía con el proyecto y **editaste** también, siempre que tu copia sea más reciente que la de la versión descargada (el instalador no pisa archivos más recientes). Si no estás seguro, cópiala antes.
 
 > Si tu `.env` se creó con una versión anterior, puede tener `MANUAL_TASK_MINUTES=10`. Actualizar no toca el `.env`: ábrelo con el Bloc de notas, pon `MANUAL_TASK_MINUTES=30` (o borra la línea: 30 es el valor por defecto), guarda y reinicia. Ver [Configuración](#configuración).
 
@@ -53,7 +53,7 @@ Qué hace `INICIAR.bat` cada vez que lo abres:
 
 Con el servidor en marcha, un error inesperado en segundo plano (en el scheduler o en una promesa sin controlar) se anota en la ventana negra y el servidor sigue funcionando.
 
-> La carpeta está en el Escritorio sincronizado con OneDrive. Si la instalación va lenta o da `EPERM`, pausa OneDrive mientras se instala (`node_modules` tiene miles de ficheros).
+> La carpeta está en el Escritorio sincronizado con OneDrive. Si la instalación va lenta o da `EPERM`, pausa OneDrive mientras se instala (`node_modules` tiene miles de ficheros; no lo marques como «Liberar espacio»). OneDrive también sube a tu nube el `.env`, con tus claves (Telegram, Claude…); los datos (cuentas, operaciones) no, porque van a `%LOCALAPPDATA%`. Si prefieres que las claves no salgan de este PC, instala el proyecto fuera de OneDrive: ver [Dónde están tus datos](#dónde-están-tus-datos).
 
 ### Alternativa: ZIP
 
@@ -101,7 +101,7 @@ Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
 ## ⭐ Grandes partidos
 
-Menú **⭐ Grandes partidos**: Claude busca a la vez (LaLiga, Champions, Copa y Supercopa, selecciones y finales) los **50 partidos más importantes** de los próximos 12 meses y los guarda en `data/top-partidos.json` (no se vuelve a pagar hasta **Actualizar**). **🎟 Preparar** abre el evento relleno: Claude lee el partido, **vigilancia desde 2 semanas antes de la venta** (fija), **1 entrada por cuenta** y el plano para tocar hasta 3 zonas. **Preparar la compra** marca todas las cuentas de esa web: al abrir, **todas van a la vez**, cada una a por su entrada (tope por cuenta de la operación, `preferences.maxPerAccount`, nunca por encima del límite oficial). **30, 10 y 2 minutos antes** de T0 el bot avisa a quien no tiene «Sesión lista» para que entre en la web oficial y en la sala de espera. En Telegram: **/top**. En **Recintos** están también los estadios de los clubes habituales de la Champions. Guía: `vault/00 Guía/Grandes partidos.md`.
+Menú **⭐ Grandes partidos**: Claude busca a la vez (LaLiga, Champions, Copa y Supercopa, selecciones y finales) los **50 partidos más importantes** de los próximos 12 meses y los guarda en `top-partidos.json`, en la carpeta de datos (no se vuelve a pagar hasta **Actualizar**). **🎟 Preparar** abre el evento relleno: Claude lee el partido, **vigilancia desde 2 semanas antes de la venta** (fija), **1 entrada por cuenta** y el plano para tocar hasta 3 zonas. **Preparar la compra** marca todas las cuentas de esa web: al abrir, **todas van a la vez**, cada una a por su entrada (tope por cuenta de la operación, `preferences.maxPerAccount`, nunca por encima del límite oficial). **30, 10 y 2 minutos antes** de T0 el bot avisa a quien no tiene «Sesión lista» para que entre en la web oficial y en la sala de espera. En Telegram: **/top**. En **Recintos** están también los estadios de los clubes habituales de la Champions. Guía: `vault/00 Guía/Grandes partidos.md`.
 
 ## Plano visual de asientos
 
@@ -114,7 +114,7 @@ Es orientativo: los sectores exactos están en el plano oficial de cada venta.
 
 ## Claude (IA)
 
-**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda solo en este ordenador (`.env`, variable `ANTHROPIC_API_KEY`); usa el Opus más reciente de tu cuenta (o el de `ANTHROPIC_MODEL`). Se paga por consulta a Anthropic; la misma búsqueda en 30 minutos es gratis.
+**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda en el `.env` de la carpeta del proyecto (variable `ANTHROPIC_API_KEY`; si la carpeta está en OneDrive, OneDrive también lo sube a tu nube); usa el Opus más reciente de tu cuenta (o el de `ANTHROPIC_MODEL`). Se paga por consulta a Anthropic; la misma búsqueda en 30 minutos es gratis.
 
 - **Lista de eventos** de la web de venta elegida (búsqueda y lectura web de Claude, en los servidores de Anthropic).
 - **Análisis del evento**: fecha, **fases de venta con su límite** («máx. N por persona» en socios, preventa, general…), límite por persona (queda **verificado solo si Claude cita la web de venta oficial**), precios, recinto (se crea al momento con sus zonas si no está), **cómo está estructurada la venta** (zonas y secciones con los nombres de la web, su precio y a qué zona del plano corresponde cada una: nota del evento, `saleZones`), el **enlace directo de compra en la web oficial** y quién vende (las reventas se descartan) y la **imagen del plano oficial**, donde Claude sitúa cada zona para tocarla.
@@ -133,7 +133,7 @@ Todo desde el dashboard, sin tocar archivos ni reiniciar (**Ajustes · Telegram*
 4. **Usar como chat principal** junto a tu nombre: te llega la bienvenida con cómo responder rápido.
 5. **Enviar mensaje de prueba**.
 
-Cada persona que vaya a comprar pulsa **Iniciar** en el bot y se le asigna su cuenta en esa misma página (**Asignar a una cuenta**): recibe solo sus tareas. El token solo vive en el `.env` de tu PC; el dashboard no lo vuelve a mostrar.
+Cada persona que vaya a comprar pulsa **Iniciar** en el bot y se le asigna su cuenta en esa misma página (**Asignar a una cuenta**): recibe solo sus tareas. El token se guarda en el `.env` de la carpeta del proyecto (con OneDrive, también en tu nube); el dashboard no lo vuelve a mostrar.
 
 Qué llega: al **armar**, la tarea «Inicia sesión» con el **plan** y los botones **✅ Sesión lista** / **❌ No puedo**; en **T0**, **«🚦 ¡Abre la venta!»** (al chat principal y a los de las cuentas) con el enlace oficial, y cada tarea de compra con **un botón por cantidad**, de la cantidad pedida a 1 (`✅ 2 en carrito`, `✅ 1 en carrito`; en filas de 5, hasta 20), **❌ No pude** y **❓ No sé**. Tras «N en carrito» el bot pregunta **«⏱ ¿Cuántos minutos le quedan al carrito en la web?»** (`5`, `8`, `10`, `15` o `20 min`) junto a **💳 Ya lo he pagado**. Los avisos de carrito a punto de caducar y el de «se acabó el tiempo del carrito, ¿lo has pagado?» llegan con **💳 Ya lo he pagado** y **⏱ Quedan 5 / 10 / 15 min**. Cuando una tarea se responde (en Telegram o en el dashboard), sus botones desaparecen en todos los chats. Desde Telegram las entradas se anotan **al precio máximo**; el precio exacto se indica respondiendo desde el dashboard.
 
@@ -185,9 +185,27 @@ En Telegram hay que sumar lo que tarde la red de Telegram. Los tiempos del simul
 
 ## Configuración
 
-`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram (mejor desde **Ajustes · Telegram**, que lo guarda ahí sin reiniciar), los minutos para responder una tarea de compra antes de que el sistema pida verificarla (`MANUAL_TASK_MINUTES`, **30** por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar. Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`), vault en `vault/`, `Europe/Madrid`.
+`INICIAR.bat` crea `.env` a partir de `.env.example`. Ahí se cambian el puerto, la zona horaria del vault, Telegram (mejor desde **Ajustes · Telegram**, que lo guarda ahí sin reiniciar), los minutos para responder una tarea de compra antes de que el sistema pida verificarla (`MANUAL_TASK_MINUTES`, **30** por defecto), Postgres o el token de operador. El `.env` solo se lee al arrancar, y vale como lo guarde el Bloc de notas (UTF-8, con BOM, «Unicode»/UTF-16 o ANSI). Sin `.env` funciona con valores por defecto: journal en PGlite (`data/pglite`; con el proyecto en OneDrive, `%LOCALAPPDATA%\TicketOrchestrator\data\pglite`), vault en `vault/`, `Europe/Madrid`.
+
+**Cambiar de puerto:** `PORT=8788` (por ejemplo). Los carritos del simulador siguen al puerto solos; si tu `.env` es de una versión anterior y tiene `PUBLIC_BASE_URL=http://localhost:8787`, cámbiale también el puerto (o borra la línea).
+
+Las claves que se guardan desde el dashboard (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ANTHROPIC_API_KEY`, `TICKETMASTER_API_KEY`, `FOOTBALL_DATA_TOKEN`) mandan, si tienen valor en el `.env`, sobre una variable de entorno de Windows con el mismo nombre (la ventana negra lo avisa al arrancar). Con el resto de ajustes manda la variable de entorno, como siempre.
 
 Un `.env` creado con una versión anterior puede tener `MANUAL_TASK_MINUTES=10`, y ese valor manda sobre el nuevo defecto: cámbialo a `30` (o borra la línea) y reinicia.
+
+### Dónde están tus datos
+
+| Qué | Dónde |
+|---|---|
+| Cuentas, operaciones, carritos, auditoría y ⭐ Grandes partidos | Con el proyecto en OneDrive (como en este PC): `%LOCALAPPDATA%\TicketOrchestrator\data`, fuera de OneDrive porque su sincronización bloquea la base de datos (y por eso **no** va a la nube: haz tú la copia). Si no: `bot final\data`. La ruta exacta sale al arrancar, en la línea «Journal» |
+| Configuración y claves | `bot final\.env` (línea «.env» al arrancar). Con el proyecto en OneDrive, también en tu nube |
+| Recintos y eventos | `bot final\vault` |
+
+- **Copia de seguridad o pasarlo a otro PC:** cierra la ventana negra y copia la carpeta de datos entera y el `.env`. Para recuperarla, con la sala cerrada, pon la copia en su sitio y vuelve a abrir **Sala de control**.
+- **Al actualizar desde una versión anterior** con el proyecto en OneDrive, la primera vez se copian solos tus datos de `bot final\data` a `%LOCALAPPDATA%\TicketOrchestrator\data` (aviso «Datos traídos de la versión anterior»). La carpeta de antes queda como estaba: cuando compruebes que está todo, puedes borrarla. Si ya habías abierto una versión que no los copiaba, el aviso «Datos de la versión anterior sin usar» explica cómo traerlos.
+- **Instalar fuera de OneDrive** (para que las claves no salgan del PC): baja el proyecto con el ZIP o con Git en una carpeta como `C:\Users\Leviç\TicketOrchestrator`, copia en ella tu `.env` y, con la sala cerrada, tus datos de `%LOCALAPPDATA%\TicketOrchestrator\data` a su carpeta `data` (fuera de OneDrive no se mueven solos).
+- **Una sola sala por carpeta de datos:** si ya hay una abierta, aunque sea en otro puerto, la segunda avisa y no arranca (dos a la vez se pisarían los datos). Un cierre forzado o un apagón no la bloquean.
+- Guía completa (carpeta `pglite-no-se-pudo-abrir-…`, aviso «Los datos no se están guardando», desinstalar): `vault/00 Guía/Bajar el proyecto a tu ordenador.md`.
 
 ## Modos de proveedor
 

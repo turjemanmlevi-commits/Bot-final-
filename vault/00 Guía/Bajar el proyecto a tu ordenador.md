@@ -34,7 +34,7 @@ Qué hace el comando, paso a paso:
 | Paso | Qué hace |
 |---|---|
 | 1. Node.js | Si no está instalado, instala **Node.js LTS** con `winget` (el instalador de programas de Windows). Si tu Windows no tiene `winget`, abre nodejs.org y se para: instálalo con las opciones por defecto y vuelve a pegar el comando |
-| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en la carpeta `bot final` de tu Escritorio (en este PC, `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada** y nunca toca tu `.env` (configuración, token de Telegram) ni la carpeta `data` (cuentas, operaciones, carritos). Tampoco pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), ni tu configuración de Obsidian (`vault\.obsidian`) si ya existe |
+| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en la carpeta `bot final` de tu Escritorio (en este PC, `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada** y nunca toca tu `.env` (configuración y claves) ni tus datos (cuentas, operaciones, carritos: ver [[#Dónde están tus datos y cómo hacer copia]]). Tampoco pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), ni tu configuración de Obsidian (`vault\.obsidian`) si ya existe |
 | 3. Acceso directo | Crea **Sala de control** en el Escritorio: abre `INICIAR.bat` |
 | 4. Obsidian | Si respondes `s`, lo instala con `winget` |
 | 5. Arranque | Abre `INICIAR.bat` (ver el punto 3) |
@@ -95,7 +95,7 @@ Con el servidor arrancado, cada vez que guardes una nota de recinto, evento o pr
 
 Primero cierra la ventana negra del servidor.
 
-- **Si lo instalaste con el comando** (o con el ZIP): vuelve a pegar en PowerShell el comando del punto 1. Copia la versión nueva encima **sin borrar** tu `.env`, la carpeta `data` ni tu configuración de Obsidian (`vault\.obsidian`), sin pisar archivos tuyos más recientes que los de la descarga, y arranca.
+- **Si lo instalaste con el comando** (o con el ZIP): vuelve a pegar en PowerShell el comando del punto 1. Copia la versión nueva encima **sin borrar** tu `.env`, tus datos ni tu configuración de Obsidian (`vault\.obsidian`), sin pisar archivos tuyos más recientes que los de la descarga, y arranca.
 - **Revisa tu `.env` tras actualizar:** si se creó con una versión anterior puede tener `MANUAL_TASK_MINUTES=10`. Actualizar no lo cambia y ese valor manda sobre el nuevo defecto (30 minutos para responder cada tarea de compra). Ábrelo con el Bloc de notas, pon `MANUAL_TASK_MINUTES=30` (o borra la línea), guarda y reinicia.
 - **Si lo clonaste con Git:**
 
@@ -106,14 +106,35 @@ Primero cierra la ventana negra del servidor.
 
   Después, doble clic en `INICIAR.bat`: instala y compila lo nuevo solo.
 
-- **Si prefieres el ZIP a mano:** descárgalo de nuevo, extráelo y copia su contenido encima de `bot final`, reemplazando los archivos **excepto la carpeta `data` y el archivo `.env`**: ahí están tus cuentas, tus operaciones y la configuración de Telegram. No borres la carpeta antes de copiar. Luego, doble clic en `INICIAR.bat`.
+- **Si prefieres el ZIP a mano:** descárgalo de nuevo, extráelo y copia su contenido encima de `bot final`, reemplazando los archivos **excepto la carpeta `data` y el archivo `.env`**: ahí están tus cuentas, tus operaciones y la configuración de Telegram (con el proyecto en OneDrive, tus datos están en otra carpeta y no corren peligro: ver [[#Dónde están tus datos y cómo hacer copia]]). No borres la carpeta antes de copiar. Luego, doble clic en `INICIAR.bat`.
 
 > [!note] Tus notas del vault
 > Los eventos y recintos que hayas creado se conservan al actualizar. Si has **editado** notas que venían con el proyecto (por ejemplo, un recinto), el comando de instalación no las pisa si tu copia es más reciente que la de la versión descargada. Si no estás seguro, o si actualizas copiando el ZIP a mano, haz antes una copia: la versión nueva puede sustituirlas.
 
+## Dónde están tus datos y cómo hacer copia
+
+| Qué | Dónde |
+|---|---|
+| Cuentas, operaciones, carritos, auditoría y la lista de ⭐ Grandes partidos | Con el proyecto en OneDrive (como en este PC): `%LOCALAPPDATA%\TicketOrchestrator\data` (pégalo en la barra de direcciones del Explorador de archivos). Si el proyecto no está en OneDrive: la carpeta `data` de `bot final`. La ruta exacta sale al arrancar, en la ventana negra, en la línea «Journal» |
+| Configuración y claves (Telegram, Claude, Ticketmaster…) | El archivo `.env` de `bot final` (línea «.env» de la ventana negra) |
+| Recintos, eventos y guías | La carpeta `vault` de `bot final` |
+
+- **Por qué fuera de OneDrive:** la sincronización de OneDrive bloquea los archivos de la base de datos y puede impedir que arranque. Por eso esa carpeta **no se sube a la nube**: la copia de seguridad la haces tú.
+- **Hacer una copia (o pasarlo a otro PC):** cierra la ventana negra y copia la carpeta de datos entera y el archivo `.env` (a un USB, por ejemplo). Para recuperarla: con la sala cerrada, pon la copia en su sitio (en lugar de la carpeta `data` que haya) y vuelve a abrir **Sala de control**.
+- **Al actualizar desde una versión anterior** con el proyecto en OneDrive: la primera vez, la sala copia sola tus datos de `bot final\data` a `%LOCALAPPDATA%\TicketOrchestrator\data` y lo avisa en el dashboard («Datos traídos de la versión anterior»). La carpeta de antes se queda como estaba; cuando compruebes que están tus cuentas y operaciones, puedes borrarla. Si no se pueden copiar (por ejemplo, OneDrive sin conexión), la ventana negra lo explica y no se crea una base vacía: arréglalo y vuelve a abrir. Si ya habías abierto una versión que no los copiaba (y ves la sala vacía), sale el aviso «Datos de la versión anterior sin usar» con los pasos para traerlos.
+- **Si mueves el proyecto fuera de OneDrive**, tus datos no se mueven solos: con la sala cerrada, copia `%LOCALAPPDATA%\TicketOrchestrator\data` a la carpeta `data` del proyecto en su nuevo sitio.
+- **Carpeta `pglite-no-se-pudo-abrir-FECHA`:** es una base de datos que no se pudo abrir; se apartó (no se borra) y se empezó con una nueva (aviso «Base de datos nueva»). Guárdala hasta comprobar que no te falta nada.
+- **Aviso «Los datos no se están guardando»:** la base de datos no se pudo abrir y la sala funciona solo en memoria: al cerrarla se pierde lo nuevo. Cierra la ventana negra y vuelve a abrir **Sala de control**; si se repite, reinicia el ordenador (otra ventana de la sala, OneDrive o el antivirus tienen bloqueados los archivos).
+- **Una sola sala por carpeta de datos:** si ya hay una abierta, aunque sea en otro puerto, la segunda dice «Ya hay una sala de control abierta con estos mismos datos…» y no arranca: dos a la vez se pisarían los datos. Un cierre forzado o un apagón no la dejan bloqueada.
+- **Cambiar de puerto:** en el `.env`, por ejemplo `PORT=8788`. Si tu `.env` es de una versión anterior y tiene `PUBLIC_BASE_URL=http://localhost:8787`, cambia también ahí el puerto (o borra esa línea).
+- **Desinstalar:** borra la carpeta `bot final` y el acceso directo **Sala de control**. Tus datos siguen en `%LOCALAPPDATA%\TicketOrchestrator` hasta que borres también esa carpeta.
+
 ## OneDrive
 
-El Escritorio está sincronizado con OneDrive. `node_modules` y `data/` tienen miles de ficheros: si OneDrive va lento o la instalación da errores `EPERM` o `EBUSY`, **pausa la sincronización** durante la primera instalación (icono de la nube → *Pausar sincronización*) y vuelve a abrir `INICIAR.bat`. También puedes marcar esas carpetas como «Liberar espacio». El vault y el código sí conviene sincronizarlos.
+El Escritorio está sincronizado con OneDrive. `node_modules` tiene miles de ficheros: si OneDrive va lento o la instalación da errores `EPERM` o `EBUSY`, **pausa la sincronización** durante la primera instalación (icono de la nube → *Pausar sincronización*) y vuelve a abrir `INICIAR.bat`. No marques `node_modules` como «Liberar espacio»: sus ficheros quedarían solo en la nube, el arranque sería más lento y sin Internet fallaría.
+
+> [!warning] Tus claves también se sincronizan
+> OneDrive sube a tu nube el archivo `.env`, con tus claves (token de Telegram, clave de Claude…): quedan protegidas por tu cuenta de Microsoft, pero salen de este PC. Si prefieres que no salgan, instala el proyecto **fuera de OneDrive**: bájalo con el ZIP o con Git en una carpeta como `C:\Users\Leviç\TicketOrchestrator` (no en el Escritorio ni en Documentos), copia en ella tu `.env` y tus datos (ver [[#Dónde están tus datos y cómo hacer copia]]) y ábrelo con su `INICIAR.bat`.
 
 ## Arranque manual (alternativa)
 
