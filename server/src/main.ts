@@ -194,10 +194,20 @@ async function main(): Promise<void> {
   watcher.start();
 
   // Claude busca y lee los eventos de cada web de venta (dashboard y /evento en Telegram).
+  // Sus respuestas se guardan junto a los datos: la misma búsqueda tras reiniciar no se vuelve a pagar.
   const ai = new ClaudeControl(
-    { runtime: app.runtime, timeZone: env.timeZone, envFile: ENV_FILE, envTemplate: ENV_TEMPLATE, model: env.anthropicModel, baseURL: env.anthropicApiBase ?? undefined },
+    {
+      runtime: app.runtime,
+      timeZone: env.timeZone,
+      envFile: ENV_FILE,
+      envTemplate: ENV_TEMPLATE,
+      model: env.anthropicModel,
+      baseURL: env.anthropicApiBase ?? undefined,
+      cacheFile: path.join(env.dataDir, 'claude-respuestas.json'),
+    },
     { apiKey: env.anthropicKey },
   );
+  await ai.load();
   const authoring = new VaultAuthoring(app);
   app.runtime.ctx.eventAssistant = new EventAssistant(app, ai, authoring);
   // ⭐ Grandes partidos: la lista se guarda junto a los datos (no se paga otra vez al reiniciar).

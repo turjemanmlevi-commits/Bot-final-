@@ -23,7 +23,14 @@ export interface FakeReply {
   stall?: boolean;
   /** Empieza a contestar y corta la conexión a mitad. */
   cut?: boolean;
-  usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number; web_fetch_requests?: number } };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    /** Lo leído de la caché y lo guardado en ella (la API los cuenta aparte de input_tokens). */
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    server_tool_use?: { web_search_requests?: number; web_fetch_requests?: number };
+  };
 }
 
 export interface FakeError {
@@ -43,6 +50,9 @@ export const FAKE_MODELS = [
   { id: 'claude-sonnet-prueba', display_name: 'Sonnet de prueba', created_at: '2026-09-01T00:00:00Z', type: 'model' },
   { id: 'claude-opus-prueba-nuevo', display_name: 'Opus de prueba (nuevo)', created_at: '2026-08-01T00:00:00Z', type: 'model' },
   { id: 'claude-opus-prueba-viejo', display_name: 'Opus de prueba (viejo)', created_at: '2026-01-01T00:00:00Z', type: 'model' },
+  // Sin la búsqueda web que se usa: no se ofrecen para elegir.
+  { id: 'claude-opus-4-5-20251101', display_name: 'Claude Opus 4.5', created_at: '2025-11-01T00:00:00Z', type: 'model' },
+  { id: 'claude-haiku-4-5-20251001', display_name: 'Claude Haiku 4.5', created_at: '2025-10-01T00:00:00Z', type: 'model' },
 ];
 
 export class FakeAnthropic {
@@ -116,7 +126,13 @@ export class FakeAnthropic {
     send('message_delta', {
       type: 'message_delta',
       delta: { stop_reason: reply.stop_reason, stop_sequence: null },
-      usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, ...(reply.usage?.server_tool_use ? { server_tool_use: reply.usage.server_tool_use } : {}) },
+      usage: {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        ...(reply.usage?.cache_read_input_tokens !== undefined ? { cache_read_input_tokens: reply.usage.cache_read_input_tokens } : {}),
+        ...(reply.usage?.cache_creation_input_tokens !== undefined ? { cache_creation_input_tokens: reply.usage.cache_creation_input_tokens } : {}),
+        ...(reply.usage?.server_tool_use ? { server_tool_use: reply.usage.server_tool_use } : {}),
+      },
     });
     send('message_stop', { type: 'message_stop' });
     res.end();

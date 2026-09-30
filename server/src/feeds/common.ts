@@ -113,7 +113,8 @@ export class RateWindow {
 
 /** Caché con caducidad. Si se pide lo mismo dos veces a la vez, se hace una sola consulta. */
 export class TtlCache<T> {
-  private readonly map = new Map<string, { at: number; value: Promise<T> }>();
+  /** `done`: la respuesta ya ha llegado (para guardarla en disco). */
+  private readonly map = new Map<string, { at: number; value: Promise<T>; done?: { v: T } }>();
 
   constructor(
     private readonly ttlMs: number,
@@ -125,16 +126,32 @@ export class TtlCache<T> {
     const hit = this.map.get(key);
     if (hit && now - hit.at < this.ttlMs) return hit.value;
     const value = load();
-    this.map.set(key, { at: now, value });
+    const entry: { at: number; value: Promise<T>; done?: { v: T } } = { at: now, value };
+    this.map.set(key, entry);
     // Un fallo no se guarda: la siguiente vez se vuelve a preguntar.
-    value.catch(() => {
-      if (this.map.get(key)?.value === value) this.map.delete(key);
-    });
-    if (this.map.size > this.max) {
-      const oldest = this.map.keys().next().value;
-      if (oldest !== undefined) this.map.delete(oldest);
-    }
+    value.then(
+      (v) => {
+        entry.done = { v };
+      },
+      () => {
+        if (this.map.get(key)?.value === value) this.map.delete(key);
+      },
+    );
+    this.trim();
     return value;
+  }
+
+  /** Mete una respuesta ya conocida (p. ej. leída de disco) con la hora a la que se obtuvo. */
+  set(key: string, value: T, at: number): void {
+    if (Date.now() - at >= this.ttlMs) return;
+    this.map.set(key, { at, value: Promise.resolve(value), done: { v: value } });
+    this.trim();
+  }
+
+  /** Respuestas vigentes que ya han llegado (las que siguen en curso o han fallado no). */
+  entries(): Array<[string, number, T]> {
+    const now = Date.now();
+    return [...this.map.entries()].filter(([, e]) => e.done && now - e.at < this.ttlMs).map(([key, e]) => [key, e.at, (e.done as { v: T }).v]);
   }
 
   /** Olvida una respuesta guardada (p. ej. al pedir una nueva con «Buscar otra vez»). */
@@ -144,6 +161,13 @@ export class TtlCache<T> {
 
   clear(): void {
     this.map.clear();
+  }
+
+  private trim(): void {
+    if (this.map.size > this.max) {
+      const oldest = this.map.keys().next().value;
+      if (oldest !== undefined) this.map.delete(oldest);
+    }
   }
 }
 

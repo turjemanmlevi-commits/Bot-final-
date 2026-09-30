@@ -17,11 +17,41 @@ export interface AiStatus {
   detail: string;
   /** Modelo que se usa. */
   model: string;
+  /** Id del modelo que se usa (null: se elige en la primera consulta). */
+  modelId: string | null;
+  /** Una persona ha elegido el modelo (ANTHROPIC_MODEL); si no, el Opus más reciente de la cuenta. */
+  modelFixed: boolean;
   /** La clave se puede poner desde el dashboard (se guarda en .env). */
   configurable: boolean;
   /** Gastado desde que arrancó la sala (dólares, aproximado). */
   spentUsd: number;
 }
+
+/** Un modelo de la cuenta que sirve para las búsquedas, con su precio orientativo. */
+export interface AiModelOption {
+  id: string;
+  name: string;
+  /** Dólares por millón de tokens leídos (entrada) y escritos (salida). */
+  input: number;
+  output: number;
+}
+
+export interface AiModelsResult {
+  /** Modelo que se usa ahora (null: se elige en la primera consulta). */
+  current: string | null;
+  fixed: boolean;
+  options: AiModelOption[];
+}
+
+/** Modelo para las búsquedas; null = el Opus más reciente de la cuenta. */
+export const AiModelSchema = z.object({
+  model: z
+    .string()
+    .trim()
+    .max(100)
+    .regex(/^[A-Za-z0-9._-]+$/, 'Nombre de modelo no válido')
+    .nullable(),
+});
 
 /** Clave de la API de Claude (sk-ant-…); null = quitarla. */
 export const AiKeySchema = z.object({

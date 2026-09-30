@@ -114,7 +114,13 @@ Es orientativo: los sectores exactos están en el plano oficial de cada venta.
 
 ## Claude (IA)
 
-**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda en el `.env` de la carpeta del proyecto (variable `ANTHROPIC_API_KEY`; si la carpeta está en OneDrive, OneDrive también lo sube a tu nube); usa el Opus más reciente de tu cuenta (o el de `ANTHROPIC_MODEL`). Se paga por consulta a Anthropic; la misma búsqueda en 30 minutos es gratis.
+**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda en el `.env` de la carpeta del proyecto (variable `ANTHROPIC_API_KEY`; si la carpeta está en OneDrive, OneDrive también lo sube a tu nube); usa el Opus más reciente de tu cuenta, o el modelo que elijas ahí mismo (se guarda en `ANTHROPIC_MODEL`; **Sonnet cuesta la mitad que Opus**). Se paga por consulta a Anthropic.
+
+Para gastar menos:
+
+- **Caché de la API**: en cada búsqueda, Claude da muchas vueltas y en cada una vuelve a leer todo lo anterior (las páginas que ya ha leído incluidas). Esas relecturas salen de la caché, a una fracción del precio (en Opus 5.5, 0,20 $ en vez de 4 $ por millón de tokens).
+- **Respuestas guardadas** en `claude-respuestas.json`, en la carpeta de datos (también al reiniciar): repetir la misma búsqueda es gratis (lista de eventos 6 h, datos de un evento 12 h, plano 7 días). **Buscar otra vez** / **Volver a analizar** preguntan de nuevo.
+- Cada respuesta dice lo que ha costado, y la ventana negra anota cada consulta (`Claude: consulta`: modelo, dólares, tokens leídos y cuántos de la caché).
 
 - **Lista de eventos** de la web de venta elegida (búsqueda y lectura web de Claude, en los servidores de Anthropic).
 - **Análisis del evento**: fecha, **fases de venta con su límite** («máx. N por persona» en socios, preventa, general…), límite por persona (queda **verificado solo si Claude cita la web de venta oficial**), precios, recinto (se crea al momento con sus zonas si no está), **cómo está estructurada la venta** (zonas y secciones con los nombres de la web, su precio y a qué zona del plano corresponde cada una: nota del evento, `saleZones`), el **enlace directo de compra en la web oficial** y quién vende (las reventas se descartan) y la **imagen del plano oficial**, donde Claude sitúa cada zona para tocarla.

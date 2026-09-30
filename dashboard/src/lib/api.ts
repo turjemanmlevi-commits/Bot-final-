@@ -6,6 +6,7 @@ import type {
   AiEventsQuery,
   AiEventsResult,
   AiKeyResult,
+  AiModelsResult,
   AiSeatMap,
   AiSeatMapQuery,
   TopMatchesState,
@@ -194,6 +195,10 @@ export const Api = {
   feedEvent: (feed: FeedId, id: string) => api<FeedEvent>(`/api/feeds/${feed}/events/${encodeURIComponent(id)}`),
   /** Clave de la API de Claude (null = quitarla): se comprueba y se guarda en .env. */
   aiSetKey: (key: string | null) => api<AiKeyResult>('/api/ai/key', { method: 'PUT', body: { key } }),
+  /** Modelos de la cuenta de Claude que sirven para las búsquedas, con su precio (gratis). */
+  aiModels: () => api<AiModelsResult>('/api/ai/models'),
+  /** Modelo de las búsquedas (null = el Opus más reciente): se guarda en .env. */
+  aiSetModel: (model: string | null) => api<AiKeyResult>('/api/ai/model', { method: 'PUT', body: { model } }),
   /** Claude mira la web de venta y trae sus próximos eventos (tarda 1–2 min). */
   aiEvents: (q: AiEventsQuery) => post<AiEventsResult>('/api/ai/events', q),
   /** Claude lee el evento: fechas, fases de venta, límite por persona, precios, recinto y plano oficial. */

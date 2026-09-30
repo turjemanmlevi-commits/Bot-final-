@@ -12,6 +12,8 @@
  *   vigilancia, plano) y hacerlo entero desde Telegram con /evento.
  * - «Buscar otra vez» renueva la caché, fases con el mismo nombre, y de qué
  *   webs vale la frase del límite (la del proveedor o la elegida por una persona).
+ * - Gastar menos: caché de la API en las búsquedas web, respuestas guardadas en
+ *   disco (gratis tras reiniciar), precio de cada modelo y elegir el modelo.
  * - Casos raros: errores 402/404/413 y 400 sin JSON crudo, probar otra clave,
  *   respuesta cortada por max_tokens o a mitad, API que se queda callada (tope
  *   propio), reventas y direcciones locales en los enlaces y precios imposibles.
@@ -28,7 +30,7 @@ import type { Hono } from 'hono';
 import { AiDetailsQuerySchema, aiEventDraft, aiLayoutText, aiSaleZonesText, parseSaleZone, type AiEventDetails, type AiEventsResult, type AiKeyResult, type AiStatus } from '@to/shared';
 import { createApp, type App } from '../app';
 import { EventAssistant } from '../ai/assistant';
-import { AiError, ClaudeControl } from '../ai/claude';
+import { AiError, ClaudeControl, priceOf } from '../ai/claude';
 import { writeFixtureVault } from '../gates/fixtures';
 import { createHttpApp } from '../http/app';
 import { MemoryDriver } from '../store/drivers';
@@ -872,5 +874,150 @@ describe('de lo que lee Claude a un evento de la sala', () => {
     const url = `${BARCA.url}?${'utm_x=1&'.repeat(70)}`;
     assert.ok(url.length > 600 && url.length <= 1000);
     assert.equal(AiDetailsQuerySchema.safeParse({ providerId: 'real-madrid', name: BARCA.name, url }).success, true);
+  });
+});
+
+describe('Claude: gastar menos (caché de la API, respuestas guardadas y modelo)', () => {
+  let fake: FakeAnthropic;
+  let dir = '';
+  let envDir = '';
+  let envFile = '';
+  let cacheFile = '';
+  let base = '';
+  let app: App;
+  let ai: ClaudeControl;
+  let http: Hono;
+
+  before(async () => {
+    setLogSilent(true);
+    fake = new FakeAnthropic();
+    base = await fake.listen();
+    dir = await mkdtemp(path.join(tmpdir(), 'to-ai-cost-'));
+    await writeAiVault(dir);
+    envDir = await mkdtemp(path.join(tmpdir(), 'to-ai-cost-env-'));
+    envFile = path.join(envDir, '.env');
+    cacheFile = path.join(envDir, 'datos', 'claude-respuestas.json');
+    app = await createApp({ driver: new MemoryDriver(), vaultDir: dir, timeZone: TZ, publicBaseUrl: 'http://x', clock: new ManualClock(NOW), ids: new SeqIdGen() });
+    ai = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile, baseURL: base, cacheFile }, { apiKey: AI_KEY });
+    await ai.load();
+    http = createHttpApp(app, { dashboardDist: null, operatorToken: null, ai });
+  });
+
+  after(async () => {
+    await app.stop();
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+    await rm(envDir, { recursive: true, force: true });
+    setLogSilent(false);
+  });
+
+  it('con búsqueda web se usa la caché de la API y lo leído de ella se cobra barato; el plano (una vuelta) no la usa', async () => {
+    fake.script.push({
+      ...deliver('entregar_eventos', { events: [BARCA], notes: '' }),
+      usage: { input_tokens: 2000, cache_read_input_tokens: 50_000, cache_creation_input_tokens: 10_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } },
+    });
+    const r = await ai.findEvents({ providerId: 'real-madrid', days: 30 });
+    const body = fake.messageRequests().at(-1)?.body ?? {};
+    assert.deepEqual(body.cache_control, { type: 'ephemeral' }, 'caché automática de lo que va leyendo');
+    const system = body.system as Array<{ type: string; text: string; cache_control?: unknown }>;
+    assert.ok(Array.isArray(system), 'instrucciones con su marca de caché');
+    assert.match(system.at(-1)?.text ?? '', /investigador de eventos/);
+    assert.deepEqual(system.at(-1)?.cache_control, { type: 'ephemeral' });
+    // Opus: (2000 × 4 + 1000 × 20 + 50 000 × 0,2 + 10 000 × 5) $ por millón + 2 búsquedas × 0,01 $.
+    assert.ok(Math.abs(r.cost.usd - 0.108) < 1e-9, String(r.cost.usd));
+    assert.equal(r.cost.inputTokens, 62_000, 'los tokens leídos incluyen los de la caché');
+
+    fake.script.push(deliver('entregar_plano', { points: [{ zone: 'Fondo Sur', x: 50, y: 90 }], notes: '' }, 0, 0));
+    await ai.seatMap({ imageUrl: PLAN, zones: ['Fondo Sur'] });
+    const plan = fake.messageRequests().at(-1)?.body ?? {};
+    assert.equal(plan.cache_control, undefined, 'una sola vuelta: la caché solo encarecería');
+    assert.equal(typeof plan.system, 'string');
+  });
+
+  it('las respuestas se guardan en disco: tras reiniciar, la misma búsqueda es gratis y «Buscar otra vez» pregunta de nuevo', async () => {
+    fake.script.push(deliver('entregar_evento', detailsInput({ limitSource: 'https://www.realmadrid.com/es-ES/entradas/condiciones', planImage: PLAN })));
+    const q = { providerId: 'real-madrid', name: BARCA.name, startsAtLocal: '2026-10-25T16:15', venue: BARCA.venue, city: 'Madrid', url: BARCA.url };
+    const first = await ai.eventDetails(q);
+    assert.equal(first.cached, false);
+    await ai.flushed();
+    assert.ok(existsSync(cacheFile), 'se guarda junto a los datos');
+
+    // «Reiniciar»: otra sala de control con el mismo archivo.
+    const again = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile: null, baseURL: base, cacheFile }, { apiKey: AI_KEY });
+    await again.load();
+    const before = fake.messageRequests().length;
+    const list = await again.findEvents({ providerId: 'real-madrid', days: 30 });
+    assert.equal(list.cached, true);
+    assert.deepEqual(list.events.map((e) => e.name), [BARCA.name]);
+    const d = await again.eventDetails(q);
+    assert.equal(d.cached, true);
+    assert.equal(d.limit.perPerson, 2);
+    assert.equal(fake.messageRequests().length, before, 'sin preguntar a Claude');
+
+    // Un archivo roto no impide arrancar: se vuelve a preguntar.
+    await writeFile(cacheFile, '{ roto', 'utf8');
+    const broken = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile: null, baseURL: base, cacheFile }, { apiKey: AI_KEY });
+    await broken.load();
+    fake.script.push(deliver('entregar_eventos', { events: [], notes: '' }));
+    assert.equal((await broken.findEvents({ providerId: 'real-madrid', days: 30 })).cached, false);
+    // Las otras salas de la prueba ya no cuentan: el estado vuelve a ser el de la primera.
+    app.runtime.ctx.aiStatus = () => ai.status();
+
+    fake.script.push(deliver('entregar_evento', detailsInput({ name: 'Otra lectura', limitSource: 'https://www.realmadrid.com/x', planImage: null })));
+    const fresh = await ai.eventDetails({ ...q, fresh: true });
+    assert.equal(fresh.cached, false);
+    assert.equal(fresh.name, 'Otra lectura');
+    assert.equal(fake.messageRequests().length, before + 2);
+  });
+
+  it('se puede elegir el modelo: la lista trae su precio, Sonnet cuesta la mitad y se guarda en .env', async () => {
+    const list = await ai.models();
+    assert.deepEqual(
+      list.options.map((o) => [o.id, o.input, o.output]),
+      [
+        ['claude-sonnet-prueba', 2, 10],
+        ['claude-opus-prueba-nuevo', 4, 20],
+        ['claude-opus-prueba-viejo', 4, 20],
+      ],
+      'Opus y Sonnet con búsqueda web, del más nuevo al más viejo (ni Haiku ni Opus 4.5)',
+    );
+    assert.equal(list.current, 'claude-opus-prueba-nuevo');
+    assert.equal(list.fixed, false);
+
+    const other = await http.request('/api/ai/model', { method: 'PUT', headers: { ...JSON_HEADERS, origin: 'https://otra-web.example' }, body: JSON.stringify({ model: 'claude-sonnet-prueba' }) });
+    assert.equal(other.status, 403, 'otra web no puede cambiarlo');
+    const bad = (await (await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: 'claude-haiku-4-5-20251001' }) })).json()) as AiKeyResult;
+    assert.equal(bad.ok, false);
+    assert.match(bad.message, /no sirve para buscar en la web/);
+
+    const res = await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: 'claude-sonnet-prueba' }) });
+    const r = (await res.json()) as AiKeyResult;
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.status.modelId, 'claude-sonnet-prueba');
+    assert.equal(r.status.modelFixed, true);
+    assert.equal(r.status.model, 'Sonnet de prueba');
+    assert.match(await readFile(envFile, 'utf8'), /ANTHROPIC_MODEL=claude-sonnet-prueba/);
+
+    fake.script.push({ ...deliver('entregar_eventos', { events: [], notes: '' }), usage: { input_tokens: 10_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } } });
+    const s = await ai.findEvents({ providerId: 'real-madrid', days: 30, fresh: true });
+    assert.equal(fake.messageRequests().at(-1)?.body.model, 'claude-sonnet-prueba');
+    // Sonnet: (10 000 × 2 + 1000 × 10) $ por millón + 2 búsquedas × 0,01 $.
+    assert.ok(Math.abs(s.cost.usd - 0.05) < 1e-9, String(s.cost.usd));
+
+    const auto = (await (await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: null }) })).json()) as AiKeyResult;
+    assert.equal(auto.ok, true, auto.message);
+    assert.equal(auto.status.modelId, 'claude-opus-prueba-nuevo', 'automático: el Opus más reciente');
+    assert.equal(auto.status.modelFixed, false);
+    assert.doesNotMatch(await readFile(envFile, 'utf8'), /ANTHROPIC_MODEL=claude/);
+  });
+
+  it('precio orientativo de cada modelo', () => {
+    assert.equal(priceOf('claude-opus-5-5').input, 4);
+    assert.equal(priceOf('claude-opus-4-8').input, 5);
+    assert.equal(priceOf('claude-sonnet-5-5').input, 2);
+    assert.equal(priceOf('claude-sonnet-5-5').cacheRead, 0.2);
+    assert.equal(priceOf('claude-sonnet-4-6').output, 15);
+    assert.equal(priceOf('claude-haiku-4-5').input, 1);
+    assert.equal(priceOf('un-modelo-nuevo').input, 4, 'si no se conoce, como Opus (por lo alto)');
   });
 });

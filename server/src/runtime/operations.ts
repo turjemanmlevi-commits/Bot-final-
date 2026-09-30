@@ -958,7 +958,7 @@ export class OperationService {
         football: { feed: 'football', configured: false, ok: null, detail: 'Sin token.' },
         configurable: false,
       },
-      ai: ctx.aiStatus?.() ?? { configured: false, ok: null, detail: 'Sin clave.', model: '', configurable: false, spentUsd: 0 },
+      ai: ctx.aiStatus?.() ?? { configured: false, ok: null, detail: 'Sin clave.', model: '', modelId: null, modelFixed: false, configurable: false, spentUsd: 0 },
     };
   }
 }

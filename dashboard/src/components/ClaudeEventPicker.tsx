@@ -281,7 +281,7 @@ export function ClaudeEventPicker({
             </div>
           )}
           <div className="small muted">
-            {list.cached ? 'Respuesta de hace un rato (gratis).' : `Consulta: ${money(list.cost.usd)} · ${list.cost.seconds} s · ${list.cost.searches} búsquedas.`} Claude solo lee
+            {list.cached ? 'Respuesta guardada (gratis).' : `Consulta: ${money(list.cost.usd)} · ${list.cost.seconds} s · ${list.cost.searches} búsquedas.`} Claude solo lee
             páginas públicas: revisa los datos antes de guardar.
           </div>
         </>

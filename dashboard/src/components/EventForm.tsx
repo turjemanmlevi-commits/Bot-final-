@@ -578,7 +578,7 @@ function AiSummary({
             ))}
           </div>
         ) : null}
-        <div className="small muted">{d.cached ? 'Respuesta de hace un rato (gratis).' : `Consulta: ${d.cost.usd.toFixed(2).replace('.', ',')} $ · ${d.cost.seconds} s.`}</div>
+        <div className="small muted">{d.cached ? 'Respuesta guardada (gratis).' : `Consulta: ${d.cost.usd.toFixed(2).replace('.', ',')} $ · ${d.cost.seconds} s.`}</div>
       </div>
     </Callout>
   );

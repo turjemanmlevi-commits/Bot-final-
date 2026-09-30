@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router';
-import type { FeedId, FeedStatus, ProviderAuthorization, ProviderDescriptor, ProviderMode } from '@to/shared';
+import type { AiModelOption, FeedId, FeedStatus, ProviderAuthorization, ProviderDescriptor, ProviderMode } from '@to/shared';
 import { Icon, type IconName } from '../components/Icon';
 import { useDialog } from '../components/Dialog';
 import { SendToSalaButton } from '../components/SendToSala';
@@ -656,6 +656,80 @@ function extractAiKey(raw: string): string | null {
   return raw.match(/sk-ant-[A-Za-z0-9_-]{20,}/)?.[0] ?? null;
 }
 
+/** «4 $» / «0,5 $». */
+function usd(n: number): string {
+  return `${n.toLocaleString('es-ES', { maximumFractionDigits: 2 })} $`;
+}
+
+/**
+ * Modelo de las búsquedas: el Opus más reciente (por defecto) u otro de la
+ * cuenta. Sonnet cuesta la mitad: se elige aquí y se guarda en .env.
+ */
+function ClaudeModelPicker({ current, fixed }: { current: string | null; fixed: boolean }) {
+  const toast = useToast();
+  const [options, setOptions] = useState<AiModelOption[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [choice, setChoice] = useState(fixed ? (current ?? '') : '');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    Api.aiModels()
+      .then((r) => {
+        if (alive) setOptions(r.options);
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => setChoice(fixed ? (current ?? '') : ''), [current, fixed]);
+
+  const saved = fixed ? (current ?? '') : '';
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await Api.aiSetModel(choice || null);
+      toast(r.message, r.ok ? 'info' : 'error');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (error) return <div className="small muted">No se ha podido ver la lista de modelos: {error}</div>;
+  if (!options) return <div className="small muted">Mirando los modelos de tu cuenta…</div>;
+  const inList = options.some((o) => o.id === choice);
+  return (
+    <div className="stack" style={{ gap: 6 }}>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-end' }}>
+        <div className="field" style={{ flex: '1 1 320px', minWidth: 0 }}>
+          <label htmlFor="ai-model">Modelo para buscar y leer los eventos</label>
+          <select id="ai-model" className="input" value={choice} disabled={busy} onChange={(e) => setChoice(e.target.value)}>
+            <option value="">Automático: el Opus más reciente de tu cuenta</option>
+            {choice && !inList ? <option value={choice}>{choice}</option> : null}
+            {options.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.name} · {usd(o.input)} leer / {usd(o.output)} escribir (por millón)
+              </option>
+            ))}
+          </select>
+        </div>
+        <button type="button" className="btn" disabled={busy || choice === saved} onClick={() => void save()}>
+          {busy ? 'Guardando…' : 'Usar este modelo'}
+        </button>
+      </div>
+      <div className="small muted">
+        <b>Sonnet</b> cuesta la mitad que <b>Opus</b>. Para decidir, lee el mismo evento con los dos («Buscar otra vez») y compara lo que trae y el coste que sale debajo
+        de la respuesta.
+      </div>
+    </div>
+  );
+}
+
 function ClaudeCard() {
   const s = useLive();
   const toast = useToast();
@@ -728,6 +802,7 @@ function ClaudeCard() {
               {status.detail} · Modelo: <b>{status.model}</b> · Gastado desde que se abrió la sala: <b>{status.spentUsd.toFixed(2)} $</b> (aprox.)
             </div>
           ) : null}
+          {status.configured && status.configurable ? <ClaudeModelPicker current={status.modelId} fixed={status.modelFixed} /> : null}
           {last ? (
             <Callout tone={last.ok ? 'good' : 'critical'}>
               {fmtTime(last.at)} — {last.message}
@@ -795,8 +870,9 @@ function ClaudeCard() {
             </>
           )}
           <div className="small muted">
-            Cada búsqueda cuesta unos céntimos (lo cobra Anthropic a tu cuenta; el total real está en platform.claude.com). La misma búsqueda repetida en los 30 minutos
-            siguientes es gratis. Claude no interviene en la compra: al abrir la venta, el bot avisa al segundo.
+            Cada búsqueda cuesta unos céntimos (lo cobra Anthropic a tu cuenta; el total real está en platform.claude.com). Las respuestas se guardan, también al
+            reiniciar: repetir la misma búsqueda es gratis (la lista de eventos durante 6 horas; los datos de un evento, 12 horas). «Buscar otra vez» pregunta de nuevo y
+            se paga. Claude no interviene en la compra: al abrir la venta, el bot avisa al segundo.
           </div>
         </div>
       )}

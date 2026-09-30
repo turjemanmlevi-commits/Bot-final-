@@ -12,6 +12,7 @@ import {
   AiDetailsQuerySchema,
   AiEventsQuerySchema,
   AiKeySchema,
+  AiModelSchema,
   AiSeatMapQuerySchema,
   AccountPatchSchema,
   CartExpirySchema,
@@ -468,6 +469,14 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
       key = r.data.key;
     }
     const result: AiKeyResult = await aiControl().setKey(key, actorOf(c));
+    return c.json(result);
+  });
+  // Modelo de las búsquedas: los de la cuenta con su precio, y elegir uno (se guarda en .env). Gratis.
+  http.get('/api/ai/models', async (c) => c.json(await aiControl().models()));
+  http.put('/api/ai/model', async (c) => {
+    sameSite(c);
+    const b = await body(c, AiModelSchema);
+    const result: AiKeyResult = await aiControl().setModel(b.model, actorOf(c));
     return c.json(result);
   });
   // Cuestan dinero (se paga a Anthropic por consulta): solo desde el propio dashboard.

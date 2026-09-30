@@ -398,7 +398,7 @@ export class TelegramEventFlow {
       lines.push(`📅 <b>Próximos eventos en ${esc(s.providerName)}</b> (${s.events.length}). Toca uno y Claude leerá sus datos:`);
     }
     if (r?.notes) lines.push('', `ℹ️ ${esc(r.notes)}`);
-    if (r) lines.push('', `<i>${r.cached ? 'Respuesta de hace un rato (gratis).' : `Consulta: ${money(r.cost.usd)} · ${r.cost.seconds} s.`}</i>`);
+    if (r) lines.push('', `<i>${r.cached ? 'Respuesta guardada (gratis).' : `Consulta: ${money(r.cost.usd)} · ${r.cost.seconds} s.`}</i>`);
     return lines.join('\n');
   }
 
@@ -475,7 +475,7 @@ export class TelegramEventFlow {
     }
     if (d.status) lines.push(`📣 ${AI_STATUS_LABEL[d.status]}`);
     if (d.notes) lines.push(`ℹ️ ${esc(cut(d.notes, 400))}`);
-    lines.push('', `<i>${d.cached ? 'Respuesta de hace un rato (gratis).' : `Consulta: ${money(d.cost.usd)} · ${d.cost.seconds} s.`}</i>`);
+    lines.push('', `<i>${d.cached ? 'Respuesta guardada (gratis).' : `Consulta: ${money(d.cost.usd)} · ${d.cost.seconds} s.`}</i>`);
     if (s.created) lines.push('', '✅ <b>Creado.</b>');
     return lines.join('\n');
   }

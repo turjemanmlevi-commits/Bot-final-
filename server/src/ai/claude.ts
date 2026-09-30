@@ -13,6 +13,8 @@
  * La clave (ANTHROPIC_API_KEY) vive solo en .env y nunca sale por la API.
  */
 
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   bestVenueMatch,
@@ -26,6 +28,8 @@ import {
   type AiEventStatus,
   type AiEventSummary,
   type AiKeyResult,
+  type AiModelOption,
+  type AiModelsResult,
   type AiSeatMap,
   type AiSeatMapQuery,
   type AiStatus,
@@ -41,15 +45,60 @@ import { log } from '../util/log';
 import { localDateTime, TtlCache } from '../feeds/common';
 
 /**
- * Precios orientativos de la API (dólares): por millón de tokens y por búsqueda
- * web, los de la gama Opus actual. El gasto real está en platform.claude.com.
+ * Precios orientativos de la API (dólares por millón de tokens): lo que se lee
+ * (input), lo que se escribe (output) y lo que se lee o se guarda en la caché.
+ * El gasto real está en platform.claude.com.
  */
-const PRICE = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, perSearch: 0.01 };
+interface Price {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+const OPUS_5_5: Price = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
+const SONNET_5: Price = { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 };
+const HAIKU: Price = { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 };
+/** El primero que encaja. Un modelo que no está aquí se cobra como el de su familia. */
+const PRICES: Array<[RegExp, Price]> = [
+  [/^claude-opus-5-5/, OPUS_5_5],
+  [/^claude-opus-(5|4)/, { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 }],
+  [/^claude-sonnet-5/, SONNET_5],
+  [/^claude-sonnet-4/, { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 }],
+  [/^claude-haiku-/, HAIKU],
+  [/^claude-(fable|mythos)-/, { input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 }],
+  [/opus/, OPUS_5_5],
+  [/sonnet/, SONNET_5],
+  [/haiku/, HAIKU],
+];
+/** Cada búsqueda web (las lecturas de páginas solo cuestan los tokens que ocupan). */
+const PER_SEARCH = 0.01;
+
+export function priceOf(model: string): Price {
+  return PRICES.find(([re]) => re.test(model))?.[1] ?? OPUS_5_5;
+}
+
 /** Familia de modelos que se usa si no se elige otro (ANTHROPIC_MODEL): el más reciente de la cuenta. */
 const PREFERRED_FAMILY = /^claude-opus-/;
+/**
+ * Modelos que se pueden elegir: Opus y Sonnet con búsqueda web avanzada (4.6 en
+ * adelante). Haiku y los anteriores no tienen las herramientas web que se usan aquí.
+ */
+const SELECTABLE = /^claude-(opus|sonnet)-/;
+const TOO_OLD = /^claude-(opus|sonnet)-(4|4-[0-5])(-\d{8})?$/;
 const DAY = 86_400_000;
 /** Tope de una investigación entera (todas sus vueltas): si la API se queda callada, nada se cuelga más de esto. */
 const RESEARCH_TIMEOUT_MS = 10 * 60_000;
+/**
+ * Cuánto se guardan las respuestas (también al reiniciar): repetir la misma
+ * búsqueda en ese tiempo es gratis. «Buscar otra vez» siempre pregunta de nuevo.
+ */
+const EVENTS_TTL_MS = 6 * 3_600_000;
+const DETAILS_TTL_MS = 12 * 3_600_000;
+const PLAN_TTL_MS = 7 * DAY;
+/** Texto de una página que Claude mete en la conversación como mucho (tokens). */
+const FETCH_MAX_TOKENS = 30_000;
+/** Caché de la API: lo ya leído en una búsqueda se vuelve a leer a una fracción del precio. */
+const EPHEMERAL = { type: 'ephemeral' } as const;
 
 export class AiError extends Error {
   constructor(
@@ -71,6 +120,19 @@ export interface ClaudeControlOptions {
   baseURL?: string;
   /** Tope de una investigación (por defecto 10 min); las pruebas lo acortan. */
   researchTimeoutMs?: number;
+  /** Archivo donde se guardan las respuestas (para no pagarlas otra vez al reiniciar); null: solo en memoria. */
+  cacheFile?: string | null;
+}
+
+/** Formato del archivo de respuestas: si cambia, las guardadas se ignoran (se vuelve a preguntar). */
+const ANSWERS_VERSION = 1;
+
+/** Respuestas guardadas en disco: [clave, cuándo (ms), respuesta]. */
+interface SavedAnswers {
+  version: number;
+  events: Array<[string, number, AiEventsResult]>;
+  details: Array<[string, number, AiEventDetails]>;
+  plans: Array<[string, number, AiSeatMap]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,17 +435,36 @@ export class ClaudeControl {
   private model: { id: string; name: string } | null = null;
   /** El respaldo del servidor no está disponible para este modelo: se pide sin él. */
   private noFallback = false;
-  private readonly eventsCache = new TtlCache<AiEventsResult>(30 * 60_000, 50);
-  private readonly detailsCache = new TtlCache<AiEventDetails>(30 * 60_000, 100);
-  private readonly planCache = new TtlCache<AiSeatMap>(6 * 3_600_000, 100);
+  private readonly eventsCache = new TtlCache<AiEventsResult>(EVENTS_TTL_MS, 50);
+  private readonly detailsCache = new TtlCache<AiEventDetails>(DETAILS_TTL_MS, 100);
+  private readonly planCache = new TtlCache<AiSeatMap>(PLAN_TTL_MS, 100);
   private queue: Promise<unknown> = Promise.resolve();
+  /** Escrituras del archivo de respuestas, una detrás de otra. */
+  private saving: Promise<void> = Promise.resolve();
+  /** Modelo elegido por una persona (ANTHROPIC_MODEL); null: el Opus más reciente de la cuenta. */
+  private fixedModel: string | null;
 
   constructor(
     private readonly opts: ClaudeControlOptions,
     initial: { apiKey?: string | null } = {},
   ) {
+    this.fixedModel = opts.model || null;
     if (initial.apiKey) this.client = this.makeClient(initial.apiKey);
     opts.runtime.ctx.aiStatus = () => this.status();
+  }
+
+  /** Lee las respuestas guardadas en disco (al arrancar): repetirlas no cuesta nada. */
+  async load(): Promise<void> {
+    if (!this.opts.cacheFile) return;
+    try {
+      const data = JSON.parse(await readFile(this.opts.cacheFile, 'utf8')) as Partial<SavedAnswers>;
+      if (data.version !== ANSWERS_VERSION) return;
+      for (const [key, at, value] of data.events ?? []) this.eventsCache.set(key, value, at);
+      for (const [key, at, value] of data.details ?? []) this.detailsCache.set(key, value, at);
+      for (const [key, at, value] of data.plans ?? []) this.planCache.set(key, value, at);
+    } catch {
+      // sin respuestas guardadas todavía (o un archivo roto: se vuelve a preguntar)
+    }
   }
 
   configured(): boolean {
@@ -398,7 +479,9 @@ export class ClaudeControl {
       detail: configured
         ? this.health.detail || 'Clave puesta (se comprueba en la primera búsqueda).'
         : 'Sin clave: crea una en platform.claude.com (API keys) y pégala aquí.',
-      model: this.model?.name ?? this.opts.model ?? 'el más reciente de tu cuenta (se elige al conectar)',
+      model: this.model?.name ?? this.fixedModel ?? 'el más reciente de tu cuenta (se elige al conectar)',
+      modelId: this.model?.id ?? this.fixedModel,
+      modelFixed: this.fixedModel !== null,
       configurable: this.opts.envFile !== null,
       spentUsd: Math.round(this.spentUsd * 100) / 100,
     };
@@ -439,6 +522,49 @@ export class ClaudeControl {
       log.info('Claude configurado desde el dashboard');
       this.publish();
       const text = 'Listo: Claude conectado. En Eventos → Nuevo evento, elige la web de venta y Claude buscará sus próximos eventos.';
+      return this.result(true, warning ? `${text} ${warning}` : text);
+    });
+  }
+
+  /** Modelos de la cuenta que sirven para las búsquedas, con su precio (la consulta es gratuita). */
+  async models(): Promise<AiModelsResult> {
+    const client = this.need();
+    let all: Anthropic.ModelInfo[];
+    try {
+      all = await listModels(client.withOptions({ timeout: 20_000, maxRetries: 1 }));
+    } catch (err) {
+      throw err instanceof AiError ? err : this.explain(err);
+    }
+    return { current: this.model?.id ?? this.fixedModel, fixed: this.fixedModel !== null, options: modelOptions(all) };
+  }
+
+  /**
+   * Elige el modelo de las búsquedas (null: el Opus más reciente de la cuenta) y
+   * lo guarda en .env (ANTHROPIC_MODEL). Se usa desde la siguiente búsqueda.
+   */
+  setModel(id: string | null, actor: string): Promise<AiKeyResult> {
+    return this.serial(async () => {
+      const client = this.need();
+      const quick = client.withOptions({ timeout: 20_000, maxRetries: 1 });
+      let chosen: { id: string; name: string } | null = null;
+      if (id !== null) {
+        let options: AiModelOption[];
+        try {
+          options = modelOptions(await listModels(quick));
+        } catch (err) {
+          return this.result(false, (err instanceof AiError ? err : this.explain(err)).message);
+        }
+        const m = options.find((o) => o.id === id);
+        if (!m) return this.result(false, `Tu cuenta de Claude no tiene el modelo «${id}» (o no sirve para buscar en la web): elige otro de la lista.`);
+        chosen = { id: m.id, name: m.name };
+      }
+      const warning = await this.persist({ ANTHROPIC_MODEL: id });
+      this.fixedModel = id;
+      // Sin modelo fijo: el Opus más reciente (si ahora no se puede mirar, se elige en la próxima búsqueda).
+      this.model = chosen ?? (await this.pickModel(quick).catch(() => null));
+      this.opts.runtime.ctx.journal.audit('ai.model', { model: id }, { actor });
+      this.publish();
+      const text = `Listo: las búsquedas usan ${this.model?.name ?? chosen?.name ?? 'el Opus más reciente de tu cuenta'}.`;
       return this.result(true, warning ? `${text} ${warning}` : text);
     });
   }
@@ -743,6 +869,8 @@ export class ClaudeControl {
     const client = this.need();
     const started = Date.now();
     const cost: AiCost = { usd: 0, searches: 0, fetches: 0, inputTokens: 0, outputTokens: 0, seconds: 0 };
+    const cache = { read: 0, write: 0 };
+    let model = '';
     const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: 'user', content: prompt }];
     const tools: Anthropic.Beta.BetaToolUnion[] = [];
     if (opts.searches > 0) {
@@ -753,28 +881,37 @@ export class ClaudeControl {
         user_location: { type: 'approximate', city: 'Madrid', country: 'ES', timezone: 'Europe/Madrid' },
       });
     }
-    if (opts.fetches > 0) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: opts.fetches, max_content_tokens: 30_000 });
+    if (opts.fetches > 0) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: opts.fetches, max_content_tokens: FETCH_MAX_TOKENS });
     tools.push(tool);
+    // Con búsqueda web, Claude da muchas vueltas dentro de una misma petición y en cada una vuelve a
+    // leer todo lo anterior (las páginas incluidas). Con la caché, lo ya leído cuesta una fracción:
+    // - marca fija al final de las instrucciones (herramientas + sistema, iguales en cada búsqueda);
+    // - caché automática del resto (la API guarda también tras cada resultado de búsqueda o lectura).
+    // Sin búsqueda web (el plano) es una sola vuelta: la caché solo encarecería.
+    const web = opts.searches > 0 || opts.fetches > 0;
+    const system: string | Anthropic.Beta.BetaTextBlockParam[] = web ? [{ type: 'text', text: SYSTEM, cache_control: EPHEMERAL }] : SYSTEM;
     let asked = false;
     // Tope propio para toda la investigación: si la API se queda callada, la búsqueda (y «Actualizar») no se cuelga.
     const timeoutMs = this.opts.researchTimeoutMs ?? RESEARCH_TIMEOUT_MS;
     const deadline = AbortSignal.timeout(timeoutMs);
     try {
-      const model = (await this.pickModel(client, deadline)).id;
+      model = (await this.pickModel(client, deadline)).id;
+      const price = priceOf(model);
       for (let turn = 0; turn < 8; turn++) {
         const res = await this.ask(
           client,
           {
             model,
             max_tokens: 16000,
-            system: SYSTEM,
+            system,
+            ...(web ? { cache_control: EPHEMERAL } : {}),
             output_config: { effort: opts.effort },
             tools,
             messages,
           },
           deadline,
         );
-        this.addUsage(cost, res.usage);
+        this.addUsage(cost, res.usage, price, cache);
         if (res.stop_reason === 'refusal') {
           throw new AiError('REFUSED', 'Claude no ha hecho esta búsqueda (la ha rechazado por seguridad). Prueba a escribirla de otra forma.');
         }
@@ -807,6 +944,21 @@ export class ClaudeControl {
       cost.seconds = Math.round((Date.now() - started) / 100) / 10;
       cost.usd = Math.round(cost.usd * 10_000) / 10_000;
       this.spentUsd += cost.usd;
+      if (cost.inputTokens > 0) {
+        // En la ventana negra: lo que ha costado cada búsqueda y cuánto se ha leído de la caché.
+        log.info('Claude: consulta', {
+          herramienta: tool.name,
+          modelo: model,
+          usd: cost.usd.toFixed(3),
+          'tokens leídos': cost.inputTokens,
+          'de ellos, de la caché': cache.read,
+          'guardados en caché': cache.write,
+          'tokens escritos': cost.outputTokens,
+          búsquedas: cost.searches,
+          lecturas: cost.fetches,
+          segundos: cost.seconds,
+        });
+      }
       this.publish();
     }
   }
@@ -839,16 +991,12 @@ export class ClaudeControl {
    */
   private async pickModel(client: Anthropic, signal?: AbortSignal): Promise<{ id: string; name: string }> {
     if (client === this.client && this.model) return this.model;
-    const all: Anthropic.ModelInfo[] = [];
-    for await (const m of client.models.list({ limit: 100 }, { signal })) {
-      all.push(m);
-      if (all.length >= 500) break;
-    }
+    const all = await listModels(client, signal);
     const byDate = (a: Anthropic.ModelInfo, b: Anthropic.ModelInfo) => Date.parse(b.created_at) - Date.parse(a.created_at);
     let chosen: Anthropic.ModelInfo | undefined;
-    if (this.opts.model) {
-      chosen = all.find((m) => m.id === this.opts.model);
-      if (!chosen) throw new AiError('BAD_REQUEST', `Tu cuenta de Claude no tiene el modelo «${this.opts.model}» (ANTHROPIC_MODEL en .env): quítalo o pon otro.`);
+    if (this.fixedModel) {
+      chosen = all.find((m) => m.id === this.fixedModel);
+      if (!chosen) throw new AiError('BAD_REQUEST', `Tu cuenta de Claude no tiene el modelo «${this.fixedModel}» (ANTHROPIC_MODEL en .env): elige otro en Ajustes · Claude.`);
     } else {
       chosen = all.filter((m) => PREFERRED_FAMILY.test(m.id)).sort(byDate)[0] ?? [...all].sort(byDate)[0];
     }
@@ -858,7 +1006,8 @@ export class ClaudeControl {
     return model;
   }
 
-  private addUsage(cost: AiCost, usage: Anthropic.Beta.BetaUsage | undefined): void {
+  /** Suma lo que ha costado una petición (al precio de su modelo); `cache` lleva la cuenta de lo leído y guardado en caché. */
+  private addUsage(cost: AiCost, usage: Anthropic.Beta.BetaUsage | undefined, price: Price, cache: { read: number; write: number }): void {
     if (!usage) return;
     const input = usage.input_tokens ?? 0;
     const output = usage.output_tokens ?? 0;
@@ -871,7 +1020,9 @@ export class ClaudeControl {
     cost.outputTokens += output;
     cost.searches += searches;
     cost.fetches += fetches;
-    cost.usd += (input * PRICE.input + output * PRICE.output + cacheRead * PRICE.cacheRead + cacheWrite * PRICE.cacheWrite) / 1_000_000 + searches * PRICE.perSearch;
+    cache.read += cacheRead;
+    cache.write += cacheWrite;
+    cost.usd += (input * price.input + output * price.output + cacheRead * price.cacheRead + cacheWrite * price.cacheWrite) / 1_000_000 + searches * PER_SEARCH;
   }
 
   /**
@@ -903,8 +1054,8 @@ export class ClaudeControl {
       if (inUse) this.model = null;
       out = new AiError(
         'BAD_REQUEST',
-        this.opts.model
-          ? `Tu cuenta de Claude ya no tiene el modelo «${this.opts.model}» (ANTHROPIC_MODEL en .env): quítalo o pon otro.`
+        this.fixedModel
+          ? `Tu cuenta de Claude ya no tiene el modelo «${this.fixedModel}» (ANTHROPIC_MODEL en .env): elige otro en Ajustes · Claude.`
           : 'El modelo de Claude que se usaba ya no está disponible para tu cuenta: vuelve a intentarlo y se elegirá otro.',
       );
     } else if (err instanceof Anthropic.APIError && err.status === 413) {
@@ -949,7 +1100,34 @@ export class ClaudeControl {
         fresh = true;
         return load();
       })
-      .then((v) => (fresh ? v : { ...v, cached: true }));
+      .then((v) => {
+        if (!fresh) return { ...v, cached: true };
+        // Se guarda en disco: tras reiniciar, la misma búsqueda sigue siendo gratis.
+        this.saveAnswers();
+        return v;
+      });
+  }
+
+  /** Guarda las respuestas vigentes en disco (una escritura detrás de otra; un fallo solo se anota). */
+  private saveAnswers(): void {
+    const file = this.opts.cacheFile;
+    if (!file) return;
+    this.saving = this.saving.then(async () => {
+      const data: SavedAnswers = { version: ANSWERS_VERSION, events: this.eventsCache.entries(), details: this.detailsCache.entries(), plans: this.planCache.entries() };
+      try {
+        await mkdir(path.dirname(file), { recursive: true });
+        const tmp = `${file}.tmp`;
+        await writeFile(tmp, JSON.stringify(data), 'utf8');
+        await rename(tmp, file);
+      } catch (err) {
+        log.warn('Claude: no se pudieron guardar las respuestas en disco (funciona igual hasta cerrar)', { error: (err as Error).message });
+      }
+    });
+  }
+
+  /** Espera a que se guarden las respuestas (pruebas). */
+  async flushed(): Promise<void> {
+    await this.saving;
   }
 
   private provider(providerId: string): { name: string; url: string | null } {
@@ -988,6 +1166,7 @@ export class ClaudeControl {
     this.eventsCache.clear();
     this.detailsCache.clear();
     this.planCache.clear();
+    this.saveAnswers();
   }
 
   private publish(): void {
@@ -1016,6 +1195,27 @@ export class ClaudeControl {
     this.queue = run.catch(() => undefined);
     return run;
   }
+}
+
+/** Lista de modelos de la cuenta (la consulta es gratuita). */
+async function listModels(client: Anthropic, signal?: AbortSignal): Promise<Anthropic.ModelInfo[]> {
+  const all: Anthropic.ModelInfo[] = [];
+  for await (const m of client.models.list({ limit: 100 }, { signal })) {
+    all.push(m);
+    if (all.length >= 500) break;
+  }
+  return all;
+}
+
+/** Los que se pueden elegir para las búsquedas (Opus y Sonnet recientes), del más nuevo al más viejo, con su precio. */
+function modelOptions(all: Anthropic.ModelInfo[]): AiModelOption[] {
+  return all
+    .filter((m) => SELECTABLE.test(m.id) && !TOO_OLD.test(m.id))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .map((m) => {
+      const p = priceOf(m.id);
+      return { id: m.id, name: m.display_name || m.id, input: p.input, output: p.output };
+    });
 }
 
 /** ¿Es el enlace de la misma web (o subdominio) que alguna de las oficiales? */
