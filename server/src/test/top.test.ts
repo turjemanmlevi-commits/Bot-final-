@@ -6,6 +6,8 @@
  *   avisos «entrad ya en la web» a T−30, T−10 y T−2 a quien no tiene sesión lista.
  * - Lista de Claude: búsquedas en paralelo, sin repetidos, las más importantes,
  *   guardada en disco y enlazada con su estadio, su web de venta y su evento.
+ * - Si una búsqueda falla se conservan los partidos de ese tipo; si Claude se
+ *   queda callado, «Actualizar» termina con un mensaje claro; nunca una reventa.
  * - Telegram /top: tocar un partido lo prepara con vigilancia de 2 semanas y 1 por cuenta.
  */
 
@@ -243,6 +245,7 @@ function topReply(body: Record<string, unknown>): FakeReply {
 
 describe('⭐ Grandes partidos', () => {
   let fake: FakeAnthropic;
+  let base = '';
   let dir = '';
   let dataDir = '';
   let app: App;
@@ -253,7 +256,7 @@ describe('⭐ Grandes partidos', () => {
   before(async () => {
     setLogSilent(true);
     fake = new FakeAnthropic();
-    const base = await fake.listen();
+    base = await fake.listen();
     dir = await mkdtemp(path.join(tmpdir(), 'to-top-'));
     await writeFixtureVault(dir);
     await note(dir, '30 Proveedores/Real Madrid.md', 'type: provider\nid: real-madrid\nname: Real Madrid\nmode: MANUAL_ASSIST\nurl: https://www.realmadrid.com/es-ES/entradas\nauthorizedCapabilities: []');
@@ -385,6 +388,84 @@ describe('⭐ Grandes partidos', () => {
       await tg.close();
     }
   });
+
+  it('sin repetidos aunque el estadio o los equipos se escriban distinto, y la ida y la vuelta sin fecha no se funden', async () => {
+    const reply = (body: Record<string, unknown>): FakeReply => {
+      const prompt = JSON.stringify(body.messages);
+      if (/el Clásico/.test(prompt)) {
+        return deliver('entregar_partidos', { matches: [M({ home: 'Real Madrid', away: 'FC Barcelona', date: '2026-10-25', time: null, category: 'CLASICO', importance: 99, venue: 'Bernabéu', city: 'Madrid' })], notes: '' });
+      }
+      if (/Champions League/.test(prompt)) {
+        return deliver('entregar_partidos', { matches: [M({ home: 'Real Madrid CF', away: 'Barça', date: '2026-10-25', time: '16:15', category: 'CLASICO', importance: 97, venue: 'Estadio Santiago Bernabéu', city: 'Madrid' })], notes: '' });
+      }
+      if (/Copa del Rey/.test(prompt)) {
+        const semi = (home: string, away: string, round: string) => ({ ...M({ home, away, date: '2027-02-10', category: 'COPA', importance: 95, competition: `Copa del Rey · Semifinal ${round}` }), date: null, time: null });
+        return deliver('entregar_partidos', { matches: [semi('Real Madrid', 'FC Barcelona', 'ida'), semi('FC Barcelona', 'Real Madrid', 'vuelta')], notes: '' });
+      }
+      return deliver('entregar_partidos', { matches: [], notes: '' });
+    };
+    for (let i = 0; i < TOP_SEARCHES.length; i++) fake.script.push(reply);
+    top.refresh('prueba');
+    await top.settled();
+    const st = top.state();
+    const clasicos = st.matches.filter((m) => m.startsAtLocal?.startsWith('2026-10-25'));
+    assert.equal(clasicos.length, 1, JSON.stringify(clasicos.map((m) => [m.name, m.venue])));
+    assert.equal(clasicos[0]?.startsAtLocal, '2026-10-25T16:15', 'con la hora que sí se sabe');
+    assert.deepEqual(
+      st.matches
+        .filter((m) => m.category === 'COPA')
+        .map((m) => m.competition)
+        .sort(),
+      ['Copa del Rey · Semifinal ida', 'Copa del Rey · Semifinal vuelta'],
+    );
+  });
+
+  it('cada búsqueda se queda con sus partidos más importantes, no con los primeros que llegan', async () => {
+    const matches = Array.from({ length: 20 }, (_, i) => M({ home: `Equipo ${i}A`, away: `Equipo ${i}B`, date: `2026-11-${String(i + 1).padStart(2, '0')}`, importance: i < 15 ? 10 : 99 }));
+    fake.script.push(deliver('entregar_partidos', { matches, notes: '' }));
+    const r = await ai.topMatches({ focus: 'x', from: '2026-10-01', to: '2027-10-01', max: 14 });
+    assert.equal(r.matches.length, 14);
+    assert.equal(r.matches.filter((m) => m.importance === 99).length, 5);
+  });
+
+  it('si una búsqueda falla, se conservan los partidos de ese tipo que ya había', async () => {
+    const liverpool = M({ home: 'Real Madrid', away: 'Liverpool FC', date: '2026-11-04', category: 'CHAMPIONS', importance: 90, venue: 'Estadio Santiago Bernabéu', city: 'Madrid', competition: 'Champions League · Fase liga' });
+    const derbi = M({ home: 'Real Madrid', away: 'Atlético de Madrid', date: '2026-12-06', importance: 85 });
+    const champions = (body: Record<string, unknown>) => /Champions League/.test(JSON.stringify(body.messages));
+    for (let i = 0; i < TOP_SEARCHES.length; i++) fake.script.push((body) => deliver('entregar_partidos', { matches: champions(body) ? [liverpool] : [derbi], notes: '' }));
+    top.refresh('prueba');
+    await top.settled();
+    assert.ok(top.state().matches.some((m) => /Liverpool/.test(m.name)));
+    // Ahora la de Champions falla (un 400 no se reintenta) y las demás van bien.
+    for (let i = 0; i < TOP_SEARCHES.length; i++) {
+      fake.script.push((body) => (champions(body) ? { status: 400, type: 'invalid_request_error', message: 'x' } : deliver('entregar_partidos', { matches: [derbi], notes: '' })));
+    }
+    top.refresh('prueba');
+    await top.settled();
+    const st = top.state();
+    assert.equal(st.error, null);
+    assert.ok(
+      st.matches.some((m) => /Liverpool/.test(m.name)),
+      'el partido de Champions que ya había sigue en la lista',
+    );
+    assert.equal(st.matches.filter((m) => /Atlético/.test(m.name)).length, 1);
+    assert.match(st.notes.join(' '), /búsquedas no han terminado \(Claude ha rechazado la consulta: x\); se conservan los partidos que ya había/);
+  });
+
+  it('si Claude se queda callado, «Actualizar» no se queda colgado: termina con un mensaje claro y se puede repetir', { timeout: 10_000 }, async () => {
+    const slow = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile: null, baseURL: base, researchTimeoutMs: 300 }, { apiKey: AI_KEY });
+    const stalled = new TopMatches({ app, ai: slow, file: null, timeZone: TZ });
+    for (let i = 0; i < TOP_SEARCHES.length; i++) fake.script.push({ ...deliver('entregar_partidos', { matches: [], notes: '' }), stall: true });
+    assert.equal(stalled.refresh('prueba').refreshing, true);
+    await stalled.settled();
+    assert.equal(stalled.state().refreshing, false);
+    assert.match(stalled.state().error ?? '', /tardando demasiado/);
+    for (let i = 0; i < TOP_SEARCHES.length; i++) fake.script.push(topReply);
+    stalled.refresh('prueba');
+    await stalled.settled();
+    assert.equal(stalled.state().error, null);
+    assert.ok(stalled.state().matches.length > 0);
+  });
 });
 
 describe('⭐ Grandes partidos enlazados con su evento', () => {
@@ -450,5 +531,32 @@ describe('⭐ Grandes partidos enlazados con su evento', () => {
     assert.equal(eventOf('Real Madrid CF'), r.event?.id, 'el Clásico sí está preparado');
     assert.equal(eventOf('Atlético de Madrid'), null, '«de Madrid» y «Real» no bastan');
     assert.equal(eventOf('Real Betis'), null);
+  });
+
+  it('una lista guardada con un enlace de reventa no lo enseña como web oficial de venta', async () => {
+    const file = path.join(dataDir, 'top-reventa.json');
+    const m = (away: string, ticketUrl: string) => ({
+      name: `Real Madrid - ${away}`,
+      home: 'Real Madrid',
+      away,
+      competition: 'LaLiga',
+      category: 'LALIGA',
+      importance: 80,
+      why: '',
+      startsAtLocal: '2026-11-08T21:00',
+      timeTBA: false,
+      venue: null,
+      city: null,
+      country: null,
+      ticketUrl,
+      saleOpensLocal: null,
+    });
+    await writeFile(file, JSON.stringify({ at: new Date(NOW).toISOString(), matches: [m('FC Barcelona', 'https://www.viagogo.es/clasico'), m('Getafe CF', 'https://www.realmadrid.com/es-ES/entradas')], notes: [], cost: null }));
+    const top = new TopMatches({ app, ai: {} as never, file, timeZone: TZ });
+    await top.load();
+    assert.deepEqual(
+      top.state().matches.map((x) => x.ticketUrl),
+      [null, 'https://www.realmadrid.com/es-ES/entradas'],
+    );
   });
 });

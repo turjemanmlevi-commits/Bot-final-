@@ -34,6 +34,8 @@ export function safeFileName(name: string): string {
     .normalize('NFC')
     .replace(/[\\/:*?"<>|#^[\]\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ')
+    // Sin puntos al principio: «../Grada» sería una nota oculta que Obsidian y el compilador no ven.
+    .replace(/^[. ]+/, '')
     .trim();
   // Se corta por caracteres (no por unidades UTF-16): un emoji no se parte por la mitad.
   const cleaned = Array.from(full).slice(0, 110).join('').replace(/[. ]+$/, '');

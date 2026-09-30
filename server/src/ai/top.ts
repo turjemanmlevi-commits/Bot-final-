@@ -15,7 +15,7 @@ import { bestVenueMatch, nameTokens, TOP_MAX, venueMentioned, type AiCost, type 
 import type { App } from '../app';
 import { localDateTime } from '../feeds/common';
 import { log } from '../util/log';
-import { AiError, type ClaudeControl } from './claude';
+import { AiError, officialLink, type ClaudeControl } from './claude';
 
 /** Tipos de partido que se buscan (uno por consulta, en paralelo). */
 export const TOP_SEARCHES: Array<{ key: string; focus: string; max: number }> = [
@@ -56,21 +56,29 @@ function teamTokens(team: string): string[] {
 
 const EMPTY_COST: AiCost = { usd: 0, searches: 0, fetches: 0, inputTokens: 0, outputTokens: 0, seconds: 0 };
 
+/** Partido de la lista con el tipo de búsqueda que lo encontró (si esa búsqueda falla, se conserva). */
+type SavedMatch = AiTopMatch & { search?: string };
+
 interface Saved {
   at: string;
-  matches: AiTopMatch[];
+  matches: SavedMatch[];
   notes: string[];
   cost: AiCost;
 }
 
-/** Misma fecha y mismos equipos (o misma competición si aún no hay equipos): es el mismo partido. */
+/**
+ * Misma fecha y mismos equipos (o misma competición si aún no hay equipos): es
+ * el mismo partido. Sin fecha, la competición y la ronda separan la ida de la vuelta.
+ */
 function matchKey(m: AiTopMatch): string {
   const day = m.startsAtLocal?.slice(0, 10) ?? 'sin-fecha';
   const teams = [m.home, m.away]
     .filter((x): x is string => Boolean(x))
     .map((t) => nameTokens(t).sort().join('-'))
     .sort();
-  return `${day}|${teams.length === 2 ? teams.join('|') : nameTokens(m.competition).sort().join('-')}`;
+  const competition = nameTokens(m.competition).sort().join('-');
+  if (teams.length !== 2) return `${day}|${competition}`;
+  return m.startsAtLocal ? `${day}|${teams.join('|')}` : `${day}|${teams.join('|')}|${competition}`;
 }
 
 export class TopMatches {
@@ -147,17 +155,23 @@ export class TopMatches {
     const ok = results.filter((r): r is PromiseFulfilledResult<Awaited<ReturnType<ClaudeControl['topMatches']>>> => r.status === 'fulfilled').map((r) => r.value);
     const failed = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (ok.length === 0) throw failed[0]?.reason instanceof Error ? failed[0].reason : new Error('Claude no ha devuelto ningún partido');
+    // Cada partido lleva su tipo de búsqueda; si una falla, se conservan los de ese tipo que ya había (y no han pasado).
+    const found: SavedMatch[] = results.flatMap((r, i) => (r.status === 'fulfilled' ? r.value.matches.map((m) => ({ ...m, search: TOP_SEARCHES[i]?.key })) : []));
+    const lost = new Set(TOP_SEARCHES.filter((_, i) => results[i]?.status === 'rejected').map((t) => t.key));
+    const kept = (this.saved?.matches ?? []).filter((m) => m.search !== undefined && lost.has(m.search) && (m.startsAtLocal?.slice(0, 10) ?? from) >= from);
     // Juntar sin repetidos (el mismo partido puede salir en dos búsquedas): se queda el dato más completo.
-    const list: AiTopMatch[] = [];
+    const venues = this.venues();
+    const list: SavedMatch[] = [];
     const index = new Map<string, number>();
     const keysOf = (m: AiTopMatch) => {
       const keys = [matchKey(m)];
       // Mismo día y mismo estadio: el mismo partido aunque los equipos se escriban distinto («Barça» / «FC Barcelona»).
-      if (m.startsAtLocal && m.venue) keys.push(`${m.startsAtLocal.slice(0, 10)}@${nameTokens(m.venue).sort().join('-')}`);
+      // El estadio de la sala junta «Bernabéu» y «Estadio Santiago Bernabéu».
+      if (m.startsAtLocal && m.venue) keys.push(`${m.startsAtLocal.slice(0, 10)}@${bestVenueMatch(venues, m.venue, m.city) ?? nameTokens(m.venue).sort().join('-')}`);
       return keys;
     };
-    for (const r of ok) {
-      for (const m of r.matches) {
+    for (const group of [found, kept]) {
+      for (const m of group) {
         const keys = keysOf(m);
         const at = keys.map((k) => index.get(k)).find((i) => i !== undefined);
         const prev = at === undefined ? undefined : list[at];
@@ -197,7 +211,10 @@ export class TopMatches {
       EMPTY_COST,
     );
     const notes = ok.map((r) => r.notes).filter(Boolean);
-    if (failed.length > 0) notes.push(`${failed.length} de ${TOP_SEARCHES.length} búsquedas no han terminado (${(failed[0]?.reason as Error)?.message ?? 'error'}): pulsa «Actualizar» más tarde para completarla.`);
+    if (failed.length > 0) {
+      const why = (failed[0]?.reason as Error)?.message ?? 'error';
+      notes.push(`${failed.length} de ${TOP_SEARCHES.length} búsquedas no han terminado (${why})${kept.length > 0 ? '; se conservan los partidos que ya había de ese tipo' : ''}: pulsa «Actualizar» más tarde para completarla.`);
+    }
     this.saved = { at: new Date(now).toISOString(), matches, notes, cost };
     await this.persist();
     this.opts.app.runtime.ctx.journal.audit('top.refreshed', { matches: matches.length, usd: cost.usd }, { actor });
@@ -216,9 +233,9 @@ export class TopMatches {
   }
 
   /** Estadio de la sala, web de venta con la que se prepara y evento ya preparado. */
-  private enrich(m: AiTopMatch): TopMatch {
+  private enrich(m: SavedMatch): TopMatch {
     const store = this.opts.app.runtime.store;
-    const venues = (store.vaultReport?.venues ?? []).map((v) => ({ venueId: v.venueId, name: v.name, city: v.city ?? null, aliases: v.aliases ?? [] }));
+    const venues = this.venues();
     const vaultVenueId = (m.venue ? bestVenueMatch(venues, m.venue, m.city) : null) ?? venueMentioned(venues, `${m.venue ?? ''}`);
     const providers = store.providerAuthorizations.filter((p) => p.mode !== 'SIMULATED');
     const isRM = /real madrid/i.test(m.home ?? '') && (vaultVenueId === null || /bernab/i.test(m.venue ?? '') || /bernab/i.test(vaultVenueId));
@@ -235,12 +252,20 @@ export class TopMatches {
             return teams.every((t) => t.some((w) => words.has(w)));
           })
         : undefined;
+    const { search: _search, ...match } = m;
     return {
-      ...m,
+      ...match,
+      // Una lista guardada antes de filtrar las reventas tampoco las enseña como web oficial.
+      ticketUrl: officialLink(m.ticketUrl),
       id: createHash('sha1').update(matchKey(m)).digest('hex').slice(0, 12),
       vaultVenueId,
       providerId,
       eventId: event?.id ?? null,
     };
+  }
+
+  /** Recintos de la sala (para situar cada partido en su estadio). */
+  private venues() {
+    return (this.opts.app.runtime.store.vaultReport?.venues ?? []).map((v) => ({ venueId: v.venueId, name: v.name, city: v.city ?? null, aliases: v.aliases ?? [] }));
   }
 }

@@ -48,6 +48,8 @@ const PRICE = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5, perSearch: 
 /** Familia de modelos que se usa si no se elige otro (ANTHROPIC_MODEL): el más reciente de la cuenta. */
 const PREFERRED_FAMILY = /^claude-opus-/;
 const DAY = 86_400_000;
+/** Tope de una investigación entera (todas sus vueltas): si la API se queda callada, nada se cuelga más de esto. */
+const RESEARCH_TIMEOUT_MS = 10 * 60_000;
 
 export class AiError extends Error {
   constructor(
@@ -67,6 +69,8 @@ export interface ClaudeControlOptions {
   model?: string | null;
   /** Solo para pruebas: servidor que imita la API. */
   baseURL?: string;
+  /** Tope de una investigación (por defecto 10 min); las pruebas lo acortan. */
+  researchTimeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,25 +300,37 @@ function str(v: unknown, max = 300): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : null;
 }
 
+/** Enlaces: hasta 1000 caracteres, lo que admite la nota del evento (uno más largo se descarta, no se corta). */
+const MAX_URL = 1000;
+
 function httpUrl(v: unknown): string | null {
-  const s = str(v, 1000);
-  if (!s) return null;
+  const s = str(v, MAX_URL + 1);
+  if (!s || s.length > MAX_URL) return null;
   try {
     const u = new URL(s);
-    return u.protocol === 'https:' || u.protocol === 'http:' ? u.toString() : null;
+    const out = u.toString();
+    return (u.protocol === 'https:' || u.protocol === 'http:') && out.length <= MAX_URL ? out : null;
   } catch {
     return null;
   }
 }
 
+/** ¿Servidor público? No localhost (ni «localhost.»), una IP, un nombre sin punto ni una red local (.local, .internal…). */
+function publicHost(u: URL): boolean {
+  const host = u.hostname.toLowerCase().replace(/\.$/, '');
+  return host.includes('.') && !/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host) && !/^[\d.]+$/.test(host) && !host.includes(':');
+}
+
+/** Enlace a la web de venta (lista de eventos, grandes partidos, página de compra): público y nunca una reventa. */
+export function officialLink(v: unknown): string | null {
+  const s = httpUrl(v);
+  return s && !isResale(s) && publicHost(new URL(s)) ? s : null;
+}
+
 /** Imagen para enseñar en el dashboard y en Telegram: solo https y nunca una dirección local. */
 function imageUrl(v: unknown): string | null {
   const s = httpUrl(v);
-  if (!s) return null;
-  const u = new URL(s);
-  const host = u.hostname.toLowerCase();
-  if (u.protocol !== 'https:' || host === 'localhost' || host.endsWith('.local') || /^[\d.]+$/.test(host) || host.includes(':')) return null;
-  return u.toString();
+  return s && s.startsWith('https:') && publicHost(new URL(s)) ? s : null;
 }
 
 /** Formatos de imagen que Claude puede mirar (el svg se enseña, pero no se analiza). */
@@ -408,7 +424,8 @@ export class ClaudeControl {
         // Con tiempo corto: la respuesta llega siempre en segundos, con el motivo si falla.
         model = await this.pickModel(client.withOptions({ timeout: 20_000, maxRetries: 1 }));
       } catch (err) {
-        const e = err instanceof AiError ? err : this.explain(err);
+        // Probar otra clave no cambia el estado de la que está en uso.
+        const e = err instanceof AiError ? err : this.explain(err, { inUse: false });
         log.warn('Claude: la clave no se ha podido comprobar', { motivo: e.message, detalle: errorDetail(err) });
         return this.result(false, e.message);
       }
@@ -427,11 +444,11 @@ export class ClaudeControl {
   }
 
   // ---------------------------------------------------------------------------
-  // Búsquedas
+  // Búsquedas (async: un error de antes de preguntar llega como promesa rechazada, no de golpe)
   // ---------------------------------------------------------------------------
 
   /** Próximos eventos de una web de venta. */
-  findEvents(q: AiEventsQuery & { siteUrl?: string | null }): Promise<AiEventsResult> {
+  async findEvents(q: AiEventsQuery & { siteUrl?: string | null }): Promise<AiEventsResult> {
     const provider = this.provider(q.providerId);
     const site = httpUrl(q.siteUrl) ?? provider.url;
     if (!site) throw new AiError('BAD_REQUEST', `Falta la web de «${provider.name}»: pega su enlace oficial.`);
@@ -472,9 +489,10 @@ export class ClaudeControl {
           timeTBA: when.timeTBA,
           venue,
           city,
-          url: httpUrl(e.url),
+          // Ni reventas ni direcciones locales: el enlace se enseña como web de venta y Claude lo lee al elegir el evento.
+          url: officialLink(e.url),
           saleOpensLocal: sale && isRealLocalDateTime(sale) ? sale : null,
-          sourceUrl: httpUrl(e.sourceUrl),
+          sourceUrl: officialLink(e.sourceUrl),
           vaultVenueId: (venue ? bestVenueMatch(venues, venue, city) : null) ?? venueMentioned(venues, `${venue ?? ''} ${name}`),
         });
       }
@@ -487,18 +505,20 @@ export class ClaudeControl {
   }
 
   /** Datos completos de un evento: fechas, fases de venta, límite, precios y recinto. */
-  eventDetails(q: AiDetailsQuery): Promise<AiEventDetails> {
+  async eventDetails(q: AiDetailsQuery): Promise<AiEventDetails> {
     const provider = this.provider(q.providerId);
     const venues = this.vaultVenues();
     const knownVenue = (q.venue ? bestVenueMatch(venues, q.venue, q.city ?? null) : null) ?? venueMentioned(venues, `${q.venue ?? ''} ${q.name}`);
     // Zonas de nuestro plano del recinto: Claude dice a cuál corresponde cada zona de la venta.
     const ourZones = knownVenue ? this.venueZones(knownVenue) : [];
+    // La página que ha elegido una persona (o la de la lista): nunca una reventa ni una dirección local.
+    const pageUrl = officialLink(q.url);
     const key = JSON.stringify([q.providerId, q.name, q.startsAtLocal ?? '', q.venue ?? '', q.url ?? '']);
     const load = async (): Promise<AiEventDetails> => {
       const prompt = [
         `Web de venta: ${provider.name}${provider.url ? ` — ${provider.url}` : ''}`,
         `Evento: ${q.name}${q.startsAtLocal ? ` · ${q.startsAtLocal.replace('T', ' ')}` : ''}${q.venue ? ` · ${q.venue}` : ''}${q.city ? ` (${q.city})` : ''}`,
-        q.url ? `Página del evento: ${q.url} (léela primero con web_fetch).` : 'Busca primero su página oficial de venta.',
+        pageUrl ? `Página del evento: ${pageUrl} (léela primero con web_fetch).` : 'Busca primero su página oficial de venta.',
         'Analízalo todo, con fuentes, para preparar la compra:',
         '1. Nombre exacto, fecha y hora (España), recinto y ciudad.',
         '2. El enlace DIRECTO a la página de COMPRA de entradas de este evento en la web oficial que lo vende (club, ticketera oficial, UEFA, RFEF…) y quién la vende. Nunca una web de reventa (Viagogo, StubHub, Ticketswap…) ni una noticia.',
@@ -524,7 +544,7 @@ export class ClaudeControl {
         urlWarning = `Claude encontró un enlace de reventa (${hostOf(url)}): no se usa. Compra solo en la web oficial.`;
         url = null;
       }
-      url = url ?? (q.url && !isResale(q.url) ? httpUrl(q.url) : null);
+      url = officialLink(url) ?? pageUrl;
       const sales = (Array.isArray(r.sales) ? r.sales : [])
         .map((x) => x as Record<string, unknown>)
         .map((x) => ({
@@ -547,12 +567,15 @@ export class ClaudeControl {
       const perPerson = typeof lim.perPerson === 'number' && Number.isInteger(lim.perPerson) && lim.perPerson >= 1 && lim.perPerson <= 50 ? lim.perPerson : null;
       const scope = typeof lim.scope === 'string' ? lim.scope : null;
       const quote = str(lim.quote, 300);
-      const limitSourceRaw = httpUrl(lim.sourceUrl);
-      const limitSource = limitSourceRaw && !isResale(limitSourceRaw) ? limitSourceRaw : null;
+      const limitSource = officialLink(lim.sourceUrl);
       // «Oficial» solo si la frase sale de la web del proveedor o del enlace que ha elegido una persona:
       // el enlace que da el propio Claude no sirve de referencia (podría ser una noticia).
-      const official = Boolean(perPerson && quote && limitSource && sameSite(limitSource, [provider.url, q.url]));
+      const official = Boolean(perPerson && quote && limitSource && sameSite(limitSource, [provider.url, pageUrl]));
       const price = r.price && typeof r.price === 'object' ? (r.price as Record<string, unknown>) : null;
+      // Precios: nunca negativos; si el mínimo pasa del máximo, no se sabe cuál está mal y no se usa ninguno.
+      const money = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null);
+      let [minPrice, maxPrice] = [money(price?.min), money(price?.max)];
+      if (minPrice !== null && maxPrice !== null && minPrice > maxPrice) [minPrice, maxPrice] = [null, null];
       const zoneByKey = new Map(ourZones.map((z) => [z.toLowerCase(), z]));
       const layout = Array.isArray(r.layout)
         ? r.layout
@@ -581,8 +604,8 @@ export class ClaudeControl {
         limit: { perPerson, semantics: perPerson && scope ? (SCOPE[scope] ?? 'PER_HOLDER') : perPerson ? 'PER_HOLDER' : null, quote, sourceUrl: limitSource, official },
         price: price
           ? {
-              min: typeof price.min === 'number' ? price.min : null,
-              max: typeof price.max === 'number' ? price.max : null,
+              min: minPrice,
+              max: maxPrice,
               currency: (str(price.currency, 3) ?? 'EUR').toUpperCase(),
             }
           : null,
@@ -591,8 +614,8 @@ export class ClaudeControl {
         status,
         notes: str(r.notes, 800) ?? '',
         sources: (Array.isArray(r.sources) ? r.sources : [])
-          .map(httpUrl)
-          .filter((u): u is string => u !== null && !isResale(u))
+          .map(officialLink)
+          .filter((u): u is string => u !== null)
           .slice(0, 12),
         vaultVenueId: knownVenue ?? (venue ? bestVenueMatch(venues, venue, city) : null),
         cost,
@@ -650,18 +673,20 @@ export class ClaudeControl {
         venue: str(m.venue, 160),
         city: str(m.city, 80),
         country: str(m.country, 60),
-        ticketUrl: httpUrl(m.ticketUrl),
+        ticketUrl: officialLink(m.ticketUrl),
         saleOpensLocal: sale && isRealLocalDateTime(sale) ? sale : null,
       });
     }
-    return { matches: matches.slice(0, q.max), notes: str(raw.notes, 400) ?? '', cost };
+    // Si trae más de la cuenta, se quedan los más importantes (no los primeros que ha escrito).
+    const top = new Set([...matches].sort((a, b) => b.importance - a.importance).slice(0, q.max));
+    return { matches: matches.filter((m) => top.has(m)), notes: str(raw.notes, 400) ?? '', cost };
   }
 
   /**
    * Dónde está cada zona en la imagen del plano oficial (Claude la mira): así se
    * puede tocar la zona sobre el plano tal cual se ve al comprar.
    */
-  seatMap(q: AiSeatMapQuery): Promise<AiSeatMap> {
+  async seatMap(q: AiSeatMapQuery): Promise<AiSeatMap> {
     const image = imageUrl(q.imageUrl);
     if (!image) throw new AiError('BAD_REQUEST', 'La imagen del plano tiene que ser un enlace https:// público.');
     const zones = [...new Set(q.zones.map((z) => z.trim()).filter(Boolean))].slice(0, 80);
@@ -731,21 +756,30 @@ export class ClaudeControl {
     if (opts.fetches > 0) tools.push({ type: 'web_fetch_20260209', name: 'web_fetch', max_uses: opts.fetches, max_content_tokens: 30_000 });
     tools.push(tool);
     let asked = false;
+    // Tope propio para toda la investigación: si la API se queda callada, la búsqueda (y «Actualizar») no se cuelga.
+    const timeoutMs = this.opts.researchTimeoutMs ?? RESEARCH_TIMEOUT_MS;
+    const deadline = AbortSignal.timeout(timeoutMs);
     try {
-      const model = (await this.pickModel(client)).id;
+      const model = (await this.pickModel(client, deadline)).id;
       for (let turn = 0; turn < 8; turn++) {
-        const res = await this.ask(client, {
-          model,
-          max_tokens: 16000,
-          system: SYSTEM,
-          output_config: { effort: opts.effort },
-          tools,
-          messages,
-        });
+        const res = await this.ask(
+          client,
+          {
+            model,
+            max_tokens: 16000,
+            system: SYSTEM,
+            output_config: { effort: opts.effort },
+            tools,
+            messages,
+          },
+          deadline,
+        );
         this.addUsage(cost, res.usage);
         if (res.stop_reason === 'refusal') {
           throw new AiError('REFUSED', 'Claude no ha hecho esta búsqueda (la ha rechazado por seguridad). Prueba a escribirla de otra forma.');
         }
+        // Cortada por max_tokens: la llamada a la herramienta puede estar a medias (el SDK la completa como puede).
+        if (res.stop_reason === 'max_tokens') throw new AiError('INCOMPLETE', 'La respuesta de Claude era demasiado larga y se ha cortado: prueba con menos días o afina la búsqueda.');
         const call = res.content.find((b) => b.type === 'tool_use' && b.name === tool.name);
         if (call && call.type === 'tool_use') {
           if (this.health.ok !== true) {
@@ -753,7 +787,6 @@ export class ClaudeControl {
           }
           return { input: call.input, cost };
         }
-        if (res.stop_reason === 'max_tokens') throw new AiError('INCOMPLETE', 'La respuesta de Claude era demasiado larga y se ha cortado: prueba con menos días o afina la búsqueda.');
         // La vuelta sigue tal cual (sin tocar lo anterior): así Claude continúa donde lo dejó.
         messages.push({ role: 'assistant', content: res.content });
         if (res.stop_reason === 'pause_turn') continue;
@@ -764,7 +797,12 @@ export class ClaudeControl {
       throw new AiError('INCOMPLETE', 'Claude no ha terminado la búsqueda. Vuelve a intentarlo en un momento.');
     } catch (err) {
       if (err instanceof AiError) throw err;
-      throw this.explain(err);
+      if (deadline.aborted) {
+        const limit = timeoutMs >= 60_000 ? `${Math.round(timeoutMs / 60_000)} min` : `${Math.round(timeoutMs / 1000)} s`;
+        throw new AiError('INCOMPLETE', `Claude está tardando demasiado (más de ${limit}) y se ha parado la búsqueda. Vuelve a intentarlo en un rato o afina la búsqueda.`);
+      }
+      // Solo el plano lleva imagen: un fallo con «url» en otra búsqueda no es la imagen del plano.
+      throw this.explain(err, { image: Array.isArray(prompt) && prompt.some((b) => b.type === 'image') });
     } finally {
       cost.seconds = Math.round((Date.now() - started) / 100) / 10;
       cost.usd = Math.round(cost.usd * 10_000) / 10_000;
@@ -778,18 +816,18 @@ export class ClaudeControl {
    * tardar minutos: así la conexión no se queda callada). Si el modelo declina
    * por seguridad, el servidor de Anthropic la repite con su modelo de respaldo.
    */
-  private async ask(client: Anthropic, params: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming): Promise<Anthropic.Beta.BetaMessage> {
+  private async ask(client: Anthropic, params: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming, signal?: AbortSignal): Promise<Anthropic.Beta.BetaMessage> {
     const withFallback: Anthropic.Beta.Messages.MessageCreateParamsNonStreaming = this.noFallback
       ? params
       : { ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: 'default' };
     try {
-      return await client.beta.messages.stream(withFallback).finalMessage();
+      return await client.beta.messages.stream(withFallback, { signal }).finalMessage();
     } catch (err) {
       // Un modelo sin respaldo configurado lo rechaza: se repite sin él (y ya no se pide más).
       if (!this.noFallback && err instanceof Anthropic.BadRequestError && /fallback/i.test(err.message)) {
         this.noFallback = true;
         log.warn('Claude: este modelo no admite el respaldo del servidor; se sigue sin él');
-        return client.beta.messages.stream(params).finalMessage();
+        return client.beta.messages.stream(params, { signal }).finalMessage();
       }
       throw err;
     }
@@ -799,10 +837,10 @@ export class ClaudeControl {
    * Modelo para esta clave: el fijado en ANTHROPIC_MODEL o, si no, el Opus más
    * reciente de la lista de la cuenta (la consulta es gratuita).
    */
-  private async pickModel(client: Anthropic): Promise<{ id: string; name: string }> {
+  private async pickModel(client: Anthropic, signal?: AbortSignal): Promise<{ id: string; name: string }> {
     if (client === this.client && this.model) return this.model;
     const all: Anthropic.ModelInfo[] = [];
-    for await (const m of client.models.list({ limit: 100 })) {
+    for await (const m of client.models.list({ limit: 100 }, { signal })) {
       all.push(m);
       if (all.length >= 500) break;
     }
@@ -836,8 +874,15 @@ export class ClaudeControl {
     cost.usd += (input * PRICE.input + output * PRICE.output + cacheRead * PRICE.cacheRead + cacheWrite * PRICE.cacheWrite) / 1_000_000 + searches * PRICE.perSearch;
   }
 
-  /** Error de la API → mensaje claro (nunca con la clave). */
-  private explain(err: unknown): AiError {
+  /**
+   * Error de la API → mensaje claro (nunca con la clave). `inUse: false`: es de
+   * una clave que se está probando (el estado y el modelo de la que está en uso
+   * no cambian). `image`: la consulta llevaba la imagen del plano.
+   */
+  private explain(err: unknown, opts: { inUse?: boolean; image?: boolean } = {}): AiError {
+    const inUse = opts.inUse !== false;
+    // El texto de la API, sin el código ni el JSON crudo («400 {"type":"error",…}»).
+    const m = err instanceof Anthropic.APIError ? apiMessage(err) : '';
     let out: AiError;
     if (err instanceof Anthropic.AuthenticationError) {
       out = new AiError('AUTH', 'Claude no acepta la clave: crea otra en platform.claude.com → API keys y pégala en Ajustes · Claude.');
@@ -846,12 +891,27 @@ export class ClaudeControl {
     } else if (err instanceof Anthropic.RateLimitError) {
       out = new AiError('RATE', 'Claude: demasiadas consultas seguidas o límite de gasto alcanzado. Espera un poco (o revisa el saldo en platform.claude.com).');
     } else if (err instanceof Anthropic.BadRequestError) {
-      const m = err.message ?? '';
       out = /credit|balance|billing/i.test(m)
         ? new AiError('AUTH', 'Tu cuenta de Claude no tiene saldo: añade crédito en platform.claude.com → Billing.')
-        : /image|download|url/i.test(m)
+        : opts.image && /image|download|url/i.test(m)
           ? new AiError('BAD_REQUEST', 'Claude no ha podido abrir la imagen del plano (la web no la deja descargar): se enseña tal cual y las zonas se eligen en la lista.')
-          : new AiError('BAD_REQUEST', `Claude ha rechazado la consulta: ${m.slice(0, 200)}`);
+          : new AiError('BAD_REQUEST', m ? `Claude ha rechazado la consulta: ${m}` : 'Claude ha rechazado la consulta (error 400).');
+    } else if (err instanceof Anthropic.APIError && err.status === 402) {
+      out = new AiError('AUTH', 'Tu cuenta de Claude no tiene saldo o hay un problema con el pago: revisa Billing en platform.claude.com.');
+    } else if (err instanceof Anthropic.NotFoundError && /model/i.test(m)) {
+      // El modelo elegido ya no está (retirado o sin acceso): la próxima consulta lo vuelve a elegir.
+      if (inUse) this.model = null;
+      out = new AiError(
+        'BAD_REQUEST',
+        this.opts.model
+          ? `Tu cuenta de Claude ya no tiene el modelo «${this.opts.model}» (ANTHROPIC_MODEL en .env): quítalo o pon otro.`
+          : 'El modelo de Claude que se usaba ya no está disponible para tu cuenta: vuelve a intentarlo y se elegirá otro.',
+      );
+    } else if (err instanceof Anthropic.APIError && err.status === 413) {
+      out = new AiError('BAD_REQUEST', 'La consulta es demasiado grande para Claude: prueba con menos días o afina la búsqueda.');
+    } else if (err instanceof Anthropic.APIConnectionTimeoutError) {
+      // El tope del SDK no trae código de red: la conexión se abrió, pero la respuesta no llegó a tiempo.
+      out = new AiError('NETWORK', 'Claude no ha contestado a tiempo (api.anthropic.com): puede estar saturado o la conexión va muy lenta. Vuelve a intentarlo en unos minutos.');
     } else if (err instanceof Anthropic.APIConnectionError) {
       const code = errorDetail(err);
       const hint = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|UNABLE_TO_GET_ISSUER/i.test(code)
@@ -862,12 +922,17 @@ export class ClaudeControl {
             ? 'no responde a tiempo: revisa la conexión o si un cortafuegos o antivirus bloquea a Node.js'
             : 'revisa la conexión a internet o si un antivirus o cortafuegos bloquea a Node.js';
       out = new AiError('NETWORK', `No se pudo conectar con Claude (api.anthropic.com)${code ? ` [${code}]` : ''}: ${hint}.`);
+    } else if (err instanceof Anthropic.APIError && err.status !== undefined && err.status < 500 && err.status !== 408 && err.status !== 409) {
+      // Otros 4xx: repetir la misma consulta no lo arregla.
+      out = new AiError('BAD_REQUEST', `Claude ha rechazado la consulta (error ${err.status})${m ? `: ${m}` : '.'}`);
     } else if (err instanceof Anthropic.APIError) {
       out = new AiError('NETWORK', `Claude no está respondiendo bien ahora mismo (error ${err.status ?? '?'}). Vuelve a intentarlo en un minuto.`);
+    } else if (/terminated|ECONNRESET|UND_ERR_SOCKET|other side closed/i.test(`${(err as Error).message} ${errorDetail(err)}`)) {
+      out = new AiError('NETWORK', 'Se ha cortado la conexión con Claude a mitad de la respuesta: vuelve a intentarlo en un momento.');
     } else {
       out = new AiError('NETWORK', `Error al hablar con Claude: ${(err as Error).message}`);
     }
-    if (out.code === 'AUTH' || out.code === 'NETWORK') {
+    if (inUse && (out.code === 'AUTH' || out.code === 'NETWORK')) {
       const changed = this.health.detail !== out.message;
       this.health = { ok: false, detail: out.message };
       if (changed) this.publish();
@@ -973,6 +1038,13 @@ function registrableDomain(host: string): string {
   const parts = host.split('.');
   if (parts.length >= 3 && (parts.at(-1) ?? '').length === 2 && SECOND_LEVEL.test(parts.at(-2) ?? '')) return parts.slice(-3).join('.');
   return parts.slice(-2).join('.');
+}
+
+/** Texto del error que da la API («messages: text content blocks must be non-empty»), sin el código ni el JSON. */
+function apiMessage(err: InstanceType<typeof Anthropic.APIError>): string {
+  const body = err.error as { message?: unknown; error?: { message?: unknown } } | undefined;
+  const m = body?.error?.message ?? body?.message;
+  return typeof m === 'string' ? m.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
 }
 
 /** Código técnico de un fallo de red (ECONNRESET, SELF_SIGNED_CERT_IN_CHAIN…) para el mensaje y la ventana negra. */

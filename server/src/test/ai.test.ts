@@ -12,9 +12,13 @@
  *   vigilancia, plano) y hacerlo entero desde Telegram con /evento.
  * - «Buscar otra vez» renueva la caché, fases con el mismo nombre, y de qué
  *   webs vale la frase del límite (la del proveedor o la elegida por una persona).
+ * - Casos raros: errores 402/404/413 y 400 sin JSON crudo, probar otra clave,
+ *   respuesta cortada por max_tokens o a mitad, API que se queda callada (tope
+ *   propio), reventas y direcciones locales en los enlaces y precios imposibles.
  */
 
 import assert from 'node:assert/strict';
+import Anthropic from '@anthropic-ai/sdk';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -622,6 +626,202 @@ describe('Claude: caché, fases de venta y límite «oficial»', () => {
     const inter = 'https://www.inter.it/biglietti/inter-real-madrid';
     fake.script.push(deliver('entregar_evento', detailsInput({ name: 'Inter - Real Madrid', limitSource: inter, planImage: null, url: inter })));
     assert.equal((await ai.eventDetails({ providerId: 'manual', name: 'Inter - Real Madrid' })).limit.official, false);
+  });
+});
+
+describe('Claude: errores de la API, cortes y enlaces raros', () => {
+  let fake: FakeAnthropic;
+  let base = '';
+  let dir = '';
+  let app: App;
+  let ai: ClaudeControl;
+  let http: Hono;
+
+  before(async () => {
+    setLogSilent(true);
+    fake = new FakeAnthropic();
+    base = await fake.listen();
+    dir = await mkdtemp(path.join(tmpdir(), 'to-ai-raros-'));
+    await writeAiVault(dir);
+    app = await createApp({ driver: new MemoryDriver(), vaultDir: dir, timeZone: TZ, publicBaseUrl: 'http://x', clock: new ManualClock(NOW), ids: new SeqIdGen() });
+    ai = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile: null, baseURL: base }, { apiKey: AI_KEY });
+    const authoring = new VaultAuthoring(app);
+    app.runtime.ctx.eventAssistant = new EventAssistant(app, ai, authoring);
+    http = createHttpApp(app, { dashboardDist: null, operatorToken: null, ai, authoring });
+  });
+
+  after(async () => {
+    app.runtime.ctx.notifier = null;
+    await app.stop();
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+    setLogSilent(false);
+  });
+
+  const failWith = async (status: number, type: string, message: string, days = 30) => {
+    fake.script.push({ status, type, message });
+    const res = await http.request('/api/ai/events', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ providerId: 'real-madrid', days, fresh: true }) });
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    return { status: res.status, code: body.error.code, message: body.error.message };
+  };
+
+  it('402, 404 y 413 con su propio mensaje, un 400 sin el JSON de la API y, tras un 404 del modelo, se vuelve a elegir', async () => {
+    const billing = await failWith(402, 'billing_error', 'Your credit balance is too low to access the Anthropic API.');
+    assert.deepEqual([billing.status, billing.code], [502, 'AI_AUTH']);
+    assert.match(billing.message, /no tiene saldo o hay un problema con el pago/);
+    const big = await failWith(413, 'request_too_large', 'Request exceeds the maximum allowed number of bytes.');
+    assert.deepEqual([big.status, big.code], [400, 'AI_BAD_REQUEST']);
+    assert.match(big.message, /demasiado grande/);
+    const bad = await failWith(400, 'invalid_request_error', 'messages: text content blocks must be non-empty');
+    assert.equal(bad.message, 'Claude ha rechazado la consulta: messages: text content blocks must be non-empty');
+    // Un 400 que habla de una «url» en una búsqueda sin imagen no es el plano.
+    const fetchFailed = await failWith(400, 'invalid_request_error', 'tools.1.web_fetch: the url https://www.realmadrid.com could not be fetched');
+    assert.doesNotMatch(fetchFailed.message, /imagen del plano/);
+    const models = () => fake.requests.filter((r) => r.path === '/v1/models').length;
+    const listed = models();
+    const gone = await failWith(404, 'not_found_error', 'model: modelo-retirado');
+    assert.deepEqual([gone.status, gone.code], [400, 'AI_BAD_REQUEST']);
+    assert.match(gone.message, /ya no está disponible/);
+    for (const e of [billing, big, bad, fetchFailed, gone]) {
+      assert.doesNotMatch(e.message, /en un minuto/, 'reintentar no lo arregla');
+      assert.doesNotMatch(e.message, /\{"type"|\b(402|404|413|400) \{/, 'sin el JSON crudo de la API');
+    }
+    fake.script.push(deliver('entregar_eventos', { events: [], notes: '' }));
+    await ai.findEvents({ providerId: 'real-madrid', days: 31, fresh: true });
+    assert.equal(models(), listed + 1, 'tras el 404 se mira otra vez la lista de modelos de la cuenta');
+    // Con la imagen del plano, en cambio, sí se explica como el plano.
+    fake.script.push({ status: 400, type: 'invalid_request_error', message: 'Unable to download the file. Please verify the URL and try again.' });
+    await assert.rejects(ai.seatMap({ imageUrl: PLAN, zones: ['Fondo Sur'], fresh: true }), /imagen del plano/);
+  });
+
+  it('probar una clave que no vale no marca como rota la que se está usando', async () => {
+    fake.script.push(deliver('entregar_eventos', { events: [], notes: '' }));
+    await ai.findEvents({ providerId: 'real-madrid', days: 32, fresh: true });
+    assert.equal(ai.status().ok, true);
+    const r = await ai.setKey('sk-ant-api03-mala-0000000000000000000000', 'prueba');
+    assert.equal(r.ok, false);
+    assert.match(r.message, /no acepta la clave/);
+    assert.equal(r.status.ok, true, 'la clave en uso sigue funcionando');
+    assert.equal(ai.status().ok, true);
+  });
+
+  it('una respuesta cortada (por max_tokens o a mitad de la conexión) no se da por buena y se explica en castellano', async () => {
+    fake.script.push({ ...deliver('entregar_eventos', { events: [BARCA], notes: '' }), stop_reason: 'max_tokens' });
+    await assert.rejects(ai.findEvents({ providerId: 'real-madrid', days: 33, fresh: true }), (e: AiError) => e.code === 'INCOMPLETE' && /demasiado larga/.test(e.message));
+    fake.script.push({ ...deliver('entregar_eventos', { events: [BARCA], notes: '' }), cut: true });
+    await assert.rejects(
+      ai.findEvents({ providerId: 'real-madrid', days: 34, fresh: true }),
+      (e: AiError) => e.code === 'NETWORK' && /Se ha cortado la conexión con Claude/.test(e.message) && !/terminated/.test(e.message),
+    );
+  });
+
+  it('si la API se queda callada, la búsqueda no se cuelga: tope propio y un mensaje claro', { timeout: 10_000 }, async () => {
+    const slow = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile: null, baseURL: base, researchTimeoutMs: 400 }, { apiKey: AI_KEY });
+    // Contesta y se calla (el tope del SDK solo cubre hasta las cabeceras) y, después, sin cabeceras.
+    for (const reply of [{ ...deliver('entregar_eventos', { events: [], notes: '' }), stall: true }, { ...deliver('entregar_eventos', { events: [], notes: '' }), delayMs: 1500 }]) {
+      fake.script.push(reply);
+      const started = Date.now();
+      await assert.rejects(slow.findEvents({ providerId: 'real-madrid', days: 35, fresh: true }), (e: AiError) => e.code === 'INCOMPLETE' && /tardando demasiado/.test(e.message));
+      assert.ok(Date.now() - started < 2500, `${Date.now() - started} ms`);
+    }
+    // El tope del SDK (sin respuesta a tiempo) se reconoce por su clase: no es «revisa la conexión a internet».
+    const explain = (slow as unknown as { explain(err: unknown): AiError }).explain.bind(slow);
+    assert.match(explain(new Anthropic.APIConnectionTimeoutError()).message, /no ha contestado a tiempo/);
+  });
+
+  it('la lista de eventos no enseña reventas, direcciones locales ni enlaces cortados, ni fechas que no existen', async () => {
+    const long = `${BARCA.url}?${'utm_x=1&'.repeat(130)}`;
+    fake.script.push(
+      deliver('entregar_eventos', {
+        events: [
+          { ...BARCA, name: 'Reventa', url: 'https://www.viagogo.es/Entradas-Deportes/rm-barcelona', sourceUrl: 'https://www.stubhub.es/rm' },
+          { ...BARCA, name: 'Dirección local', url: 'http://127.0.0.1:8960/api/state', sourceUrl: 'https://intranet/entradas' },
+          { ...BARCA, name: 'Localhost con punto', url: 'https://localhost./entradas', sourceUrl: 'https://club.localhost/entradas' },
+          { ...BARCA, name: 'Enlace larguísimo', url: long },
+          { ...BARCA, name: 'Fecha imposible', date: '2026-13-45', time: '21:00', saleOpens: '2026-99-99T99:99' },
+          { ...BARCA, name: '30 de febrero', date: '2027-02-30', time: '25:00' },
+          BARCA,
+        ],
+        notes: '',
+      }),
+    );
+    const r = await ai.findEvents({ providerId: 'real-madrid', days: 365, fresh: true });
+    const by = new Map(r.events.map((e) => [e.name, e]));
+    for (const name of ['Reventa', 'Dirección local', 'Localhost con punto', 'Enlace larguísimo']) assert.equal(by.get(name)?.url, null, name);
+    for (const name of ['Reventa', 'Dirección local', 'Localhost con punto']) assert.equal(by.get(name)?.sourceUrl, null, name);
+    assert.equal(by.get(BARCA.name)?.url, BARCA.url, 'la web oficial, sí');
+    assert.deepEqual([by.get('Fecha imposible')?.startsAtLocal, by.get('Fecha imposible')?.saleOpensLocal], [null, null]);
+    assert.equal(by.get('30 de febrero')?.startsAtLocal, null);
+
+    // Al leer el evento: la reventa no se le pide a Claude como «página del evento» y lo local no vale.
+    fake.script.push(deliver('entregar_evento', detailsInput({ limitSource: 'http://192.168.1.10/condiciones', planImage: 'https://localhost./plano.png', url: 'http://10.0.0.5/compra' })));
+    const d = await ai.eventDetails({ providerId: 'real-madrid', name: BARCA.name, url: 'https://www.viagogo.es/Entradas-Deportes/rm-barcelona', fresh: true });
+    assert.doesNotMatch(JSON.stringify(fake.messageRequests().at(-1)?.body.messages), /viagogo/);
+    assert.deepEqual([d.url, d.limit.sourceUrl, d.limit.official, d.planImageUrl], [null, null, false, null]);
+    // Un plano en una dirección local no se manda a Claude (ni se paga).
+    for (const imageUrl of ['https://localhost./p.png', 'https://estadio.localhost/p.png', 'https://intranet/p.png', 'https://nas.internal/p.png']) {
+      const before = fake.messageRequests().length;
+      await assert.rejects(async () => ai.seatMap({ imageUrl, zones: ['Fondo Sur'] }), /enlace https:\/\/ público/, imageUrl);
+      assert.equal(fake.messageRequests().length, before, imageUrl);
+    }
+    // Grandes partidos: tampoco como «Web oficial de venta».
+    const match = { home: 'Real Madrid', away: 'FC Barcelona', competition: 'LaLiga', category: 'CLASICO', importance: 99, why: 'x', date: '2026-10-25', time: '16:15', venue: 'Bernabéu', city: 'Madrid', country: 'España' };
+    fake.script.push(
+      deliver('entregar_partidos', {
+        matches: [
+          { ...match, ticketUrl: 'https://www.viagogo.es/clasico', saleOpens: '2026-10-20T25:61' },
+          { ...match, date: '2026-11-25', ticketUrl: 'http://127.0.0.1/entradas', saleOpens: null },
+        ],
+        notes: '',
+      }),
+    );
+    const t = await ai.topMatches({ focus: 'x', from: '2026-10-01', to: '2027-10-01', max: 10 });
+    assert.deepEqual(
+      t.matches.map((m) => [m.ticketUrl, m.saleOpensLocal]),
+      [
+        [null, null],
+        [null, null],
+      ],
+    );
+  });
+
+  it('Telegram /evento con una web de venta sin enlace: contesta el motivo en vez de quedarse «buscando»', async () => {
+    const tg = new FakeTelegram();
+    const tgBase = await tg.listen();
+    const bot = new TelegramNotifier({ token: TOKEN, chatId: '700', apiBase: tgBase, retryMs: 50, setupProfile: false });
+    app.runtime.ctx.notifier = bot;
+    bot.attach(app.runtime);
+    try {
+      await until(() => bot.status().connected, 'bot conectado');
+      tg.message(700, '/evento');
+      await until(() => keyboardFor(tg, /Nuevo evento con Claude/).length > 0, 'menú de webs de venta');
+      const manual = keyboardFor(tg, /Nuevo evento con Claude/).find((b) => /Manual/.test(b.text));
+      assert.ok(manual?.callback_data);
+      tg.push({ callback_query: { id: 'm1', data: manual.callback_data, from: { id: 700, username: 'levi' }, message: { chat: { id: 700, type: 'private' }, message_id: 99 } } });
+      await until(() => tg.messagesTo('700').some((t) => /❌ Falta la web de «Manual»/.test(t)), 'el motivo, en vez de «Claude sigue buscando…» para siempre');
+      // Y la búsqueda no se queda ocupada: «Volver a empezar» y se puede elegir otra web.
+      assert.ok(keyboardFor(tg, /Falta la web/).some((b) => /Volver a empezar/.test(b.text)));
+    } finally {
+      bot.stop();
+      app.runtime.ctx.notifier = null;
+      await tg.close();
+    }
+    // Lo mismo sin Telegram: el error llega como promesa rechazada, no de golpe.
+    let pending: Promise<unknown> = Promise.resolve();
+    assert.doesNotThrow(() => {
+      pending = ai.seatMap({ imageUrl: 'https://127.0.0.1/p.png', zones: ['Fondo Sur'] });
+    });
+    await assert.rejects(pending, AiError);
+  });
+
+  it('precios: nunca negativos y, si el mínimo pasa del máximo, ninguno', async () => {
+    const price = async (name: string, p: unknown) => {
+      fake.script.push(deliver('entregar_evento', { ...detailsInput({ name, limitSource: 'https://www.realmadrid.com/x', planImage: null }), price: p }));
+      return (await ai.eventDetails({ providerId: 'real-madrid', name, fresh: true })).price;
+    };
+    assert.deepEqual(await price('Precio negativo', { min: -10, max: 5, currency: 'EUR' }), { min: null, max: 5, currency: 'EUR' });
+    assert.deepEqual(await price('Precios al revés', { min: 90, max: 60, currency: 'EUR' }), { min: null, max: null, currency: 'EUR' });
+    assert.deepEqual(await price('Precios bien', { min: 60, max: 90, currency: 'eur' }), { min: 60, max: 90, currency: 'EUR' });
   });
 });
 

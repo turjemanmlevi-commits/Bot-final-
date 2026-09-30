@@ -19,6 +19,10 @@ export interface FakeReply {
   stop_reason: 'end_turn' | 'tool_use' | 'pause_turn' | 'refusal' | 'max_tokens';
   /** Tarda en contestar (para comprobar que el bot no se queda esperando). */
   delayMs?: number;
+  /** Empieza a contestar y se queda callada (la conexión sigue abierta): para el tope de tiempo. */
+  stall?: boolean;
+  /** Empieza a contestar y corta la conexión a mitad. */
+  cut?: boolean;
   usage?: { input_tokens?: number; output_tokens?: number; server_tool_use?: { web_search_requests?: number; web_fetch_requests?: number } };
 }
 
@@ -90,6 +94,13 @@ export class FakeAnthropic {
       type: 'message_start',
       message: { id: `msg_${this.requests.length}`, type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.input_tokens, output_tokens: 1 } },
     });
+    if (reply.stall) return;
+    if (reply.cut) {
+      send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+      send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Buscando…' } });
+      setTimeout(() => res.socket?.destroy(), 50);
+      return;
+    }
     reply.content.forEach((block, index) => {
       if (block.type === 'text') {
         send('content_block_start', { type: 'content_block_start', index, content_block: { type: 'text', text: '' } });
@@ -121,7 +132,11 @@ export class FakeAnthropic {
   }
 
   close(): Promise<void> {
-    return new Promise((r) => this.server.close(() => r()));
+    return new Promise((r) => {
+      this.server.close(() => r());
+      // Las respuestas que se han quedado calladas (stall) también se cierran.
+      this.server.closeAllConnections();
+    });
   }
 }
 
