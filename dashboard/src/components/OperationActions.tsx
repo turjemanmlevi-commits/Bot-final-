@@ -93,7 +93,13 @@ export function OperationActions({
       });
       if (!ok) return;
     }
-    const r = await run(() => Api.command(op.id, { command, value, reason }));
+    let r = await run(() => Api.command(op.id, { command, value, reason }));
+    // Cerrar con carritos por pagar: el servidor pide confirmación explícita.
+    if (r && !r.ok && r.needsConfirm) {
+      const sure = await ask({ title: '¿Cerrar con carritos por pagar?', body: r.message, confirmText: 'Cerrar igualmente', danger: true });
+      if (!sure) return;
+      r = await run(() => Api.command(op.id, { command, value, reason, confirm: true }));
+    }
     if (r) {
       if (r.ok) toast(doneText(command, r), command === 'readiness' && r.readiness?.overall === 'FAIL' ? 'error' : 'info');
       else {

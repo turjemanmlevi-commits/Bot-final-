@@ -24,7 +24,7 @@ tags:
 | **Cambio de esquema** | El proveedor cambió el formato de sus respuestas | La operación se pausa. Revisa el adapter antes de continuar |
 | **Limitado por el proveedor** | Rate limit | Se espera y se reintenta solo |
 | **Readiness fallido / con avisos** | Algo no está listo antes de T0 | Arregla lo que indique cada comprobación |
-| **Kill switch** | Alguien activó una parada | Global, de proveedor o de operación: suéltalo en *Seguridad* cuando proceda, y **siempre antes de T0**: con uno de estos activo en T0 la operación termina sin arrancar. De una cuenta («Parar cuenta»): solo esa cuenta deja de recibir tareas; la operación arranca y sigue con las demás. Se suelta en *Cuentas* |
+| **Kill switch** | Alguien activó una parada | Global, de proveedor o de operación: suéltalo en *Seguridad* cuando proceda, mejor antes de T0: con uno de estos activo en T0 la operación queda en pausa sin arrancar hasta que lo sueltes y pulses *Reanudar*. De una cuenta («Parar cuenta»): solo esa cuenta deja de recibir tareas; la operación arranca y sigue con las demás. Se suelta en *Cuentas* |
 | **Journal degradado** | No se está guardando la auditoría | La automatización se pausa hasta que se recupere |
 | **Sin progreso** | Un rato sin nuevas entradas (en asistencia manual, el plazo de una tarea: 30 min por defecto) | ¿Precio máximo demasiado bajo? ¿Zonas agotadas? ¿Cuentas en cola? |
 | **Operación finalizada** | Terminó la ventana, se paró o se cerraron todos los carritos | Paga los carritos que quieras conservar y pulsa *Cerrar* |

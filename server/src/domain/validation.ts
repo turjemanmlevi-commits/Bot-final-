@@ -10,6 +10,7 @@ import type {
   CompiledPolicy,
   Id,
   OperationConfig,
+  OperationState,
   ProviderDescriptor,
   ValidationIssue,
   ValidationReport,
@@ -32,8 +33,8 @@ export interface ValidationContext {
   accounts: ReadonlyMap<Id, Account>;
   scenarioIds: readonly string[];
   /** Operación (distinta de esta) que tiene arrendada la cuenta, o null. */
-  leasedBy: (accountId: Id) => Id | null;
-  /** Comprobaciones adicionales al armar (arrendamientos, sesiones bloqueadas). */
+  leasedBy: (accountId: Id) => { id: Id; name: string; state: OperationState | null } | null;
+  /** Comprobaciones adicionales al armar (sesiones bloqueadas; una cuenta de otra operación pasa de aviso a error). */
   forArm: boolean;
   maxSnapshotAgeMs?: number;
 }
@@ -171,11 +172,14 @@ export function validateConfig(config: OperationConfig, ctx: ValidationContext):
     if (event && event.limits.semantics !== 'UNKNOWN' && groupKeyFor(a, event.limits.semantics) === null) {
       bad('GROUP_REF_MISSING', event.limits.semantics === 'PER_HOUSEHOLD' ? 'falta la referencia de hogar.' : 'falta la referencia del medio de pago.');
     }
-    if (ctx.forArm) {
-      const other = ctx.leasedBy(a.id);
-      if (other) bad('ACCOUNT_LEASED', `la está usando otra operación (${other}).`);
-      if (a.session.state === 'BLOCKED') bad('ACCOUNT_BLOCKED', 'la sesión está bloqueada por el proveedor.');
+    // Se avisa ya al validar (por su nombre, no por su id); al armar es un error.
+    const other = ctx.leasedBy(a.id);
+    if (other) {
+      const busy = `la está usando otra operación («${other.name}»${other.state === 'ENDED' || other.state === 'CART_SECURED' ? ': ciérrala para liberarla' : ''}).`;
+      if (ctx.forArm) bad('ACCOUNT_LEASED', busy);
+      else warn('ACCOUNT_LEASED', 'accountIds', `${a.label}: ${busy} Hasta que quede libre no se podrá armar esta operación.`);
     }
+    if (ctx.forArm && a.session.state === 'BLOCKED') bad('ACCOUNT_BLOCKED', 'la sesión está bloqueada por el proveedor.');
     if (ok) validAccounts.push(a);
   }
 

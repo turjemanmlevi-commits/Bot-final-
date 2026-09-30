@@ -97,7 +97,7 @@ export const AiDetailsQuerySchema = z.object({
   startsAtLocal: z.string().trim().max(20).nullable().optional(),
   venue: z.string().trim().max(160).nullable().optional(),
   city: z.string().trim().max(80).nullable().optional(),
-  url: z.string().trim().max(600).nullable().optional(),
+  url: z.string().trim().max(1000).nullable().optional(),
   fresh: z.boolean().optional(),
 });
 export type AiDetailsQuery = z.infer<typeof AiDetailsQuerySchema>;
@@ -305,8 +305,8 @@ function host(url: string | null): string | null {
 
 /**
  * Traduce los datos de Claude a un evento de la sala. El límite queda
- * «verificado» solo si Claude cita la frase de la web de venta oficial; si sale
- * de otra fuente, se rellena pero hay que confirmarlo.
+ * «verificado» solo si Claude cita la frase de la web de venta oficial (y la
+ * fase elegida no da más que esa frase); si no, se rellena pero hay que confirmarlo.
  */
 export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null; saleIndex?: number | null; today: string; nowLocal: string }): AiEventDraft {
   // Por posición manda sobre el nombre: dos fases pueden llamarse igual («Venta socios» del 1 y del 2).
@@ -322,14 +322,20 @@ export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null
   const n = sale?.limit ?? d.limit.perPerson;
   const quote = sale?.limit && sale.limit !== d.limit.perPerson ? `${sale.limit} por persona en «${sale.name}»` : d.limit.quote ? `«${d.limit.quote}»` : `${n} por persona`;
   const from = host(d.limit.sourceUrl) ?? 'la web';
+  // La fase no trae su propia fuente: solo queda verificada si no supera la frase oficial citada.
+  const verified = d.limit.official && n !== null && d.limit.perPerson !== null && n <= d.limit.perPerson;
   const limit =
     n !== null
       ? {
           perAccount: n,
           semantics: d.limit.semantics ?? 'PER_HOLDER',
-          verified: d.limit.official,
-          source: `${d.limit.official ? 'Condiciones oficiales' : 'Según'} ${from} (leído por Claude el ${opts.today}): ${quote}${d.limit.sourceUrl ? ` · ${d.limit.sourceUrl}` : ''}`.slice(0, 500),
-          notes: d.limit.official ? '' : 'No sale de la web de venta oficial: compruébalo allí antes de marcarlo como verificado.',
+          verified,
+          source: `${verified ? 'Condiciones oficiales' : 'Según'} ${from} (leído por Claude el ${opts.today}): ${quote}${d.limit.sourceUrl ? ` · ${d.limit.sourceUrl}` : ''}`.slice(0, 500),
+          notes: verified
+            ? ''
+            : d.limit.official && d.limit.perPerson !== null
+              ? `La fase «${sale?.name ?? ''}» da ${n} por persona y la frase oficial dice ${d.limit.perPerson}: compruébalo en la web de venta antes de marcarlo como verificado.`.slice(0, 500)
+              : 'No sale de la web de venta oficial: compruébalo allí antes de marcarlo como verificado.',
         }
       : null;
   const notes: string[] = [`Datos reunidos por Claude el ${opts.today} (revísalos en la web oficial).`];
@@ -365,9 +371,11 @@ export function aiEventDraft(d: AiEventDetails, opts: { saleName?: string | null
  */
 export function aiSaleZonesText(layout: AiEventDetails['layout']): string[] {
   if (!layout) return [];
+  // « · » separa el precio y «→» nuestra zona: dentro de un nombre se cambian por « - » (al buscar alias es lo mismo).
+  const clean = (s: string) => layoutName(s).replace(/\s*[·→]\s*/g, ' - ').trim();
   return layout.slice(0, 60).map((z) => {
-    const name = layoutName(z.zone) + (z.standing ? ' (de pie)' : '');
-    const secs = z.sections.map(layoutName).filter(Boolean);
+    const name = clean(z.zone) + (z.standing ? ' (de pie)' : '');
+    const secs = z.sections.map(clean).filter(Boolean);
     const price = z.price ? ` · ${z.price.replace(/[·→]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40)}` : '';
     const ours = z.venueZone ? ` → ${z.venueZone}` : '';
     return `${name}${secs.length > 0 ? `: ${secs.join(', ')}` : ''}${price}${ours}`.slice(0, 400);

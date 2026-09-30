@@ -178,6 +178,8 @@ export interface CommandRequest {
   /** Nuevo valor para reduce-qty (entradas) o lower-max-price (unidades menores). */
   value?: number | undefined;
   reason?: string | undefined;
+  /** Confirmación explícita de una acción con consecuencias (cerrar con carritos por pagar). */
+  confirm?: boolean | undefined;
 }
 
 export interface CommandResult {
@@ -186,6 +188,8 @@ export interface CommandResult {
   operation: OperationSummary;
   validation?: ValidationReport | undefined;
   readiness?: ReadinessReport | undefined;
+  /** El comando no se hizo porque necesita confirmación: repetirlo con `confirm: true`. */
+  needsConfirm?: boolean | undefined;
 }
 
 // ---------------------------------------------------------------------------

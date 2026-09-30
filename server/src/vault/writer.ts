@@ -30,14 +30,13 @@ const WINDOWS_RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
 
 /** Nombre de archivo válido en Windows, OneDrive y Obsidian (sin \ / : * ? " < > | # ^ [ ]). */
 export function safeFileName(name: string): string {
-  const cleaned = name
+  const full = name
     .normalize('NFC')
     .replace(/[\\/:*?"<>|#^[\]\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[. ]+$/, '')
-    .slice(0, 110)
     .trim();
+  // Se corta por caracteres (no por unidades UTF-16): un emoji no se parte por la mitad.
+  const cleaned = Array.from(full).slice(0, 110).join('').replace(/[. ]+$/, '');
   if (cleaned === '') throw new VaultWriteError('El nombre no sirve como nombre de archivo', 'BAD_REQUEST');
   return WINDOWS_RESERVED.test(cleaned) ? `${cleaned}_` : cleaned;
 }
@@ -47,6 +46,16 @@ async function exists(p: string): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+/** Crea un archivo que no existía. Si otro lo acaba de crear (EEXIST), conflicto claro y sin la ruta del disco. */
+async function writeNew(abs: string, text: string): Promise<void> {
+  try {
+    await writeFile(abs, text, { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') throw new VaultWriteError(`Ya existe la nota «${path.basename(abs, '.md')}»`, 'CONFLICT');
+    throw err;
+  }
 }
 
 /** Fecha de hoy (AAAA-MM-DD) en la zona del vault. */
@@ -179,7 +188,7 @@ export async function createEventNote(input: EventNoteInput, eventId: string, ct
     tags: ['evento', 'real'],
   };
   await mkdir(path.dirname(abs), { recursive: true });
-  await writeFile(abs, `${frontmatterText(data)}\n${eventBody(input, ctx.providerNote)}`, { encoding: 'utf8', flag: 'wx' });
+  await writeNew(abs, `${frontmatterText(data)}\n${eventBody(input, ctx.providerNote)}`);
   return rel;
 }
 
@@ -286,7 +295,7 @@ export async function createVenueNotes(input: VenueQuickInput, zones: LayoutZone
   for (const f of files) {
     const abs = path.join(folder, f.rel);
     await mkdir(path.dirname(abs), { recursive: true });
-    await writeFile(abs, f.text, { encoding: 'utf8', flag: 'wx' });
+    await writeNew(abs, f.text);
   }
   return { folder: folderRel, files: files.length };
 }
@@ -329,7 +338,12 @@ async function findZoneNote(folderAbs: string, zone: string): Promise<string | n
 export async function addVenueSaleZones(
   vaultDir: string,
   venueFile: string,
-  input: { zones: LayoutZone[]; aliases: Array<{ zone: string; alias: string }>; existingSections: string[] },
+  input: {
+    zones: LayoutZone[];
+    aliases: Array<{ zone: string; alias: string }>;
+    /** Lo que ya tiene el recinto en la sala (ids y secciones). */
+    existing: { venueId: string; zoneIds: string[]; sections: Array<{ id: string; name: string }> };
+  },
   ctx: VenueWriteContext,
 ): Promise<{ zones: number; aliases: number }> {
   const venueAbs = path.resolve(vaultDir, venueFile);
@@ -338,35 +352,43 @@ export async function addVenueSaleZones(
   const folderAbs = path.dirname(venueAbs);
   const venueBase = path.basename(venueFile, '.md');
   const today = todayIn(ctx.timeZone, ctx.now);
-  const takenSections = new Set(input.existingSections.map((x) => safeFileName(x).toLowerCase()));
+  // Una nota nueva no lleva `id`: el compilador le da `recinto.zona-nombre` (zona) o `recinto.nombre` (sección),
+  // así que no puede repetir el de otra aunque el nombre de archivo sea distinto.
+  const { venueId } = input.existing;
+  const zoneIds = new Set(input.existing.zoneIds);
+  const takenSections = new Set(input.existing.sections.map((x) => safeFileName(x.name).toLowerCase()));
+  const sectionIds = new Set(input.existing.sections.map((x) => x.id));
+  const taken = (name: string) => takenSections.has(safeFileName(name).toLowerCase()) || sectionIds.has(`${venueId}.${slugify(name)}`);
   let zones = 0;
   for (const z of input.zones) {
     if (await findZoneNote(folderAbs, z.name)) continue;
+    const zoneId = `${venueId}.zona-${slugify(z.name)}`;
+    if (zoneIds.has(zoneId)) continue;
     const zBase = safeFileName(z.name);
     const zAbs = path.join(folderAbs, 'Zonas', `${zBase}.md`);
     if (await exists(zAbs)) continue;
     await mkdir(path.dirname(zAbs), { recursive: true });
-    await writeFile(
+    await writeNew(
       zAbs,
       frontmatterText({ type: 'zone', venue: link(venueBase), name: z.name, aliases: [], source: 'Web de venta (leído por Claude)', verifiedAt: today, verifiedBy: ctx.actor, tags: ['zona'] }) +
         `\n# ${z.name}\n\nZona añadida desde la estructura de la venta de un evento. Revísala con el plano oficial.\n`,
-      { encoding: 'utf8', flag: 'wx' },
     );
+    zoneIds.add(zoneId);
     for (const s of z.sections) {
-      // Una sección con el mismo nombre que otra del recinto lleva delante su zona.
+      // Una sección con el mismo nombre (o id) que otra del recinto lleva delante su zona.
       let name = s.name;
-      if (takenSections.has(safeFileName(name).toLowerCase())) name = `${z.name} · ${s.name}`;
+      if (taken(name)) name = `${z.name} · ${s.name}`;
+      if (taken(name)) continue;
       const sBase = safeFileName(name);
-      if (takenSections.has(sBase.toLowerCase())) continue;
       takenSections.add(sBase.toLowerCase());
+      sectionIds.add(`${venueId}.${slugify(name)}`);
       const sAbs = path.join(folderAbs, 'Secciones', `${sBase}.md`);
       if (await exists(sAbs)) continue;
       await mkdir(path.dirname(sAbs), { recursive: true });
-      await writeFile(
+      await writeNew(
         sAbs,
         frontmatterText({ type: 'section', venue: link(venueBase), zone: link(zBase), name, kind: s.standing ? 'STANDING' : 'SEATED', aliases: [], tags: ['seccion'] }) +
           `\n# ${name}\n\nZona [[${zBase}]] de [[${venueBase}]]. Añadida desde la estructura de la venta.\n`,
-        { encoding: 'utf8', flag: 'wx' },
       );
     }
     zones++;
