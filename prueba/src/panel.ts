@@ -26,7 +26,7 @@ export function panelHtml(d: PanelDefaults): string {
   h1{font-size:20px;margin:0 0 4px} h2{font-size:15px;margin:0 0 12px;color:var(--muted);font-weight:600}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
   label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
-  input[type=text],input[type=number],input[type=url]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);font:inherit}
+  input[type=text],input[type=number],input[type=url],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);font:inherit}
   .modes{display:flex;gap:8px}.modes label{flex:1;margin:0;border:1px solid var(--line);border-radius:8px;padding:8px;cursor:pointer;color:var(--ink)}
   .modes input{margin-right:6px}.check{display:flex;gap:6px;align-items:center;color:var(--ink)}
   button{font:inherit;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
