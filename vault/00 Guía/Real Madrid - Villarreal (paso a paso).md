@@ -45,7 +45,7 @@ Evento ya preparado en la sala: [[Real Madrid - Villarreal CF · LaLiga J8]]. Gu
 | Hora | Qué pasa | Qué hace cada persona |
 |---|---|---|
 | **9:30, 9:50 y 9:58** | El bot avisa «⏰ Faltan N min: entrad ya» a quien no tiene la sesión lista | Entrar en **realmadrid.com** con su cuenta, abrir la página del partido y, si hay **sala de espera**, entrar ya. Pulsar **«Sesión lista»** en Telegram |
-| **10:00 (T0)** | Cada persona recibe «🚦 ¡Abre la venta!» y **su tarea**: zona, precio máximo y el botón a la web oficial | Comprar **1 entrada** en su zona (si hay cola, esperar el turno como cualquiera) y pulsar **«En carrito»**; si no hay entradas, **«No pude»**: al momento le llega la **siguiente zona** |
+| **10:00 (T0)** | Cada persona recibe **en un solo mensaje** «🚦 ¡Abre la venta!» con **su tarea**: zona, precio máximo y el botón a la web oficial | Comprar **1 entrada** en su zona (si hay cola, esperar el turno como cualquiera) y pulsar **«En carrito»**; si no hay entradas, **«No pude»**: al momento le llega la **siguiente zona** |
 | **Después** | La sala lleva la cuenta de carritos y del tiempo que les queda | **Pagar** en la web oficial y pulsar **«Pagado»** |
 
 > [!tip] Si algo va mal
@@ -53,12 +53,21 @@ Evento ya preparado en la sala: [[Real Madrid - Villarreal CF · LaLiga J8]]. Gu
 
 ## Qué se ha comprobado esta noche (con simuladores)
 
-Ensayo con reloj real de este mismo partido (copia de la sala, venta abriendo a los 3 minutos, 10 cuentas con su chat, Telegram simulado en el mismo ordenador):
+Ensayo con reloj real de este mismo partido (copia de la sala, venta abriendo a los 3 minutos, 10 cuentas con su chat, Telegram simulado en el mismo ordenador), antes y después de las mejoras de esta noche:
 
-- El **plan** llega a cada persona entre 20 y 50 ms después de **Armar**; «Sesión lista» se registra en menos de 50 ms.
-- A la hora de apertura, **la tarea llega a cada chat en unos 30 ms**.
-- **«No pude» → siguiente zona** en unos 7 ms.
+| Qué | Antes | Ahora |
+|---|---|---|
+| De la apertura a la tarea en el chat de cada persona | 27–32 ms | **10–12 ms** |
+| Mensajes por persona a la hora de apertura | 2 (la tarea llegaba antes que el aviso) | **1** (aviso y tarea juntos) |
+| «Sesión lista» registrada | 17–50 ms | **5–17 ms** |
+| 8 personas pulsan «en carrito» a la vez (Telegram con 80 ms de retraso) | hasta 1 s | **menos de 0,1 s** |
+| «No pude» → siguiente zona | 7 ms | 7 ms |
+
+Además:
+
 - Ana, con **2 cuentas** (mismo titular), recibe **1** tarea: nunca se pasa del límite por persona.
 - A quien no tenía la sesión lista le llegaron los avisos «entrad ya».
+- Con una red más lenta (50 ms hasta Telegram), la tarea llega en **33–48 ms** (antes 169–209 ms): las conexiones con Telegram se abren 3 segundos antes de la hora.
+- Si Telegram falla o pide esperar (errores 429 o 500), el mensaje **se reintenta** en vez de perderse (antes se perdían 8 de 11 en el chat principal).
 
 No se ha probado contra realmadrid.com ni contra Telegram o Claude reales (desde la nube no se usan tus claves): el ensayo de verdad es el tuyo.
