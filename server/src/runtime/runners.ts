@@ -39,6 +39,9 @@ interface AccountRunState {
 /** Tiempo que una oferta rechazada (agotada, precio cambiado) se considera no disponible. */
 const UNAVAILABLE_MS = 5000;
 
+/** Espera mínima entre dos consultas de la cola cuando el proveedor da una estimación (ms). */
+const QUEUE_POLL_MIN_MS = 2;
+
 export class AutomatedRunner implements Runner {
   readonly kind = 'AUTOMATED' as const;
   private timer: TimerHandle | null = null;
@@ -140,10 +143,11 @@ export class AutomatedRunner implements Runner {
             .catch(() => null)
             .then((info) => {
               st.queuePolling = false;
-              // Si el proveedor da una estimación, se vuelve a mirar justo cuando toca
-              // (mínimo 20 ms, máximo queuePollMs): se detecta la salida de la cola al momento.
+              // Si el proveedor da una estimación, se vuelve a mirar justo cuando toca (mínimo
+              // QUEUE_POLL_MIN_MS, máximo queuePollMs): se detecta la salida de la cola al momento.
+              // Con un mínimo de 20 ms, «aún no abre, faltan 4 ms» costaba 16 ms de más en T0.
               const eta = info && (info.state === 'WAITING' || info.state === 'NOT_OPEN') ? info.etaMs : null;
-              const delay = eta !== null && eta !== undefined ? Math.min(ctx.cfg.queuePollMs, Math.max(20, eta)) : ctx.cfg.queuePollMs;
+              const delay = eta !== null && eta !== undefined ? Math.min(ctx.cfg.queuePollMs, Math.max(QUEUE_POLL_MIN_MS, eta)) : ctx.cfg.queuePollMs;
               st.nextQueuePollAt = ctx.now() + delay;
               if (info?.state === 'PASSED') this.tick();
               else if (!this.stopped) ctx.clock.setTimeout(() => this.tick(), delay);
@@ -450,11 +454,9 @@ export class RunnerManager {
 
   start(operationId: Id): void {
     if (this.runners.has(operationId)) return;
-    const r = this.ctx.store.operations.get(operationId);
-    if (!r) return;
-    const p = r.config.providerId;
-    const automated = this.ctx.registry.automated(p, 'cart.add') && this.ctx.registry.automated(p, 'inventory.read');
-    const runner: Runner = automated ? new AutomatedRunner(this.ctx, operationId) : new ManualRunner(this.ctx, operationId);
+    const kind = this.kindFor(operationId);
+    if (!kind) return;
+    const runner: Runner = kind === 'AUTOMATED' ? new AutomatedRunner(this.ctx, operationId) : new ManualRunner(this.ctx, operationId);
     this.runners.set(operationId, runner);
     this.ctx.journal.audit('runner.started', { kind: runner.kind }, { operationId });
     runner.start();
@@ -479,6 +481,14 @@ export class RunnerManager {
 
   kind(operationId: Id): Runner['kind'] | null {
     return this.runners.get(operationId)?.kind ?? null;
+  }
+
+  /** Tipo de runner que le toca a la operación, aunque aún no haya arrancado. */
+  kindFor(operationId: Id): Runner['kind'] | null {
+    const r = this.ctx.store.operations.get(operationId);
+    if (!r) return null;
+    const p = r.config.providerId;
+    return this.ctx.registry.automated(p, 'cart.add') && this.ctx.registry.automated(p, 'inventory.read') ? 'AUTOMATED' : 'MANUAL';
   }
 
   /** Un kill switch global, de proveedor u operación pausa en el acto las operaciones afectadas. */

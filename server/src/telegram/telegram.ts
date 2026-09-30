@@ -10,8 +10,12 @@
  * - A cualquier otro chat que escriba al bot solo se le contesta con su chat ID,
  *   para que puedas configurarlo. No recibe nada ni puede mandar nada.
  * - Al conectar, el bot se configura solo: menú de comandos y descripción.
+ * - Los mensajes de cada chat salen en orden, por conexiones ya abiertas y
+ *   reintentando si Telegram falla o pide esperar: una tarea no se pierde.
  */
 
+import http from 'node:http';
+import https from 'node:https';
 import type { Account, Alert, HumanTask, TelegramChatSeen, TelegramStatus } from '@to/shared';
 import { formatMoney, OPERATION_STATE_LABEL } from '@to/shared';
 import type { Notifier } from '../runtime/context';
@@ -47,6 +51,10 @@ export interface TelegramOptions {
   retryMs?: number;
   /** Poner el menú de comandos y la descripción del bot al conectar (por defecto sí). */
   setupProfile?: boolean;
+  /** Plazo de cada intento de envío de un mensaje (por defecto 5 s; después se reintenta). */
+  sendTimeoutMs?: number;
+  /** Mensajes por segundo como mucho, sumando todos los chats (por defecto 25; Telegram admite ~30). */
+  sendsPerSecond?: number;
 }
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -93,63 +101,180 @@ export const BOT_SHORT_DESCRIPTION = 'Avisos al segundo y tareas con botones par
 
 const MAX_SEEN = 10;
 const HINT_EVERY_MS = 30_000;
+/** Una tarea de compra creada hasta 10 s después de arrancar la operación es «de la apertura». */
+const OPENING_WINDOW_MS = 10_000;
+/** Plazo de cada intento de envío: una tarea colgada se reintenta pronto en vez de esperar 15 s. */
+const SEND_TIMEOUT_MS = 5000;
+/** Ritmo máximo de mensajes, sumando todos los chats (Telegram admite ~30/s). */
+const SENDS_PER_SECOND = 25;
+/** Telegram admite 4096 caracteres por mensaje: /estado se parte en trozos de como mucho esto. */
+const MAX_CHUNK = 3500;
 
 interface TgResponse<T> {
   ok: boolean;
   result: T;
   description?: string;
   error_code?: number;
+  parameters?: { retry_after?: number };
 }
 
-/** Llamada a la Bot API. El token nunca aparece en los mensajes de error. */
-/** Descripción corta de un fallo de red («fetch failed (ECONNRESET)»). */
+/** Descripción corta de un fallo de red («socket hang up (ECONNRESET)»). */
 function networkError(err: unknown): string {
-  const e = err as Error & { cause?: { code?: string; message?: string } };
-  const cause = e.cause?.code ?? e.cause?.message;
+  const e = err as Error & { code?: string; cause?: { code?: string; message?: string } };
+  const cause = e.cause?.code ?? e.cause?.message ?? (e.code && !e.message.includes(e.code) ? e.code : undefined);
   return cause ? `${e.message} (${cause})` : e.message;
 }
 
-async function callTelegram<T>(apiBase: string, token: string, method: string, body: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
+/**
+ * Conexiones persistentes con la Bot API. Con fetch, una conexión ociosa se
+ * cerraba a los ~4 s y en T0 cada mensaje abría la suya (TCP + TLS, todos a la
+ * vez). Aquí se reutilizan (la más reciente primero) y se cierran tras 50 s ociosas.
+ */
+const MAX_SOCKETS = 32;
+const AGENT_OPTS = { keepAlive: true, keepAliveMsecs: 10_000, maxSockets: MAX_SOCKETS, maxFreeSockets: MAX_SOCKETS, scheduling: 'lifo' as const, timeout: 50_000 };
+const httpsAgent = new https.Agent({ ...AGENT_OPTS, maxCachedSessions: 64 });
+// Solo para las pruebas (TELEGRAM_API_BASE con http://).
+const httpAgent = new http.Agent(AGENT_OPTS);
+
+class TelegramTimeout extends Error {
+  override readonly name = 'TimeoutError';
+}
+
+/** Un POST a la Bot API por una conexión persistente. */
+function post(url: URL, payload: string, timeoutMs: number, signal?: AbortSignal): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fail = (err: Error) => {
+      clearTimeout(timer);
+      reject(err);
+    };
+    const secure = url.protocol === 'https:';
+    const req = (secure ? https : http).request(
+      url,
+      { method: 'POST', agent: secure ? httpsAgent : httpAgent, headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) }, signal },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          clearTimeout(timer);
+          resolve({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') });
+        });
+        res.on('error', fail);
+        res.on('close', () => {
+          if (!res.complete) fail(new Error('Telegram cortó la respuesta'));
+        });
+      },
+    );
+    timer = setTimeout(() => req.destroy(new TelegramTimeout(`Telegram no ha contestado en ${Math.round(timeoutMs / 100) / 10} s`)), timeoutMs);
+    req.on('error', fail);
+    req.end(payload);
+  });
+}
+
+/** Espera `ms`, o menos si se para el bot. */
+function pause(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('Bot de Telegram parado'));
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new Error('Bot de Telegram parado'));
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** Intentos ante un corte de red, un 5xx o una página de error; un 429 no gasta intento. */
+const ATTEMPTS = 4;
+/** Esperas de un 429 que se aceptan seguidas, y la espera más larga (s). */
+const MAX_RATE_LIMITED = 5;
+const MAX_RETRY_AFTER_S = 60;
+const backoffMs = (failures: number) => Math.min(2000, 200 * 2 ** (failures - 1));
+
+interface CallOpts {
+  timeoutMs: number;
+  /** Corta la llamada y sus esperas (al parar el bot). */
+  signal?: AbortSignal;
+  /** 1 = sin reintentos (getUpdates: lo reintenta su bucle). */
+  attempts?: number;
+  /** Reintentar también si Telegram no contesta a tiempo (un envío: mejor un duplicado que una tarea perdida). */
+  retryTimeout?: boolean;
+}
+
+/**
+ * Llamada a la Bot API. El token nunca aparece en los mensajes de error.
+ * Un aviso de apertura o una tarea no se puede perder: se reintenta con espera
+ * creciente ante un corte de red, un 5xx o una página HTML de error, y ante un
+ * 429 se espera lo que pide Telegram (retry_after) y se reenvía.
+ */
+async function callTelegram<T>(apiBase: string, token: string, method: string, body: Record<string, unknown>, opts: CallOpts): Promise<T> {
   const redact = (m: string) => m.split(token).join('<token>');
-  // Un corte de red momentáneo (p. ej. una conexión que Telegram ya había cerrado) se reintenta al
-  // momento: un aviso de apertura o una tarea no se puede perder. La escucha (getUpdates, con
-  // `signal`) la reintenta su propio bucle.
-  const attempts = signal ? 1 : 3;
-  let res: Response | null = null;
-  for (let i = 0; i < attempts && !res; i++) {
-    const timeout = AbortSignal.timeout(timeoutMs);
+  const url = new URL(`${apiBase}/bot${token}/${method}`);
+  const payload = JSON.stringify(body);
+  const attempts = opts.attempts ?? ATTEMPTS;
+  let failures = 0;
+  let limited = 0;
+  for (;;) {
+    let res: { status: number; text: string };
     try {
-      res = await fetch(`${apiBase}/bot${token}/${method}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
-      });
+      res = await post(url, payload, opts.timeoutMs, opts.signal);
     } catch (err) {
-      const name = (err as Error).name;
-      const last = i === attempts - 1 || name === 'AbortError' || name === 'TimeoutError' || signal?.aborted === true;
-      if (last) throw new Error(redact(networkError(err)));
-      await new Promise((r) => setTimeout(r, 150 * (i + 1)));
+      const error = new Error(redact(networkError(err)));
+      const timedOut = (err as Error).name === 'TimeoutError';
+      if (opts.signal?.aborted || (timedOut && !opts.retryTimeout) || ++failures >= attempts) throw error;
+      await pause(backoffMs(failures), opts.signal);
+      continue;
     }
-  }
-  if (!res) throw new Error(`Telegram ${method}: sin respuesta`);
-  let json: TgResponse<T>;
-  try {
-    json = (await res.json()) as TgResponse<T>;
-  } catch {
-    throw new Error(`Telegram respondió ${res.status} sin JSON`);
-  }
-  if (!json.ok) {
+    let json: TgResponse<T>;
+    try {
+      json = JSON.parse(res.text) as TgResponse<T>;
+      if (typeof json !== 'object' || json === null) throw new Error('sin JSON');
+    } catch {
+      // Una página de error del balanceador (502/504 en HTML) se reintenta como cualquier 5xx.
+      const error = new Error(`Telegram respondió ${res.status} sin JSON`);
+      if (res.status < 500 || ++failures >= attempts) throw error;
+      await pause(backoffMs(failures), opts.signal);
+      continue;
+    }
+    if (json.ok) return json.result;
     if (json.error_code === 401 || json.error_code === 404) throw new Error('Token no válido: pega el token correcto en Ajustes · Telegram');
-    throw new Error(redact(json.description ?? `Telegram ${method} falló (${res.status})`));
+    const error = new Error(redact(json.description ?? `Telegram ${method} falló (${res.status})`));
+    const code = json.error_code ?? res.status;
+    if (code === 429) {
+      // Límite de Telegram (~1 mensaje/s por chat, ~30/s en total): se espera lo que pide y se reenvía.
+      const wait = Math.max(1, Number(json.parameters?.retry_after) || 1);
+      if (attempts === 1 || ++limited > MAX_RATE_LIMITED || wait > MAX_RETRY_AFTER_S) throw error;
+      log.warn(`Telegram limita los envíos (${method}): se reintenta en ${wait} s`);
+      await pause(wait * 1000, opts.signal);
+      continue;
+    }
+    if (code < 500 || ++failures >= attempts) throw error;
+    await pause(backoffMs(failures), opts.signal);
   }
-  return json.result;
+}
+
+/** Junta líneas en mensajes de como mucho `max` caracteres. */
+function chunkLines(lines: string[], max = MAX_CHUNK): string[] {
+  const out: string[] = [];
+  let cur = '';
+  for (const line of lines) {
+    if (cur && cur.length + 1 + line.length > max) {
+      out.push(cur);
+      cur = '';
+    }
+    cur = cur ? `${cur}\n${line}` : line;
+  }
+  if (cur) out.push(cur);
+  return out;
 }
 
 /** Comprueba un token con getMe antes de guardarlo. */
 export async function probeTelegramToken(apiBase: string, token: string): Promise<{ ok: true; username: string } | { ok: false; message: string }> {
   try {
-    const me = await callTelegram<{ username?: string; is_bot?: boolean }>(apiBase.replace(/\/+$/, ''), token, 'getMe', {}, 10_000);
+    const me = await callTelegram<{ username?: string; is_bot?: boolean }>(apiBase.replace(/\/+$/, ''), token, 'getMe', {}, { timeoutMs: 10_000, attempts: 3 });
     if (!me.username) return { ok: false, message: 'Telegram no ha devuelto el nombre del bot: vuelve a intentarlo.' };
     return { ok: true, username: me.username };
   } catch (err) {
@@ -171,6 +296,24 @@ function chatName(chat: TgChat): string {
   return full || (chat.username ? `@${chat.username}` : `chat ${chat.id}`);
 }
 
+/** «/estado ahora» → «/estado» (sin el @nombre_del_bot de los grupos). */
+function commandOf(text: string | undefined): string {
+  return (text ?? '').trim().split(/\s+/)[0]?.toLowerCase().replace(/@.*$/, '') ?? '';
+}
+
+/** Comandos que esperan a Claude o a Telegram (crear eventos). */
+const FLOW_COMMANDS = new Set(['/evento', '/nuevo', '/top']);
+
+/** Un mensaje en la cola de un chat. */
+interface Outgoing {
+  text: string;
+  keyboard?: Button[][];
+  /** Copia informativa (la tarea de otra persona en el chat principal): sale después de lo urgente. */
+  low: boolean;
+  done: (r: { message_id?: number } | undefined) => void;
+  fail: (err: Error) => void;
+}
+
 export class TelegramNotifier implements Notifier {
   readonly enabled = true;
   connected = false;
@@ -179,7 +322,23 @@ export class TelegramNotifier implements Notifier {
   private runtime: Runtime | null = null;
   private offset = 0;
   private stopped = false;
-  private poller: AbortController | null = null;
+  /** Se aborta al parar: corta la escucha, los envíos y sus esperas. */
+  private readonly life = new AbortController();
+  /** Mensajes pendientes de cada chat: salen en orden y de uno en uno (un 429 retiene solo a ese chat). */
+  private readonly outbox = new Map<string, Outgoing[]>();
+  private readonly sending = new Set<string>();
+  /** Cupo de envíos (fichas que se recargan a `sendsPerSecond`). */
+  private tokens: number;
+  private tokensAt = Date.now();
+  private drainTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Actualizaciones en curso por carril: las de un chat van en orden y las de chats distintos, a la vez. */
+  private readonly inbox = new Map<string, Promise<void>>();
+  /** Último «Error enviando a…» mostrado (se quita en cuanto un envío sale bien). */
+  private sendError: string | null = null;
+  /** Cuentas que ya recibieron su tarea de la apertura con «¡Abre la venta!» («operación:cuenta»). */
+  private readonly openingSent = new Set<string>();
+  private checking = false;
+  private lastCheckAt = 0;
   private readonly seen = new Map<string, TelegramChatSeen>();
   /** Mensajes con botones de cada tarea (para quitarlos en todos los chats al cerrarse). */
   private readonly taskMessages = new Map<string, Array<{ chatId: string; messageId: number }>>();
@@ -192,6 +351,10 @@ export class TelegramNotifier implements Notifier {
   private readonly apiBase: string;
   private readonly timeZone: string;
   private readonly retryMs: number;
+  private readonly sendTimeoutMs: number;
+  private readonly sendsPerSecond: number;
+  /** «10:00» en la zona de la sala (crear el formato cuesta ~0,1 ms: se hace una vez). */
+  private readonly clockFmt: Intl.DateTimeFormat;
   /** Número del propio bot (principio del token): nunca es el chat de nadie. */
   private readonly botId: string;
   /** «/evento»: crear eventos con Claude desde Telegram. */
@@ -203,11 +366,15 @@ export class TelegramNotifier implements Notifier {
     this.apiBase = (opts.apiBase ?? 'https://api.telegram.org').replace(/\/+$/, '');
     this.timeZone = opts.timeZone ?? 'Europe/Madrid';
     this.retryMs = opts.retryMs ?? 5000;
+    this.sendTimeoutMs = opts.sendTimeoutMs ?? SEND_TIMEOUT_MS;
+    this.sendsPerSecond = Math.max(1, opts.sendsPerSecond ?? SENDS_PER_SECOND);
+    this.tokens = this.sendsPerSecond;
+    this.clockFmt = new Intl.DateTimeFormat('es-ES', { timeZone: this.timeZone, hour: '2-digit', minute: '2-digit' });
     this.flow = new TelegramEventFlow(
       {
         send: async (chatId, text, keyboard) => {
           try {
-            const r = await this.sendNow(chatId, text, keyboard);
+            const r = await this.enqueue(chatId, text, keyboard);
             return typeof r?.message_id === 'number' ? r.message_id : null;
           } catch (err) {
             log.warn('Telegram: no se pudo enviar', { chatId, error: (err as Error).message });
@@ -221,7 +388,7 @@ export class TelegramNotifier implements Notifier {
           } catch (err) {
             // Telegram no ha podido descargar la imagen: se manda el enlace.
             log.warn('Telegram: no se pudo enviar la imagen del plano', { error: (err as Error).message });
-            await this.sendNow(chatId, `${caption}: ${url}`).catch(() => undefined);
+            await this.enqueue(chatId, `${caption}: ${url}`).catch(() => undefined);
             return false;
           }
         },
@@ -263,7 +430,11 @@ export class TelegramNotifier implements Notifier {
 
   stop(): void {
     this.stopped = true;
-    this.poller?.abort();
+    this.life.abort();
+    if (this.drainTimer !== null) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
+    for (const queue of this.outbox.values()) for (const m of queue) m.fail(new Error('Bot de Telegram parado'));
+    this.outbox.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -291,11 +462,13 @@ export class TelegramNotifier implements Notifier {
       : `@${this.bot} conectado. Falta el chat principal: abre el bot en Telegram, pulsa «Iniciar» y elígelo en Ajustes · Telegram`;
   }
 
-  private api<T>(method: string, body: Record<string, unknown>, timeoutMs = 15_000, signal?: AbortSignal): Promise<T> {
-    return callTelegram<T>(this.apiBase, this.opts.token, method, body, timeoutMs, signal);
+  private api<T>(method: string, body: Record<string, unknown>, opts: Partial<CallOpts> = {}): Promise<T> {
+    return callTelegram<T>(this.apiBase, this.opts.token, method, body, { timeoutMs: 15_000, signal: this.life.signal, ...opts });
   }
 
   private async check(): Promise<void> {
+    this.checking = true;
+    this.lastCheckAt = Date.now();
     try {
       const me = await this.api<{ username: string }>('getMe', {});
       this.bot = me.username;
@@ -308,9 +481,12 @@ export class TelegramNotifier implements Notifier {
       );
       void this.setupProfile();
     } catch (err) {
+      if (this.stopped) return;
       this.connected = false;
       this.detail = `Sin conexión: ${(err as Error).message}`;
       log.warn('Telegram: no se pudo comprobar el bot', { error: (err as Error).message });
+    } finally {
+      this.checking = false;
     }
   }
 
@@ -327,29 +503,96 @@ export class TelegramNotifier implements Notifier {
     }
   }
 
-  private async sendNow(chatId: string, text: string, keyboard?: Button[][]): Promise<{ message_id?: number } | undefined> {
-    return this.api<{ message_id?: number }>('sendMessage', {
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      link_preview_options: { is_disabled: true },
-      ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+  private sendNow(chatId: string, text: string, keyboard?: Button[][]): Promise<{ message_id?: number } | undefined> {
+    return this.api<{ message_id?: number }>(
+      'sendMessage',
+      {
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+        ...(keyboard ? { reply_markup: { inline_keyboard: keyboard } } : {}),
+      },
+      { timeoutMs: this.sendTimeoutMs, retryTimeout: true },
+    );
+  }
+
+  /** Pone un mensaje en la cola de su chat; se resuelve cuando Telegram lo ha aceptado. */
+  private enqueue(chatId: string, text: string, keyboard?: Button[][], low = false): Promise<{ message_id?: number } | undefined> {
+    return new Promise((done, fail) => {
+      if (this.stopped) return fail(new Error('Bot de Telegram parado'));
+      const queue = this.outbox.get(chatId) ?? [];
+      queue.push({ text, keyboard, low, done, fail });
+      this.outbox.set(chatId, queue);
+      this.drain();
     });
   }
 
-  private send(chatId: string, text: string, keyboard?: Button[][], onSent?: (messageId: number) => void): void {
-    void this.sendNow(chatId, text, keyboard).then((r) => {
-      if (onSent && typeof r?.message_id === 'number') onSent(r.message_id);
-    }).catch((err: Error) => {
-      this.detail = `Error enviando a ${chatId}: ${err.message}`;
-      log.warn('Telegram: no se pudo enviar', { chatId, error: err.message });
-    });
+  /** Envía lo que se pueda ya: un mensaje por chat a la vez y, sumando todos, al ritmo permitido. */
+  private drain(): void {
+    if (this.stopped) return;
+    const now = Date.now();
+    this.tokens = Math.min(this.sendsPerSecond, this.tokens + ((now - this.tokensAt) * this.sendsPerSecond) / 1000);
+    this.tokensAt = now;
+    for (;;) {
+      // El siguiente chat libre; primero los que no tienen en cabeza una copia informativa.
+      let next: string | null = null;
+      for (const [chat, queue] of this.outbox) {
+        if (this.sending.has(chat)) continue;
+        if (!queue[0]?.low) {
+          next = chat;
+          break;
+        }
+        next ??= chat;
+      }
+      if (next === null) return;
+      if (this.tokens < 1) {
+        // Sin cupo: se vuelve a mirar en cuanto lo haya.
+        this.drainTimer ??= setTimeout(
+          () => {
+            this.drainTimer = null;
+            this.drain();
+          },
+          Math.ceil(((1 - this.tokens) * 1000) / this.sendsPerSecond),
+        );
+        return;
+      }
+      const chat = next;
+      const queue = this.outbox.get(chat) ?? [];
+      const m = queue.shift();
+      if (queue.length === 0) this.outbox.delete(chat);
+      if (!m) continue;
+      this.tokens -= 1;
+      this.sending.add(chat);
+      void this.sendNow(chat, m.text, m.keyboard)
+        .then(m.done, m.fail)
+        .finally(() => {
+          this.sending.delete(chat);
+          this.drain();
+        });
+    }
+  }
+
+  private send(chatId: string, text: string, keyboard?: Button[][], opts: { onSent?: (messageId: number) => void; low?: boolean } = {}): void {
+    void this.enqueue(chatId, text, keyboard, opts.low).then(
+      (r) => {
+        // Ya se puede enviar: fuera el «Error enviando a…» de un fallo anterior.
+        if (this.sendError !== null && this.detail === this.sendError) this.refreshDetail();
+        this.sendError = null;
+        if (opts.onSent && typeof r?.message_id === 'number') opts.onSent(r.message_id);
+      },
+      (err: Error) => {
+        if (this.stopped) return;
+        this.detail = this.sendError = `Error enviando a ${chatId}: ${err.message}`;
+        log.warn('Telegram: no se pudo enviar', { chatId, error: err.message });
+      },
+    );
   }
 
   /** Envía y espera la respuesta de Telegram, con el error explicado. */
   private async deliver(target: string, text: string): Promise<{ ok: boolean; message: string }> {
     try {
-      await this.sendNow(target, text);
+      await this.enqueue(target, text);
       this.connected = true;
       this.refreshDetail();
       return { ok: true, message: `Mensaje enviado al chat ${target}.` };
@@ -361,7 +604,7 @@ export class TelegramNotifier implements Notifier {
           ? `${target} es el número de un bot, no el de una persona: elige tu chat en Ajustes · Telegram (el de quien pulsó «Iniciar»).`
           : /chat not found|bot was blocked|user is deactivated/i.test(message)
             ? `Telegram no deja escribir al chat ${target}: abre el bot en Telegram, pulsa «Iniciar» (/start) y vuelve a probar.`
-            : /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|network/i.test(message)
+            : /fetch failed|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|network|no ha contestado|cortó la respuesta/i.test(message)
               ? `No se pudo conectar con Telegram (${message}). Comprueba la conexión a Internet y vuelve a pulsar «Enviar mensaje de prueba»; si se repite, un antivirus o cortafuegos puede estar bloqueando a Node.js.`
               : `No se pudo enviar: ${message}`,
       };
@@ -411,6 +654,12 @@ export class TelegramNotifier implements Notifier {
     return [...chats];
   }
 
+  /** Chat propio de la cuenta, si tiene uno distinto del principal. */
+  private personalChat(accountId: string): string | null {
+    const personal = this.runtime?.store.accounts.get(accountId)?.telegramChatId;
+    return personal && personal !== this.botId && personal !== this.chatId ? personal : null;
+  }
+
   notifyAlert(alert: Alert): void {
     if (alert.severity === 'INFO' && !ALWAYS_SEND.has(alert.kind)) return;
     if (alert.kind === 'HUMAN_TASK') return; // la tarea llega con sus propios botones
@@ -428,7 +677,7 @@ export class TelegramNotifier implements Notifier {
   }
 
   private clock(iso: string): string {
-    return new Intl.DateTimeFormat('es-ES', { timeZone: this.timeZone, hour: '2-digit', minute: '2-digit' }).format(new Date(iso));
+    return this.clockFmt.format(new Date(iso));
   }
 
   taskMessage(task: HumanTask): { text: string; keyboard: Button[][] } {
@@ -464,20 +713,57 @@ export class TelegramNotifier implements Notifier {
     return { text: lines.join('\n'), keyboard };
   }
 
-  announce(text: string, accountIds: string[], link?: string | null): void {
+  announce(text: string, accountIds: string[], link?: string | null, opts: { mainChat?: boolean } = {}): void {
     const chats = new Set<string>();
     if (this.chatId) chats.add(this.chatId);
     for (const id of accountIds) {
       const personal = this.runtime?.store.accounts.get(id)?.telegramChatId;
       if (personal && personal !== this.botId) chats.add(personal);
     }
+    if (opts.mainChat === false && this.chatId) chats.delete(this.chatId);
     const keyboard: Button[][] | undefined = link ? [[{ text: '🌐 Abrir la web oficial', url: link }]] : undefined;
     for (const chat of chats) this.send(chat, text, keyboard);
   }
 
+  /**
+   * Unos segundos antes de T0: abre (o refresca) una conexión por cada chat que
+   * recibirá mensajes en la apertura, para que en T0 no haya ningún handshake.
+   */
+  prewarm(accountIds: string[]): void {
+    if (this.stopped) return;
+    const chats = new Set(accountIds.flatMap((id) => this.chatsFor(id)));
+    const n = Math.min(Math.max(1, chats.size), MAX_SOCKETS - 2);
+    for (let i = 0; i < n; i++) void this.api('getMe', {}, { timeoutMs: 5000 }).catch(() => undefined);
+  }
+
+  /**
+   * «¡Abre la venta!» para la primera tarea de compra de una cuenta que nace con la
+   * apertura: va en el mismo mensaje que la tarea (un solo mensaje por persona en T0).
+   */
+  private openingLine(task: HumanTask): string | null {
+    const op = task.operationId ? this.runtime?.store.operations.get(task.operationId) : undefined;
+    if (task.kind !== 'ADD_TO_CART' || !op?.startedAt || Date.parse(task.createdAt) - Date.parse(op.startedAt) > OPENING_WINDOW_MS) return null;
+    const key = `${op.id}:${task.accountId}`;
+    if (this.openingSent.has(key)) return null;
+    this.openingSent.add(key);
+    return `🚦 <b>¡Abre la venta! ${esc(op.config.name)}</b>\nEntra ya en la web oficial (cola incluida).`;
+  }
+
   notifyTask(task: HumanTask): void {
     const { text, keyboard } = this.taskMessage(task);
-    for (const chat of this.chatsFor(task.accountId)) this.send(chat, text, keyboard, (messageId) => this.trackTaskMessage(task.id, chat, messageId));
+    const personal = this.personalChat(task.accountId);
+    // El chat principal ya recibió el aviso de apertura justo antes que las copias de las tareas.
+    const opening = personal ? this.openingLine(task) : null;
+    // Primero el chat de la persona: con poco cupo, su tarea sale antes que la copia informativa.
+    const chats = this.chatsFor(task.accountId).sort((a, b) => Number(b === personal) - Number(a === personal));
+    for (const chat of chats) {
+      const own = chat === personal;
+      this.send(chat, own && opening ? `${opening}\n\n${text}` : text, keyboard, {
+        onSent: (messageId) => this.trackTaskMessage(task.id, chat, messageId),
+        // La copia en el chat principal de una tarea que ya llega a su persona es informativa.
+        low: personal !== null && !own,
+      });
+    }
   }
 
   private trackTaskMessage(taskId: string, chatId: string, messageId: number): void {
@@ -495,9 +781,17 @@ export class TelegramNotifier implements Notifier {
     const list = this.taskMessages.get(task.id);
     if (!list) return;
     this.taskMessages.delete(task.id);
-    for (const m of list) {
-      void this.api('editMessageReplyMarkup', { chat_id: m.chatId, message_id: m.messageId, reply_markup: { inline_keyboard: [] } }).catch(() => undefined);
-    }
+    for (const m of list) this.setKeyboard(m.chatId, m.messageId);
+  }
+
+  /** Cambia (o quita) los botones de un mensaje sin esperar a Telegram. */
+  private setKeyboard(chatId: string | number, messageId: number, keyboard: Button[][] = []): void {
+    void this.api('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: keyboard } }).catch(() => undefined);
+  }
+
+  /** Responde a un botón sin esperar a Telegram: una respuesta lenta no retrasa a nadie. */
+  private answer(callbackId: string, text: string): void {
+    void this.api('answerCallbackQuery', { callback_query_id: callbackId, text }).catch(() => undefined);
   }
 
   // ---------------------------------------------------------------------------
@@ -524,22 +818,23 @@ export class TelegramNotifier implements Notifier {
 
   private async poll(): Promise<void> {
     while (!this.stopped) {
-      this.poller = new AbortController();
       try {
         const updates = await this.api<TgUpdate[]>(
           'getUpdates',
           { offset: this.offset, timeout: 25, allowed_updates: ['message', 'callback_query'] },
-          35_000,
-          this.poller.signal,
+          { timeoutMs: 35_000, attempts: 1 },
         );
-        if (!this.connected && this.bot) {
+        if (!this.bot) {
+          // getMe falló al arrancar pero Telegram ya contesta: se comprueba otra vez (nombre y menú de comandos).
+          if (!this.checking && Date.now() - this.lastCheckAt >= this.retryMs) void this.check();
+        } else if (!this.connected) {
           this.connected = true;
           this.refreshDetail();
         }
         for (const u of updates) {
           if (this.stopped) break;
           this.offset = Math.max(this.offset, u.update_id + 1);
-          await this.handle(u).catch((err: Error) => log.warn('Telegram: error procesando un mensaje', { error: err.message }));
+          this.dispatch(u);
         }
       } catch (err) {
         if (this.stopped) break;
@@ -555,10 +850,29 @@ export class TelegramNotifier implements Notifier {
         this.detail = /Conflict/i.test(message)
           ? 'Otro programa está leyendo este bot (¿hay dos servidores abiertos?). Cierra el otro.'
           : `Sin conexión: ${message}`;
-        await new Promise((r) => setTimeout(r, this.retryMs));
-        if (!this.bot && !this.stopped) await this.check();
+        await pause(this.retryMs, this.life.signal).catch(() => undefined);
+        if (!this.bot && !this.stopped && !this.checking) await this.check();
       }
     }
+  }
+
+  /**
+   * Atiende una actualización sin esperar a las demás: lo que cambia el estado (responder
+   * una tarea, marcar un carrito) se hace al momento y en orden dentro de cada chat, y una
+   * respuesta lenta de Telegram a una persona no retrasa a las demás.
+   */
+  private dispatch(u: TgUpdate): void {
+    const chat = String(u.callback_query?.message?.chat.id ?? u.message?.chat.id ?? '');
+    // «/evento» espera a Claude y a Telegram: va por su propio carril para no retrasar los botones de las tareas.
+    const flow = u.callback_query ? (u.callback_query.data ?? '').startsWith('ev:') : FLOW_COMMANDS.has(commandOf(u.message?.text));
+    const lane = flow ? `ev:${chat}` : chat;
+    const next = (this.inbox.get(lane) ?? Promise.resolve())
+      .then(() => this.handle(u))
+      .catch((err: Error) => log.warn('Telegram: error procesando un mensaje', { error: err.message }));
+    this.inbox.set(lane, next);
+    void next.then(() => {
+      if (this.inbox.get(lane) === next) this.inbox.delete(lane);
+    });
   }
 
   private hint(chat: TgChat): void {
@@ -583,7 +897,7 @@ export class TelegramNotifier implements Notifier {
       const q = u.callback_query;
       const chat = q.message ? String(q.message.chat.id) : '';
       if (!allowed.has(chat)) {
-        await this.api('answerCallbackQuery', { callback_query_id: q.id, text: 'Este chat no está autorizado.' }).catch(() => undefined);
+        this.answer(q.id, 'Este chat no está autorizado.');
         return;
       }
       const [kind, ref, result, extra] = (q.data ?? '').split(':');
@@ -606,12 +920,8 @@ export class TelegramNotifier implements Notifier {
         } catch (err) {
           text = (err as Error).message;
         }
-        await this.api('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => undefined);
-        if (q.message) {
-          await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(
-            () => undefined,
-          );
-        }
+        this.answer(q.id, text);
+        if (q.message) this.setKeyboard(q.message.chat.id, q.message.message_id);
         return;
       }
       if (kind === 'x' && ref && result) {
@@ -631,17 +941,17 @@ export class TelegramNotifier implements Notifier {
         } catch (err) {
           text = (err as Error).message;
         }
-        await this.api('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => undefined);
-        if (q.message) {
-          // Queda solo «Ya lo he pagado».
-          await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: keep } }).catch(
-            () => undefined,
-          );
-        }
+        this.answer(q.id, text);
+        // Queda solo «Ya lo he pagado».
+        if (q.message) this.setKeyboard(q.message.chat.id, q.message.message_id, keep);
         return;
       }
       const taskId = ref;
-      if (kind !== 't' || !taskId || !result) return;
+      if (kind !== 't' || !taskId || !result) {
+        // Botón de una versión anterior del bot (o mal formado): se contesta igual, para que no se quede cargando.
+        this.answer(q.id, 'Botón antiguo: escribe /tareas para ver tus tareas.');
+        return;
+      }
       const task = rt.store.humanTasks.get(taskId);
       let text = 'Hecho ✅';
       try {
@@ -679,19 +989,15 @@ export class TelegramNotifier implements Notifier {
       } catch (err) {
         text = (err as Error).message;
       }
-      await this.api('answerCallbackQuery', { callback_query_id: q.id, text }).catch(() => undefined);
-      if (q.message) {
-        await this.api('editMessageReplyMarkup', { chat_id: q.message.chat.id, message_id: q.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(
-          () => undefined,
-        );
-      }
+      this.answer(q.id, text);
+      if (q.message) this.setKeyboard(q.message.chat.id, q.message.message_id);
       return;
     }
     const m = u.message;
     if (!m) return;
     this.remember(m.chat);
     const chat = String(m.chat.id);
-    const cmd = (m.text ?? '').trim().split(/\s+/)[0]?.toLowerCase().replace(/@.*$/, '') ?? '';
+    const cmd = commandOf(m.text);
     if (cmd === '/id') {
       this.send(chat, `El chat ID de este chat es: <code>${chat}</code>`);
       return;
@@ -701,7 +1007,7 @@ export class TelegramNotifier implements Notifier {
       return;
     }
     const main = chat === this.chatId;
-    if (cmd === '/evento' || cmd === '/nuevo' || cmd === '/top') {
+    if (FLOW_COMMANDS.has(cmd)) {
       if (!main) {
         this.send(chat, 'Solo el chat principal puede crear eventos.');
         return;
@@ -709,9 +1015,11 @@ export class TelegramNotifier implements Notifier {
       if (cmd === '/top') await this.flow.startTop(chat);
       else await this.flow.start(chat);
     } else if (cmd === '/estado') {
-      const ops = rt.ctx.ops.summaries().filter((o) => !['CLOSED', 'CANCELLED'].includes(o.state));
+      const ops = rt.ctx.ops.summaries().filter((o) => !['CLOSED', 'CANCELLED', 'ENDED'].includes(o.state));
       const lines = ops.map((o) => `• <b>${esc(o.name)}</b>: ${OPERATION_STATE_LABEL[o.state]} · ${o.cartedQty}/${o.requestedQty} en carrito`);
-      this.send(chat, lines.length ? lines.join('\n') : 'No hay operaciones activas.');
+      if (lines.length === 0) this.send(chat, 'No hay operaciones activas.');
+      // Con muchas operaciones no cabe en un mensaje (4096 caracteres): se manda en varios.
+      for (const part of chunkLines(lines)) this.send(chat, part);
     } else if (cmd === '/tareas') {
       const mine = (t: HumanTask) => main || rt.store.accounts.get(t.accountId)?.telegramChatId === chat;
       const tasks = [...rt.store.humanTasks.values()].filter((t) => t.state === 'OPEN' && mine(t));
@@ -721,7 +1029,8 @@ export class TelegramNotifier implements Notifier {
       }
       for (const t of tasks) {
         const { text, keyboard } = this.taskMessage(t);
-        this.send(chat, text, keyboard);
+        // Esta copia también pierde los botones cuando se cierre la tarea.
+        this.send(chat, text, keyboard, { onSent: (messageId) => this.trackTaskMessage(t.id, chat, messageId) });
       }
     } else if (cmd === '/pausa' || cmd === '/parar_todo') {
       if (!main) {

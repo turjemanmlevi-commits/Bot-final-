@@ -6,6 +6,7 @@ import path from 'node:path';
 import { writeFixtureVault, FIXTURE_UNVERIFIED_EVENT } from '../gates/fixtures';
 import { createHarness, manualConfig, simConfig, simulateOperation, SIM_ACCOUNTS } from '../gates/harness';
 import { replayOperation } from '../runtime/replay';
+import { iso } from '../util/time';
 
 let dir = '';
 before(async () => {
@@ -64,6 +65,46 @@ describe('runtime', () => {
       assert.ok(['PAUSED', 'CART_SECURED'].includes(rt.ctx.ops.get(op.id).state));
       const resume = await rt.ctx.ops.command(op.id, { command: 'resume' }, 't');
       if (rt.ctx.ops.get(op.id).state === 'PAUSED') assert.equal(resume.ok, false, 'no se reanuda con el kill switch activo');
+    } finally {
+      await h.stop();
+    }
+  });
+
+  it('SIMULATED: el desfase del reloj del proveedor se mide sin sesgo (T0 no se adelanta)', async () => {
+    const h = await createHarness(dir);
+    try {
+      const rt = h.app.runtime;
+      // El simulador va 140 ms adelantado (escenario por defecto) y tarda 10 ms en contestar la hora.
+      const sync = rt.ctx.ops.syncClock('sim');
+      await h.clock.advance(50);
+      await sync;
+      assert.equal(rt.store.clockSkew.get('sim'), 140);
+    } finally {
+      await h.stop();
+    }
+  });
+
+  it('SIMULATED: si la cola aún no abre y faltan pocos ms, se vuelve a mirar justo entonces', async () => {
+    const h = await createHarness(dir, { seed: 5 });
+    try {
+      const rt = h.app.runtime;
+      const accounts = SIM_ACCOUNTS.slice(0, 2).map((a) => rt.ctx.accounts.create(a, 't'));
+      const op = rt.ctx.ops.create(simConfig(accounts.map((a) => a.id), h.clock.now(), { requestedQty: 2, simulation: { scenarioId: 'sin-cola', seed: 5 } }), 't');
+      await rt.ctx.ops.command(op.id, { command: 'validate' }, 't');
+      assert.ok((await rt.ctx.ops.command(op.id, { command: 'arm' }, 't')).ok);
+      // «Aún no abre: faltan 3 ms» en la primera consulta de cada cuenta.
+      const polls = new Map<string, number[]>();
+      const pollQueue = rt.ctx.accounts.pollQueue.bind(rt.ctx.accounts);
+      rt.ctx.accounts.pollQueue = async (accountId, operationId, eventRef) => {
+        const at = polls.get(accountId) ?? [];
+        at.push(h.clock.now());
+        polls.set(accountId, at);
+        if (at.length === 1) return { state: 'NOT_OPEN', position: null, etaMs: 3, updatedAt: iso(h.clock.now()) };
+        return pollQueue(accountId, operationId, eventRef);
+      };
+      await h.clock.runUntil(() => [...polls.values()].some((p) => p.length >= 2), 120_000, 1);
+      const first = [...polls.values()].find((p) => p.length >= 2) ?? [];
+      assert.ok((first[1] ?? 0) - (first[0] ?? 0) <= 5, `segunda consulta a los ${(first[1] ?? 0) - (first[0] ?? 0)} ms`);
     } finally {
       await h.stop();
     }

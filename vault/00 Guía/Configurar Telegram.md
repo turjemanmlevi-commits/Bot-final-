@@ -45,7 +45,7 @@ Esa persona recibe las tareas y alertas de **su cuenta** y el aviso de apertura 
 ## Qué llega
 
 - **Al armar la operación — «Inicia sesión», con el plan de la cuenta**: «Plan: la venta abre a las 18:05. Irás a por 1) Lateral Este · Primer anfiteatro, 2) Fondo Sur; hasta 2 entradas, máximo 120,00 € por entrada con gastos…». Botones: **🌐 Abrir la web oficial**, **✅ Sesión lista**, **❌ No puedo**. «Sesión lista» se pulsa el día de la venta, con la sesión iniciada de verdad en la web oficial. Se pide **en cada compra**: al armar, la cuenta vuelve a *Sin sesión* aunque lo pulsaras en un ensayo. Si la operación se desarma, esta tarea se cancela y sus botones desaparecen; al volver a armar llega otra con el plan nuevo.
-- **En T0 — «🚦 ¡Abre la venta!»**, a la hora exacta, al chat principal y a los chats de las cuentas de la operación, con el botón **🌐 Abrir la web oficial** y, si hace falta, cuántas cuentas no han pulsado «Sesión lista».
+- **En T0 — «🚦 ¡Abre la venta!»**, a la hora exacta, al chat principal con el botón **🌐 Abrir la web oficial** y, si hace falta, cuántas cuentas no han pulsado «Sesión lista». En el chat de cada cuenta llega en el mismo mensaje que su tarea de compra (un solo mensaje); quien no recibe tarea recibe el aviso aparte.
 - **En T0 — la tarea de compra** de cada cuenta con «Sesión lista»: «Añade 2 entradas · Lateral Este · Primer anfiteatro», con `🎯 2 × Lateral Este · Primer anfiteatro · máx. 120,00 € por entrada` y `⏱ Responde antes de las HH:MM` (30 minutos después, por defecto). Botones:
   - **🌐 Abrir la web oficial**;
   - **un botón por cantidad**, de la cantidad pedida a 1: `✅ 2 en carrito`, `✅ 1 en carrito` (en filas de 5, hasta 20). Pulsa el número de entradas que tienes de verdad en el carrito;
