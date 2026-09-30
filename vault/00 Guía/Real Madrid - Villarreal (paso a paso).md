@@ -49,7 +49,7 @@ Evento ya preparado en la sala: [[Real Madrid - Villarreal CF · LaLiga J8]]. Gu
 | **Después** | La sala lleva la cuenta de carritos y del tiempo que les queda | **Pagar** en la web oficial y pulsar **«Pagado»** |
 
 > [!tip] Si algo va mal
-> **Pausa** (en la operación o **/pausa** en Telegram) o **PARAR TODO** (*Seguridad*, o **/parar_todo**): se avisa al momento a todas las personas de que paren. Si el PARAR TODO está activo a las 10:00, la operación **queda en pausa** (no se pierde): suéltalo y pulsa **Reanudar**.
+> **Pausa** (en la operación o **/pausa** en Telegram) o **PARAR TODO** (*Seguridad*, o **/parar_todo**): se avisa al momento a todas las personas de que paren. Al **reanudar**, cada persona sigue en su zona (nunca vuelve a una donde ya dijo «No pude»). Si el PARAR TODO está activo a las 10:00, la operación **queda en pausa** (no se pierde): suéltalo y pulsa **Reanudar**.
 
 ## Qué se ha comprobado esta noche (con simuladores)
 
@@ -57,15 +57,15 @@ Ensayo con reloj real de este mismo partido (copia de la sala, venta abriendo a 
 
 | Qué | Antes | Ahora |
 |---|---|---|
-| De la apertura a la tarea en el chat de cada persona | 27–32 ms | **10–12 ms** |
+| De la apertura a la tarea en el chat de cada persona | 27–32 ms | **10–13 ms** |
 | Mensajes por persona a la hora de apertura | 2 (la tarea llegaba antes que el aviso) | **1** (aviso y tarea juntos) |
 | «Sesión lista» registrada | 17–50 ms | **5–17 ms** |
 | 8 personas pulsan «en carrito» a la vez (Telegram con 80 ms de retraso) | hasta 1 s | **menos de 0,1 s** |
-| «No pude» → siguiente zona | 7 ms | 7 ms |
+| «No pude» → siguiente zona | 7 ms | 5–7 ms |
 
 Además:
 
-- Ana, con **2 cuentas** (mismo titular), recibe **1** tarea: nunca se pasa del límite por persona.
+- Ana, con **2 cuentas** (mismo titular), recibe **1** tarea: nunca se pasa del límite por persona. Y aunque hagáis **dos operaciones del mismo partido**, lo que una persona ya tiene (o está comprando) en una cuenta cuenta para la otra: la segunda no la deja pasar del límite.
 - A quien no tenía la sesión lista le llegaron los avisos «entrad ya».
 - Con una red más lenta (50 ms hasta Telegram), la tarea llega en **33–48 ms** (antes 169–209 ms): las conexiones con Telegram se abren 3 segundos antes de la hora.
 - Si Telegram falla o pide esperar (errores 429 o 500), el mensaje **se reintenta** en vez de perderse (antes se perdían 8 de 11 en el chat principal).
