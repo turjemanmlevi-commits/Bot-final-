@@ -4,6 +4,7 @@
  */
 
 import type { Account, AccountInput, Id, OperationConfig } from '@to/shared';
+import { scenarioInfos } from '../providers/scenarios';
 import { iso } from '../util/time';
 import type { Runtime } from './runtime';
 
@@ -33,6 +34,15 @@ function ensureAccounts(runtime: Runtime, inputs: AccountInput[], actor: string)
   return out;
 }
 
+/** Una sola demo de cada tipo: la de una demo anterior que se quedó sin armar (borrador o validada) se cancela. */
+async function cancelUnarmed(runtime: Runtime, eventId: Id, name: string, actor: string): Promise<void> {
+  for (const r of [...runtime.store.operations.values()]) {
+    if (r.config.eventId === eventId && r.config.name === name && (r.state === 'DRAFT' || r.state === 'VALIDATED')) {
+      await runtime.ctx.ops.command(r.id, { command: 'cancel', reason: 'Sustituida por una demo nueva' }, actor);
+    }
+  }
+}
+
 export interface DemoResult {
   operationId: Id;
   manualOperationId: Id | null;
@@ -47,6 +57,10 @@ export async function seedDemo(
 ): Promise<DemoResult> {
   const actor = opts.actor ?? 'demo';
   const now = runtime.ctx.now();
+  // Antes de crear nada: un escenario que no existe no deja cuentas ni operaciones a medias.
+  const scenarioId = opts.scenarioId ?? 'demo';
+  const scenarios = scenarioInfos().map((s) => s.id);
+  if (!scenarios.includes(scenarioId)) throw new Error(`Escenario desconocido: «${scenarioId}». Usa uno de estos: ${scenarios.join(', ')}.`);
   const simAccounts = ensureAccounts(runtime, SIM_ACCOUNTS, actor);
   const manualAccounts = ensureAccounts(runtime, MANUAL_ACCOUNTS, actor);
 
@@ -74,7 +88,8 @@ export async function seedDemo(
     requestedQty: 8,
     currency: 'EUR',
     maxUnitPrice: 13_000,
-    budget: 100_000,
+    // 8 × 130 €: cubre las 8 entradas aunque todas lleguen al máximo (sin aviso de presupuesto).
+    budget: 104_000,
     preferences: {
       targets: ['Pista A', '103', '104', 'Grada Baja', 'Pista B'],
       excludeSections: [],
@@ -87,21 +102,31 @@ export async function seedDemo(
     },
     accountIds: simAccounts.map((a) => a.id),
     cartExpiryAlertsSeconds: [300, 120, 60],
-    simulation: { scenarioId: opts.scenarioId ?? 'demo', seed: opts.seed ?? Math.floor(now % 100_000) },
+    simulation: { scenarioId, seed: opts.seed ?? Math.floor(now % 100_000) },
   };
+  await cancelUnarmed(runtime, event.id, config.name, actor);
   const op = runtime.ctx.ops.create(config, actor);
+  // Si no valida o no se arma, no se deja una operación huérfana en borrador.
   const validated = await runtime.ctx.ops.command(op.id, { command: 'validate' }, actor);
-  if (!validated.ok) throw new Error(`La demo no valida: ${validated.validation?.issues.map((i) => i.message).join(' · ')}`);
+  if (!validated.ok) {
+    await runtime.ctx.ops.command(op.id, { command: 'cancel', reason: 'La demo no valida' }, actor);
+    throw new Error(`La demo no valida: ${validated.validation?.issues.filter((i) => i.severity === 'ERROR').map((i) => i.message).join(' · ')}`);
+  }
   const armed = await runtime.ctx.ops.command(op.id, { command: 'arm' }, actor);
-  if (!armed.ok) throw new Error(`La demo no se puede armar: ${armed.message}`);
+  if (!armed.ok) {
+    await runtime.ctx.ops.command(op.id, { command: 'cancel', reason: 'La demo no se puede armar' }, actor);
+    throw new Error(`La demo no se puede armar: ${armed.message}`);
+  }
 
   let manualOperationId: Id | null = null;
   const manualEvent = runtime.store.events.get(DEMO_MANUAL_EVENT);
   const manualBusy = manualAccounts.some((a) => a.leasedBy !== null);
   if (manualEvent && !manualBusy) {
+    const name = `Demo manual · ${manualEvent.name}`;
+    await cancelUnarmed(runtime, manualEvent.id, name, actor);
     const manual = runtime.ctx.ops.create(
       {
-        name: `Demo manual · ${manualEvent.name}`,
+        name,
         eventId: manualEvent.id,
         providerId: 'manual',
         t0: iso(now + 15 * 60_000),

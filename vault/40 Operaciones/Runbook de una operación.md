@@ -37,7 +37,7 @@ De «queremos 8 entradas para este concierto» a «carritos pagados».
 | Al **armar** | Congela todo en un snapshot, reserva las cuentas, abre sesiones (en asistencia manual, las cuentas vuelven a *Sin sesión* y reciben una tarea «Inicia sesión» nueva con el plan) | Resolver los retos de sesión; en asistencia manual, iniciar sesión en la web oficial y pulsar «Sesión lista» antes de T0 (Tareas humanas o Telegram) |
 | T−12 h, T−1 h, T−5 min | [[Readiness]] automático | Arreglar lo que salga en rojo o ámbar |
 | T0 − congelado | Pasa a *Congelada*; sincroniza reloj con el proveedor | Tener el dashboard delante |
-| **T0** | Readiness final → *En marcha* (si da **rojo** —kill switch global, de proveedor o de la operación activo, o el journal sin guardar— la operación **termina sin arrancar**; una cuenta parada solo da ámbar y no participa): cola, inventario, decisiones, carritos. En asistencia manual: aviso «🚦 ¡Abre la venta!» y una tarea «Añade N entradas · <zona>» por cuenta lista | Vigilar alertas; en asistencia manual, hacer tu tarea en la web oficial y responderla |
+| **T0** | Readiness final → *En marcha* (si da **rojo** por el journal sin guardar la operación **termina sin arrancar**; con un kill switch global, de proveedor o de la operación activo queda **en pausa sin arrancar** hasta que lo sueltes y pulses *Reanudar*; una cuenta parada solo da ámbar y no participa): cola, inventario, decisiones, carritos. En asistencia manual: aviso «🚦 ¡Abre la venta!» y una tarea «Añade N entradas · <zona>» por cuenta lista | Vigilar alertas; en asistencia manual, hacer tu tarea en la web oficial y responderla |
 | Carrito asegurado | Para la automatización y avisa. Si se libera un carrito y la ventana sigue abierta, vuelve a *En marcha* y reparte lo que falta | **Pagar cada carrito** antes de que caduque |
 
 En modo **asistencia manual** el sistema te va dando tareas («añade 2 entradas de Platea Central, máx. 45 €»): hazlas en tu navegador y responde en el dashboard o en Telegram.
@@ -45,7 +45,7 @@ En modo **asistencia manual** el sistema te va dando tareas («añade 2 entradas
 ## Si algo va mal
 
 - **Parar todo ya**: Seguridad → PARAR TODO (kill switch global). Nada automático sale del sistema y lo que esté en marcha se pausa.
-- **Antes de T0, ningún kill switch global, de proveedor ni de operación activo**: en T0 el [[Readiness]] final da rojo y la operación **termina sin arrancar**.
+- **Antes de T0, ningún kill switch global, de proveedor ni de operación activo**: en T0 el [[Readiness]] final da rojo y la operación queda **en pausa sin arrancar** (no se reparte nada) hasta que lo sueltes y pulses *Reanudar*.
 - **Quitar a una persona** (antes o durante la venta): «Parar cuenta» en *Cuentas* es **seguro**. Solo excluye esa cuenta: el [[Readiness]] da un aviso («Cuentas paradas (no participarán)») y la operación arranca y sigue con las demás. Si esa cuenta ya tenía una tarea de compra abierta, respóndela con «No pude» para liberar sus entradas. Alternativa antes de T0: *Desarmar*, *Editar configuración* (quitar la cuenta), *Guardar y validar* y *Armar*; al volver a armar, cada persona recibe una tarea «Inicia sesión» nueva con el plan nuevo y tiene que pulsar otra vez «Sesión lista».
 - **Pausar una operación**: botón *Pausar*. Reanudar solo si la ventana sigue abierta.
 - **Menos entradas / precio más bajo**: *Reducir cantidad* y *Bajar precio máx.* funcionan en caliente (nunca al revés).

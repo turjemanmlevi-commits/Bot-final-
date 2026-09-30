@@ -5,6 +5,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { Hono, type Context } from 'hono';
+import { compress } from 'hono/compress';
 import { streamSSE } from 'hono/streaming';
 import {
   AccountInputSchema,
@@ -40,7 +41,7 @@ import {
   type TelegramConfigResult,
   type TelegramTestResult,
 } from '@to/shared';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { App } from '../app';
 import { resolveLabel, venueIndex } from '../domain/venue';
 import { runGates } from '../gates/gates';
@@ -94,20 +95,66 @@ function actorOf(c: Context): string {
   return clean === '' ? 'operador' : clean;
 }
 
-async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> {
+async function body<T extends z.ZodType>(c: Context, schema: T, labels: Record<string, string> = FIELD_LABEL): Promise<z.infer<T>> {
   let json: unknown;
   try {
     json = await c.req.json();
   } catch {
     throw new ApiError(400, 'BAD_JSON', 'El cuerpo no es JSON válido');
   }
-  const r = schema.safeParse(json);
+  const r = schema.safeParse(json, { error: spanishIssue });
   if (!r.success) {
-    const message = r.error.issues.map((i) => `${FIELD_LABEL[i.path.join('.')] ?? (i.path.join('.') || '(raíz)')}: ${i.message}`).join('; ');
+    const message = r.error.issues
+      .map((i) => {
+        const key = i.path.join('.');
+        // «cartExpiryAlertsSeconds.10» → la etiqueta de la lista.
+        const field = labels[key] ?? labels[i.path.filter((x) => typeof x !== 'number').join('.')] ?? (key || '(raíz)');
+        return `${field}: ${i.message}`;
+      })
+      .join('; ');
     throw new ApiError(400, 'BAD_REQUEST', message, r.error.issues);
   }
   return r.data;
 }
+
+const TYPE_ES: Record<string, string> = {
+  string: 'un texto',
+  number: 'un número',
+  int: 'un número entero',
+  bigint: 'un número entero',
+  boolean: 'verdadero o falso',
+  array: 'una lista',
+  object: 'un objeto',
+  date: 'una fecha',
+};
+
+const zodEs = z.locales.es().localeError;
+
+/**
+ * Mensajes de zod en castellano, cortos y como los muestran los formularios.
+ * Los mensajes propios de cada esquema (ya en castellano) tienen prioridad.
+ */
+const spanishIssue: z.core.$ZodErrorMap = (iss) => {
+  const many = (n: number | bigint, one: string, other: string) => `${String(n)} ${Number(n) === 1 ? one : other}`;
+  switch (iss.code) {
+    case 'invalid_type':
+      return iss.input === undefined ? 'es obligatorio' : `tiene que ser ${TYPE_ES[iss.expected] ?? iss.expected}`;
+    case 'too_small':
+      if (iss.origin === 'string') return Number(iss.minimum) <= 1 ? 'no puede estar vacío' : `mínimo ${many(iss.minimum, 'carácter', 'caracteres')}`;
+      if (iss.origin === 'array' || iss.origin === 'set') return `al menos ${many(iss.minimum, 'valor', 'valores')}`;
+      return iss.inclusive === false ? `tiene que ser mayor que ${String(iss.minimum)}` : `mínimo ${String(iss.minimum)}`;
+    case 'too_big':
+      if (iss.origin === 'string') return `máximo ${many(iss.maximum, 'carácter', 'caracteres')}`;
+      if (iss.origin === 'array' || iss.origin === 'set') return `como mucho ${many(iss.maximum, 'valor', 'valores')}`;
+      return iss.inclusive === false ? `tiene que ser menor que ${String(iss.maximum)}` : `máximo ${String(iss.maximum)}`;
+    case 'invalid_format':
+      return iss.format === 'datetime' ? 'fecha y hora no válida' : iss.format === 'url' ? 'enlace no válido' : iss.format === 'email' ? 'email no válido' : 'formato no válido';
+    case 'invalid_value':
+      return iss.values.length === 1 ? `tiene que ser ${String(iss.values[0])}` : `tiene que ser uno de estos: ${iss.values.map(String).join(', ')}`;
+    default:
+      return zodEs(iss);
+  }
+};
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -155,6 +202,38 @@ const FIELD_LABEL: Record<string, string> = {
   qty: 'Cantidad',
   unitPrice: 'Precio por entrada',
   minutes: 'Minutos',
+  expiresAt: 'Caducidad del carrito',
+  seats: 'Asientos',
+  note: 'Nota',
+  reason: 'Motivo',
+  value: 'Valor',
+  startInSeconds: 'Arranque (s)',
+  scenarioId: 'Escenario',
+  seed: 'Semilla',
+};
+
+/** Los del formulario «Nueva operación» (aparte: «name» o «currency» también son campos de un evento). */
+const OPERATION_FIELD_LABEL: Record<string, string> = {
+  ...FIELD_LABEL,
+  name: 'Nombre de la operación',
+  eventId: 'Evento',
+  providerId: 'Proveedor',
+  t0: 'T0',
+  runWindowMinutes: 'Ventana (minutos)',
+  freezeLeadSeconds: 'Congelar antes de T0 (s)',
+  requestedQty: 'Entradas',
+  currency: 'Moneda',
+  maxUnitPrice: 'Máximo por entrada',
+  budget: 'Presupuesto total',
+  'preferences.targets': 'Objetivos',
+  'preferences.excludeSections': 'Excluir secciones',
+  'preferences.minGroupSize': 'Grupo mínimo por carrito',
+  'preferences.maxAmbiguity': 'Ambigüedad máxima',
+  'preferences.maxPerAccount': 'Entradas por cuenta',
+  accountIds: 'Cuentas',
+  cartExpiryAlertsSeconds: 'Avisar antes de que caduque un carrito',
+  'simulation.scenarioId': 'Escenario del simulador',
+  'simulation.seed': 'Semilla',
 };
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -206,6 +285,10 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     const payload: ApiErrorBody = { error: { code, message: err.message, details } };
     return c.json(payload, status);
   });
+
+  // gzip/deflate si el navegador lo acepta (JS del dashboard, /api/state…). El stream SSE
+  // (text/event-stream) no se comprime: cada evento tiene que salir en el acto.
+  http.use('*', compress());
 
   if (opts.operatorToken) {
     const token = opts.operatorToken;
@@ -380,7 +463,7 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     }
     let key: string | null = null;
     if (!(json && typeof json === 'object' && (json as { key?: unknown }).key === null)) {
-      const r = AiKeySchema.safeParse(json);
+      const r = AiKeySchema.safeParse(json, { error: spanishIssue });
       if (!r.success) throw new ApiError(400, 'BAD_REQUEST', `Clave: ${r.error.issues[0]?.message ?? 'no válida'}`);
       key = r.data.key;
     }
@@ -439,7 +522,7 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     }
     let key: string | null = null;
     if (!(json && typeof json === 'object' && (json as { key?: unknown }).key === null)) {
-      const r = FeedKeySchema.safeParse(json);
+      const r = FeedKeySchema.safeParse(json, { error: spanishIssue });
       if (!r.success) throw new ApiError(400, 'BAD_REQUEST', `Clave: ${r.error.issues[0]?.message ?? 'no válida'}`);
       key = r.data.key;
     }
@@ -504,13 +587,13 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
 
   http.get('/api/operations', (c) => c.json(ctx.ops.summaries()));
   http.post('/api/operations', async (c) => {
-    const config = (await body(c, OperationConfigSchema)) as OperationConfig;
+    const config = (await body(c, OperationConfigSchema, OPERATION_FIELD_LABEL)) as OperationConfig;
     const r = ctx.ops.create(config, actorOf(c));
     return c.json(ctx.ops.detail(r.id), 201);
   });
   http.get('/api/operations/:id', (c) => c.json(ctx.ops.detail(c.req.param('id'))));
   http.put('/api/operations/:id/config', async (c) => {
-    const config = (await body(c, OperationConfigSchema)) as OperationConfig;
+    const config = (await body(c, OperationConfigSchema, OPERATION_FIELD_LABEL)) as OperationConfig;
     ctx.ops.updateConfig(c.req.param('id'), config, actorOf(c));
     return c.json(ctx.ops.detail(c.req.param('id')));
   });

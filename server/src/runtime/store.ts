@@ -46,6 +46,8 @@ export interface OperationRecord {
   validation: ValidationReport | null;
   readiness: ReadinessReport[];
   readinessPhasesDone: ReadinessPhase[];
+  /** Avisos «entrad ya» enviados («T0:minutos»): no se repiten tras un reinicio y sí con otro T0. */
+  entryRemindersDone?: string[];
   amendments: Amendment[];
   endReason: EndReason | null;
   pausedReason: string | null;
