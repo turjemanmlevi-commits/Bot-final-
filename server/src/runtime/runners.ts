@@ -9,7 +9,7 @@
  * siguiente mejor sección según la política, respetando límites y presupuesto.
  */
 
-import type { Account, DecisionRecord, Id, KillSwitch, VenueArtifact } from '@to/shared';
+import type { Account, Claim, DecisionRecord, Id, KillSwitch, VenueArtifact } from '@to/shared';
 import { capacityOf, wantFor } from '../domain/allocation';
 import { normalizeInventory, type CandidateSnapshot } from '../domain/candidates';
 import { decide, prepareSnapshot, type DecisionInput, type RankedCandidate } from '../domain/decision';
@@ -360,13 +360,30 @@ export class AutomatedRunner implements Runner {
 export class ManualRunner implements Runner {
   readonly kind = 'MANUAL' as const;
   private timer: TimerHandle | null = null;
-  private readonly targetIdx = new Map<Id, number>();
-  private readonly lastTask = new Map<Id, Id>();
 
   constructor(
     private readonly ctx: Ctx,
     readonly operationId: Id,
   ) {}
+
+  /**
+   * Zona por la que va una cuenta, deducida de su último claim manual en la operación
+   * (no de memoria del runner, que se crea de nuevo en cada arranque): sobrevive a pausas,
+   * kill switches, «carrito perdido» y reinicios. Se pasa a la siguiente zona cuando esa
+   * reserva acabó rechazada: «No pude» en la tarea o «no está» en su verificación.
+   */
+  private zoneIndex(accountId: Id, targets: Array<{ key: string }>): number {
+    let last: Claim | undefined;
+    for (const c of this.ctx.store.claims.values()) {
+      if (c.operationId !== this.operationId || c.accountId !== accountId || !c.candidateId.startsWith('manual:')) continue;
+      if (!last || c.createdAt >= last.createdAt) last = c;
+    }
+    if (!last) return 0;
+    const candidateId = last.candidateId;
+    const idx = targets.findIndex((t) => `manual:${t.key}` === candidateId);
+    if (idx < 0) return 0;
+    return last.state === 'REJECTED' ? idx + 1 : idx;
+  }
 
   start(): void {
     // 250 ms: en cuanto una persona marca «Sesión lista» o «No pude», recibe su siguiente tarea.
@@ -414,19 +431,7 @@ export class ManualRunner implements Runner {
         continue;
       }
       if (ctx.tasks.openFor(accountId, 'ADD_TO_CART', r.id) || ctx.tasks.openFor(accountId, 'VERIFY_CART', r.id)) continue;
-      const lastId = this.lastTask.get(accountId);
-      if (lastId) {
-        // Se pasa a la siguiente zona cuando la reserva de la última tarea acabó
-        // rechazada: «No pude» en la tarea o «no está» en su verificación.
-        const last = ctx.store.humanTasks.get(lastId);
-        const claim = last?.claimId ? ctx.store.claims.get(last.claimId) : undefined;
-        if ((claim && claim.state === 'REJECTED') || (!claim && last?.state === 'FAILED')) {
-          this.targetIdx.set(accountId, (this.targetIdx.get(accountId) ?? 0) + 1);
-        }
-        this.lastTask.delete(accountId);
-      }
-      const idx = this.targetIdx.get(accountId) ?? 0;
-      const target = targets[idx];
+      const target = targets[this.zoneIndex(accountId, targets)];
       if (!target) continue;
       const want = wantFor(alloc, accountId);
       const byBudget = Math.floor(alloc.budget.remaining / Math.max(1, alloc.maxUnitPrice));
@@ -436,8 +441,7 @@ export class ManualRunner implements Runner {
       const rest = alloc.remainingQty - qty;
       if (rest > 0 && rest < minGroup && qty - (minGroup - rest) >= minGroup) qty -= minGroup - rest;
       if (qty < minGroup) continue;
-      const task = ctx.claims.createManualClaim(r, accountId, target, qty);
-      if (task) this.lastTask.set(accountId, task.id);
+      ctx.claims.createManualClaim(r, accountId, target, qty);
       alloc = ctx.store.allocations.get(r.id) ?? alloc;
     }
   }

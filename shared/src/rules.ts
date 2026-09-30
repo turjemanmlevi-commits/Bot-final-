@@ -31,7 +31,8 @@ export const STATE_TRANSITIONS: Record<OperationState, readonly OperationState[]
   RUNNING: ['PAUSED', 'RECOVERING', 'CART_SECURED', 'ENDED', 'CANCELLED'],
   PAUSED: ['RUNNING', 'RECOVERING', 'CART_SECURED', 'ENDED', 'CANCELLED'],
   RECOVERING: ['RUNNING', 'PAUSED', 'CART_SECURED', 'ENDED', 'CANCELLED'],
-  CART_SECURED: ['RUNNING', 'CLOSED'],
+  // ENDED: se pierden todos sus carritos cuando la ventana ya ha terminado.
+  CART_SECURED: ['RUNNING', 'ENDED', 'CLOSED'],
   ENDED: ['CLOSED'],
   CANCELLED: [],
   CLOSED: [],

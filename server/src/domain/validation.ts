@@ -9,6 +9,7 @@ import type {
   CatalogEvent,
   CompiledPolicy,
   Id,
+  LimitSemantics,
   OperationConfig,
   OperationState,
   ProviderDescriptor,
@@ -18,7 +19,7 @@ import type {
 } from '@to/shared';
 import { formatMoney } from '@to/shared';
 import { iso } from '../util/time';
-import { effectiveCapacity, groupKeyFor } from './limits';
+import { effectiveCapacity, groupKeyFor, type EventUsage } from './limits';
 import { compilePolicy } from './policy';
 
 export const MAX_ACCOUNTS_PER_OPERATION = 10;
@@ -34,10 +35,21 @@ export interface ValidationContext {
   scenarioIds: readonly string[];
   /** Operación (distinta de esta) que tiene arrendada la cuenta, o null. */
   leasedBy: (accountId: Id) => { id: Id; name: string; state: OperationState | null } | null;
+  /** Cupo del evento que ya ocupan otras operaciones (el límite es del evento, no de cada operación). */
+  eventUsage?: EventUsage;
   /** Comprobaciones adicionales al armar (sesiones bloqueadas; una cuenta de otra operación pasa de aviso a error). */
   forArm: boolean;
   maxSnapshotAgeMs?: number;
 }
+
+/** Quién comparte el límite con la cuenta, según la semántica del evento. */
+const GROUP_OWNER: Record<LimitSemantics, string> = {
+  PER_ACCOUNT: 'la cuenta',
+  PER_HOLDER: 'su titular',
+  PER_HOUSEHOLD: 'su hogar',
+  PER_PAYMENT_METHOD: 'su medio de pago',
+  UNKNOWN: 'su grupo',
+};
 
 export function accountEligible(account: Account, event: CatalogEvent): boolean {
   if (account.eligibility.length === 0) return false;
@@ -179,6 +191,31 @@ export function validateConfig(config: OperationConfig, ctx: ValidationContext):
       if (ctx.forArm) bad('ACCOUNT_LEASED', busy);
       else warn('ACCOUNT_LEASED', 'accountIds', `${a.label}: ${busy} Hasta que quede libre no se podrá armar esta operación.`);
     }
+    // El cupo es del evento: lo que ya tienen otras operaciones (en carrito, pagado, en vuelo o lo
+    // que aún pueden comprar) se descuenta. Sin cupo útil, aviso al validar y error al armar.
+    const usage = ctx.eventUsage;
+    if (event && usage && ok && !other && event.limits.semantics !== 'UNKNOWN') {
+      const l = event.limits;
+      const key = groupKeyFor(a, l.semantics) ?? `cuenta:${a.id}`;
+      const byAccount = l.perAccount - (usage.perAccount.get(a.id) ?? 0);
+      const byGroup = l.perGroup - (usage.perGroup.get(key) ?? 0);
+      const own = prefs.maxPerAccount && prefs.maxPerAccount > 0 ? prefs.maxPerAccount : Number.POSITIVE_INFINITY;
+      const left = Math.max(0, Math.min(byAccount, byGroup, own));
+      if (left < Math.min(l.perAccount, l.perGroup, own)) {
+        // Se explica el límite que aprieta: el de la cuenta o el de su titular, hogar o medio de pago.
+        const group = l.semantics !== 'PER_ACCOUNT' && byGroup < byAccount;
+        const [limit, remaining] = group ? [l.perGroup, byGroup] : [l.perAccount, byAccount];
+        const where = (usage.where.get(group ? key : a.id) ?? []).map((n) => `«${n}»`).join(', ') || 'otras operaciones';
+        const has = `${group ? `${GROUP_OWNER[l.semantics]} ya tiene` : 'ya tiene'} ${limit - remaining} de ${limit} entradas de este evento, compradas o reservadas en ${where}`;
+        if (left < prefs.minGroupSize) {
+          const none = left === 0 ? 'no le queda cupo' : `le queda${left === 1 ? '' : 'n'} ${left}, menos que el grupo mínimo de ${prefs.minGroupSize}`;
+          if (ctx.forArm) bad('EVENT_QUOTA_USED', `${has}: ${none}. Quítala de esta operación.`);
+          else warn('EVENT_QUOTA_USED', 'accountIds', `${a.label}: ${has}: ${none}. Quítala o no se podrá armar esta operación.`);
+        } else {
+          warn('EVENT_QUOTA_USED', 'accountIds', `${a.label}: ${has}: aquí solo podrá comprar ${left}.`);
+        }
+      }
+    }
     if (ctx.forArm && a.session.state === 'BLOCKED') bad('ACCOUNT_BLOCKED', 'la sesión está bloqueada por el proveedor.');
     if (ok) validAccounts.push(a);
   }
@@ -198,9 +235,10 @@ export function validateConfig(config: OperationConfig, ctx: ValidationContext):
   // Capacidad legal ---------------------------------------------------------------------
   let capacity: number | null = null;
   if (event && event.limits.semantics !== 'UNKNOWN') {
-    capacity = effectiveCapacity(validAccounts, event.limits, config.requestedQty);
+    capacity = effectiveCapacity(validAccounts, event.limits, config.requestedQty, ctx.eventUsage);
     if (validAccounts.length > 0 && capacity < config.requestedQty) {
-      warn('CAPACITY_SHORTFALL', 'accountIds', `Con estas cuentas y los límites del evento solo se pueden conseguir ${capacity} de ${config.requestedQty} entradas.`);
+      const shared = capacity < effectiveCapacity(validAccounts, event.limits, config.requestedQty) ? ' (descontando lo que ya tienen otras operaciones de este evento)' : '';
+      warn('CAPACITY_SHORTFALL', 'accountIds', `Con estas cuentas y los límites del evento solo se pueden conseguir ${capacity} de ${config.requestedQty} entradas${shared}.`);
     }
   }
 

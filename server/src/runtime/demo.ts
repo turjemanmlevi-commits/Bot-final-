@@ -76,6 +76,13 @@ export async function seedDemo(
       throw new Error(`Las cuentas de demo están en "${prev.config.name}" (${prev.state}). Párala o cancélala antes de crear otra demo.`);
     }
   }
+  // El cupo por titular es del evento y en el simulador no se paga nada: los carritos que
+  // dejaron las demos anteriores (ya cerradas) se liberan para que la nueva tenga su cupo.
+  for (const c of [...runtime.store.carts.values()]) {
+    const prev = runtime.store.operations.get(c.operationId);
+    if (prev?.config.eventId !== event.id || (prev.state !== 'CLOSED' && prev.state !== 'CANCELLED')) continue;
+    if (c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED') runtime.ctx.carts.mark(c.id, 'RELEASED', actor, 'Demo anterior');
+  }
 
   const t0 = iso(now + (opts.startInSeconds ?? 90) * 1000);
   const config: OperationConfig = {

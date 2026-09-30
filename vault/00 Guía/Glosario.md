@@ -17,7 +17,7 @@ tags:
 - **Readback** — confirmar leyendo el carrito del proveedor, no solo fiándose de su respuesta.
 - **Ambiguo** — no se sabe si la acción funcionó (timeout). La reserva se mantiene hasta reconciliar.
 - **Reconciliación** — leer el carrito para resolver un claim ambiguo; si no se puede, lo verifica una persona.
-- **Carrito asegurado (CART_SECURED)** — todas las entradas pedidas están en carritos confirmados. Ahí termina el trabajo del sistema; el pago es siempre humano. En asistencia manual, las entradas las ha puesto en el carrito cada persona en la web oficial. Si luego se libera un carrito y la ventana sigue abierta, la operación vuelve a *En ejecución* y reparte lo que falta.
+- **Carrito asegurado (CART_SECURED)** — todas las entradas pedidas están en carritos confirmados. Ahí termina el trabajo del sistema; el pago es siempre humano. En asistencia manual, las entradas las ha puesto en el carrito cada persona en la web oficial. Si luego se libera un carrito y la ventana sigue abierta, la operación vuelve a *En ejecución* y reparte lo que falta; si la ventana ya terminó y no queda nada en carrito, queda *Finalizada*.
 - **Tiempo del carrito** — minutos que le quedan al carrito según la web oficial, que indica una persona. Es una estimación: un carrito confirmado por una persona no caduca solo; al agotarse, el sistema pregunta «¿lo has pagado?» (**Ya lo he pagado** o **Liberar**).
 - **Liberar** — decir que un carrito se perdió o no se va a pagar. Esas entradas se vuelven a repartir mientras la venta siga abierta.
 - **Kill switch** — parada inmediata (global, proveedor, operación o cuenta). La de una cuenta («Parar cuenta») solo deja fuera esa cuenta y no impide arrancar en T0. Ver [[Kill switches y circuitos]].

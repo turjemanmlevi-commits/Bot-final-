@@ -90,6 +90,9 @@ Marca **«He comprobado estos límites en las condiciones oficiales»** solo cua
 > [!example] Ejemplo
 > Ticketmaster dice «máximo 4 entradas por cliente» y sois 3 personas: Por cuenta **4** · Por grupo **4** · Por operación **12** · Cómo cuenta: **Por titular**.
 
+> [!note] Varias operaciones del mismo evento
+> El cupo es del **evento**: si hacéis dos operaciones del mismo partido o concierto, lo que una persona ya tiene (en carrito o pagado) o lo que otra operación armada aún le puede dar se descuenta en la siguiente. Si a una cuenta ya no le queda cupo, validar lo avisa y armar da error con el nombre de la otra operación.
+
 ### 6. Operación
 
 **Operaciones → Nueva operación**, o el botón **Operación** junto al evento en *Eventos*:
@@ -159,7 +162,7 @@ Responde **en carrito** solo cuando las entradas estén de verdad en el carrito 
 > Los minutos que indicáis son una **estimación**: un carrito confirmado por una persona **no caduca solo** ni se vuelve a repartir por su cuenta. Cuando se acaba el tiempo, sigue contando y llega una alerta crítica, **«<cuenta>: se acabó el tiempo del carrito, ¿lo has pagado?»** (en *Carritos* sale «Tiempo agotado: ¿lo has pagado?»). Responded:
 > - **Ya lo he pagado** si se pagó.
 > - **⏱ Quedan N min** en Telegram (o *Minutos que quedan* en *Carritos*) si la web aún os da tiempo: la cuenta atrás y sus avisos empiezan de nuevo.
-> - **Liberar** en *Carritos* si se perdió: esas entradas se vuelven a repartir. Si la operación estaba en *Carrito asegurado* y su ventana sigue abierta, vuelve a *En ejecución* y lo que falta llega como tarea nueva.
+> - **Liberar** en *Carritos* si se perdió: esas entradas se vuelven a repartir. Si la operación estaba en *Carrito asegurado* y su ventana sigue abierta, vuelve a *En ejecución* y lo que falta llega como tarea nueva (con la ventana ya cerrada no se reparte nada más).
 
 ### Terminar
 
