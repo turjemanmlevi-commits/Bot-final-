@@ -974,7 +974,10 @@ export function EventForm({
               limitPerAccount: String(after.perAccount),
               limitPerGroup: String(after.perAccount),
               limitPerOperation: String(Math.max(after.perAccount, toInt(x.limitPerOperation) || 0)),
+              // Verificado solo si la fase no da más que la frase oficial: al cambiar de fase se recalcula.
+              limitsVerified: after.verified,
               limitsSource: after.source,
+              limitsNotes: x.limitsNotes === before.notes ? after.notes : x.limitsNotes,
             }
           : {};
       // La nota dice qué apertura se eligió: se cambia si sigue siendo la que escribió Claude.
