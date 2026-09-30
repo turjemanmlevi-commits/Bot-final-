@@ -197,6 +197,16 @@ describe('notas del vault desde el dashboard y Telegram', () => {
     assert.equal(r.event?.name, name, 'se reconoce como cargado');
   });
 
+  it('un recinto o una zona que empieza por «../» no crea notas ocultas: se cargan en la sala', async () => {
+    const v = await authoring.createVenue({ name: '../../Recinto: Nuevo/Sur', city: 'Madrid', source: 'plano de prueba', layout: '../Grada/Alta: 101, ../102\nPista (de pie)' }, 'prueba');
+    assert.equal(v.folder, '10 Recintos/Recinto Nuevo Sur');
+    assert.ok(v.venueId, JSON.stringify(v.issues));
+    const zones = await readdir(path.join(dir, v.folder, 'Zonas'));
+    assert.deepEqual(zones.sort(), ['Grada Alta.md', 'Pista.md']);
+    const loaded = [...app.runtime.store.artifacts.values()].find((a) => a.venueId === v.venueId && a.eventId === null);
+    assert.equal(loaded?.zones.length, 2, 'las dos zonas están en la sala');
+  });
+
   it('las fechas que se escriben en las notas salen del reloj de la sala', async () => {
     const r = await authoring.createEvent(input({ name: 'Real Madrid - Alavés', limitsVerified: true, limitsSource: 'https://www.example.org/condiciones' }), 'prueba');
     assert.match(await readFile(path.join(dir, r.file), 'utf8'), /limitsVerifiedAt: "?2030-03-10"?/);
