@@ -17,7 +17,7 @@ Si aparece login, verificación o algo que no sabe seleccionar, te avisa por Tel
 
 ## Puesta en marcha (en tu PC)
 
-**Lo más fácil:** doble clic en `iniciar.bat` (Windows) o `./iniciar.sh` (Mac/Linux) en la raíz del proyecto. Instala todo, arranca y abre `http://127.0.0.1:3000`.
+**Lo más fácil:** doble clic en `iniciar.bat` (Windows) o `./iniciar.sh` (Mac/Linux) en la raíz del proyecto. Instala todo, arranca y abre el panel solo cuando el servidor ya está listo (`http://127.0.0.1:3000`; si ese puerto está ocupado usa el 3001, 3002…: mira la URL que sale en la ventana negra).
 
 A mano:
 

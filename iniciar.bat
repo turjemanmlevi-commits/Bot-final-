@@ -5,6 +5,5 @@ where node >nul 2>nul || (echo Instala Node.js 20 o superior: https://nodejs.org
 if not exist node_modules call npm install
 call npx playwright install chromium
 if not exist prueba\.env copy prueba\.env.example prueba\.env >nul
-start "" http://127.0.0.1:3000
 call npm run prueba
 pause
