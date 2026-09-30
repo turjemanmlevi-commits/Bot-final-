@@ -5,7 +5,7 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { resolveLabel, resolvePreference } from '../domain/venue';
 import { withFixtureVault } from '../gates/fixtures';
-import { artifactForEvent, compileVault } from '../vault/compiler';
+import { artifactForEvent, compileVault, readVaultNotes } from '../vault/compiler';
 import { parseFrontmatter, parseLink, splitFrontmatter } from '../vault/markdown';
 import { parseVaultDate } from '../util/time';
 
@@ -51,6 +51,27 @@ describe('compilador del vault', () => {
       assert.ok(ev);
       assert.equal(ev?.limits.semantics, 'PER_HOLDER');
       assert.ok(artifactForEvent(a.artifacts, ev as { id: string; venueId: string }));
+    });
+  });
+
+  it('las propiedades ya leídas se reutilizan por contenido sin mezclarse entre lecturas', async () => {
+    await withFixtureVault(async (dir) => {
+      const first = await readVaultNotes(dir, []);
+      const venue = first.find((n) => n.data.type === 'venue');
+      assert.ok(venue);
+      // Lo que haga el compilador con una lectura no se cuela en la siguiente.
+      (venue as { data: Record<string, unknown> }).data.name = 'Cambiado en memoria';
+      const second = await readVaultNotes(dir, []);
+      assert.equal(second.find((n) => n.file === venue?.file)?.data.name, 'Recinto Test');
+      assert.deepEqual(
+        second.map((n) => n.file),
+        first.map((n) => n.file),
+        'mismo orden',
+      );
+      // Una nota que cambia en disco se vuelve a interpretar.
+      await writeFile(path.join(dir, venue?.file ?? ''), '---\ntype: venue\nid: recinto-test\nname: Recinto Renombrado\nsource: x\n---\n');
+      const c = await compileVault({ vaultDir: dir, timeZone: 'Europe/Madrid' });
+      assert.equal(c.report.venues[0]?.name, 'Recinto Renombrado');
     });
   });
 
