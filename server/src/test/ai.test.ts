@@ -183,14 +183,14 @@ describe('Claude (API de Anthropic)', () => {
     assert.equal(ai.status().configured, false);
   });
 
-  it('la clave buena se guarda en .env, se elige el Opus más reciente y nunca se devuelve', async () => {
+  it('la clave buena se guarda en .env, se elige el Sonnet más reciente (lo más barato) y nunca se devuelve', async () => {
     const other = await http.request('/api/ai/key', { method: 'PUT', headers: { ...JSON_HEADERS, origin: 'https://otra-web.example' }, body: JSON.stringify({ key: AI_KEY }) });
     assert.equal(other.status, 403, 'otra web no puede poner la clave');
     const res = await http.request('/api/ai/key', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ key: AI_KEY }) });
     const r = (await res.json()) as AiKeyResult;
     assert.equal(r.ok, true, r.message);
     assert.match(await readFile(envFile, 'utf8'), new RegExp(`ANTHROPIC_API_KEY=${AI_KEY}`));
-    assert.equal(r.status.model, 'Opus de prueba (nuevo)');
+    assert.equal(r.status.model, 'Sonnet de prueba');
     assert.equal(r.status.configured, true);
     for (const url of ['/api/ai', '/api/system', '/api/state']) {
       assert.ok(!(await (await http.request(url)).text()).includes(AI_KEY), `${url} no devuelve la clave`);
@@ -216,11 +216,11 @@ describe('Claude (API de Anthropic)', () => {
     const reqs = fake.messageRequests().slice(before);
     assert.equal(reqs.length, 2, 'la vuelta pausada se reanuda con una segunda petición');
     const first = reqs[0]?.body ?? {};
-    assert.equal(first.model, 'claude-opus-prueba-nuevo');
+    assert.equal(first.model, 'claude-sonnet-prueba');
     assert.equal(first.stream, true, 'en streaming: una búsqueda larga no deja la conexión callada');
     assert.equal(first.fallbacks, 'default');
     assert.match(String(reqs[0]?.headers['anthropic-beta']), /server-side-fallback-2026-07-01/);
-    assert.deepEqual(first.output_config, { effort: 'medium' });
+    assert.deepEqual(first.output_config, { effort: 'low' }, 'una lista: esfuerzo bajo');
     assert.equal(first.tool_choice, undefined, 'sin forzar la herramienta (el modelo lo rechaza)');
     const tools = first.tools as Array<Record<string, unknown>>;
     assert.deepEqual(
@@ -228,6 +228,14 @@ describe('Claude (API de Anthropic)', () => {
       ['web_search_20260209', 'web_fetch_20260209', 'entregar_eventos'],
     );
     assert.equal(tools[2]?.strict, true);
+    assert.deepEqual(
+      tools.slice(0, 2).map((t) => [t.max_uses, t.max_content_tokens]),
+      [
+        [4, undefined],
+        [3, 15_000],
+      ],
+      'pocas búsquedas y lecturas, y páginas recortadas',
+    );
     assert.match(JSON.stringify(first.messages), /realmadrid\.com\/es-ES\/entradas/, 'Claude empieza por la web de venta');
     const resumed = reqs[1]?.body.messages as Array<{ role: string; content: Array<{ type: string }> }>;
     assert.equal(resumed.length, 2, 'sin mensajes extra al reanudar');
@@ -249,11 +257,11 @@ describe('Claude (API de Anthropic)', () => {
     assert.equal(vista?.saleOpensLocal, null);
     assert.equal(vista?.vaultVenueId, null);
     assert.match(r.notes, /calendario oficial/);
-    // (3000 + 20000) × 4 $ + (300 + 1500) × 20 $ por millón, y 3 búsquedas × 0,01 $.
+    // Sonnet: (3000 + 20000) × 2 $ + (300 + 1500) × 10 $ por millón, y 3 búsquedas × 0,01 $.
     assert.equal(r.cost.searches, 3);
     assert.equal(r.cost.fetches, 1);
-    assert.ok(Math.abs(r.cost.usd - 0.158) < 1e-9, String(r.cost.usd));
-    assert.ok(Math.abs(ai.status().spentUsd - 0.16) < 1e-9);
+    assert.ok(Math.abs(r.cost.usd - 0.094) < 1e-9, String(r.cost.usd));
+    assert.ok(Math.abs(ai.status().spentUsd - 0.09) < 1e-9);
 
     const again = await ai.findEvents({ providerId: 'real-madrid', days: 45 });
     assert.equal(again.cached, true, 'la misma búsqueda al rato no cuesta nada');
@@ -264,7 +272,7 @@ describe('Claude (API de Anthropic)', () => {
     fake.script.push(deliver('entregar_evento', detailsInput({ limitSource: 'https://www.realmadrid.com/es-ES/entradas/condiciones', planImage: PLAN })));
     const d = await ai.eventDetails({ providerId: 'real-madrid', name: BARCA.name, startsAtLocal: '2026-10-25T16:15', venue: BARCA.venue, city: 'Madrid', url: BARCA.url });
     const req = fake.messageRequests().at(-1);
-    assert.deepEqual(req?.body.output_config, { effort: 'high' });
+    assert.deepEqual(req?.body.output_config, { effort: 'medium' });
     // La estructura se analiza siempre, también con el recinto ya en la sala, y con nuestras zonas para hacerlas corresponder.
     assert.match(JSON.stringify(req?.body.messages), /Cómo está estructurada la venta de ESTE evento/);
     assert.match(JSON.stringify(req?.body.messages), /Nuestro plano de este recinto tiene estas zonas: Fondo Norte, Fondo Sur, Lateral Este, Lateral Oeste/);
@@ -923,8 +931,8 @@ describe('Claude: gastar menos (caché de la API, respuestas guardadas y modelo)
     assert.ok(Array.isArray(system), 'instrucciones con su marca de caché');
     assert.match(system.at(-1)?.text ?? '', /investigador de eventos/);
     assert.deepEqual(system.at(-1)?.cache_control, { type: 'ephemeral' });
-    // Opus: (2000 × 4 + 1000 × 20 + 50 000 × 0,2 + 10 000 × 5) $ por millón + 2 búsquedas × 0,01 $.
-    assert.ok(Math.abs(r.cost.usd - 0.108) < 1e-9, String(r.cost.usd));
+    // Sonnet: (2000 × 2 + 1000 × 10 + 50 000 × 0,2 + 10 000 × 2,5) $ por millón + 2 búsquedas × 0,01 $.
+    assert.ok(Math.abs(r.cost.usd - 0.069) < 1e-9, String(r.cost.usd));
     assert.equal(r.cost.inputTokens, 62_000, 'los tokens leídos incluyen los de la caché');
 
     fake.script.push(deliver('entregar_plano', { points: [{ zone: 'Fondo Sur', x: 50, y: 90 }], notes: '' }, 0, 0));
@@ -970,7 +978,7 @@ describe('Claude: gastar menos (caché de la API, respuestas guardadas y modelo)
     assert.equal(fake.messageRequests().length, before + 2);
   });
 
-  it('se puede elegir el modelo: la lista trae su precio, Sonnet cuesta la mitad y se guarda en .env', async () => {
+  it('se puede elegir el modelo: la lista trae su precio, Opus cuesta el doble y se guarda en .env', async () => {
     const list = await ai.models();
     assert.deepEqual(
       list.options.map((o) => [o.id, o.input, o.output]),
@@ -981,32 +989,32 @@ describe('Claude: gastar menos (caché de la API, respuestas guardadas y modelo)
       ],
       'Opus y Sonnet con búsqueda web, del más nuevo al más viejo (ni Haiku ni Opus 4.5)',
     );
-    assert.equal(list.current, 'claude-opus-prueba-nuevo');
+    assert.equal(list.current, 'claude-sonnet-prueba', 'por defecto, el más barato');
     assert.equal(list.fixed, false);
 
-    const other = await http.request('/api/ai/model', { method: 'PUT', headers: { ...JSON_HEADERS, origin: 'https://otra-web.example' }, body: JSON.stringify({ model: 'claude-sonnet-prueba' }) });
+    const other = await http.request('/api/ai/model', { method: 'PUT', headers: { ...JSON_HEADERS, origin: 'https://otra-web.example' }, body: JSON.stringify({ model: 'claude-opus-prueba-nuevo' }) });
     assert.equal(other.status, 403, 'otra web no puede cambiarlo');
     const bad = (await (await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: 'claude-haiku-4-5-20251001' }) })).json()) as AiKeyResult;
     assert.equal(bad.ok, false);
     assert.match(bad.message, /no sirve para buscar en la web/);
 
-    const res = await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: 'claude-sonnet-prueba' }) });
+    const res = await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: 'claude-opus-prueba-nuevo' }) });
     const r = (await res.json()) as AiKeyResult;
     assert.equal(r.ok, true, r.message);
-    assert.equal(r.status.modelId, 'claude-sonnet-prueba');
+    assert.equal(r.status.modelId, 'claude-opus-prueba-nuevo');
     assert.equal(r.status.modelFixed, true);
-    assert.equal(r.status.model, 'Sonnet de prueba');
-    assert.match(await readFile(envFile, 'utf8'), /ANTHROPIC_MODEL=claude-sonnet-prueba/);
+    assert.equal(r.status.model, 'Opus de prueba (nuevo)');
+    assert.match(await readFile(envFile, 'utf8'), /ANTHROPIC_MODEL=claude-opus-prueba-nuevo/);
 
     fake.script.push({ ...deliver('entregar_eventos', { events: [], notes: '' }), usage: { input_tokens: 10_000, output_tokens: 1000, server_tool_use: { web_search_requests: 2 } } });
     const s = await ai.findEvents({ providerId: 'real-madrid', days: 30, fresh: true });
-    assert.equal(fake.messageRequests().at(-1)?.body.model, 'claude-sonnet-prueba');
-    // Sonnet: (10 000 × 2 + 1000 × 10) $ por millón + 2 búsquedas × 0,01 $.
-    assert.ok(Math.abs(s.cost.usd - 0.05) < 1e-9, String(s.cost.usd));
+    assert.equal(fake.messageRequests().at(-1)?.body.model, 'claude-opus-prueba-nuevo');
+    // Opus: (10 000 × 4 + 1000 × 20) $ por millón + 2 búsquedas × 0,01 $.
+    assert.ok(Math.abs(s.cost.usd - 0.08) < 1e-9, String(s.cost.usd));
 
     const auto = (await (await http.request('/api/ai/model', { method: 'PUT', headers: JSON_HEADERS, body: JSON.stringify({ model: null }) })).json()) as AiKeyResult;
     assert.equal(auto.ok, true, auto.message);
-    assert.equal(auto.status.modelId, 'claude-opus-prueba-nuevo', 'automático: el Opus más reciente');
+    assert.equal(auto.status.modelId, 'claude-sonnet-prueba', 'automático: el Sonnet más reciente');
     assert.equal(auto.status.modelFixed, false);
     assert.doesNotMatch(await readFile(envFile, 'utf8'), /ANTHROPIC_MODEL=claude/);
   });

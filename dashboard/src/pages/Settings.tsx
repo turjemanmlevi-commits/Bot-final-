@@ -662,8 +662,8 @@ function usd(n: number): string {
 }
 
 /**
- * Modelo de las búsquedas: el Opus más reciente (por defecto) u otro de la
- * cuenta. Sonnet cuesta la mitad: se elige aquí y se guarda en .env.
+ * Modelo de las búsquedas: el Sonnet más reciente (por defecto: el más
+ * barato que lee bien los eventos) u otro de la cuenta. Se guarda en .env.
  */
 function ClaudeModelPicker({ current, fixed }: { current: string | null; fixed: boolean }) {
   const toast = useToast();
@@ -709,7 +709,7 @@ function ClaudeModelPicker({ current, fixed }: { current: string | null; fixed: 
         <div className="field" style={{ flex: '1 1 320px', minWidth: 0 }}>
           <label htmlFor="ai-model">Modelo para buscar y leer los eventos</label>
           <select id="ai-model" className="input" value={choice} disabled={busy} onChange={(e) => setChoice(e.target.value)}>
-            <option value="">Automático: el Opus más reciente de tu cuenta</option>
+            <option value="">Automático (lo más barato): el Sonnet más reciente de tu cuenta</option>
             {choice && !inList ? <option value={choice}>{choice}</option> : null}
             {options.map((o) => (
               <option key={o.id} value={o.id}>
@@ -723,8 +723,8 @@ function ClaudeModelPicker({ current, fixed }: { current: string | null; fixed: 
         </button>
       </div>
       <div className="small muted">
-        <b>Sonnet</b> cuesta la mitad que <b>Opus</b>. Para decidir, lee el mismo evento con los dos («Buscar otra vez») y compara lo que trae y el coste que sale debajo
-        de la respuesta.
+        <b>Sonnet</b> cuesta la mitad que <b>Opus</b> y es el que se usa por defecto. Si un evento sale incompleto (por ejemplo, sin el límite por persona), elige
+        Opus y pulsa «Volver a analizar con Claude»; luego vuelve a Automático.
       </div>
     </div>
   );

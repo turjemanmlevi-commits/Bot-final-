@@ -19,7 +19,7 @@ export interface AiStatus {
   model: string;
   /** Id del modelo que se usa (null: se elige en la primera consulta). */
   modelId: string | null;
-  /** Una persona ha elegido el modelo (ANTHROPIC_MODEL); si no, el Opus más reciente de la cuenta. */
+  /** Una persona ha elegido el modelo (ANTHROPIC_MODEL); si no, el Sonnet más reciente de la cuenta. */
   modelFixed: boolean;
   /** La clave se puede poner desde el dashboard (se guarda en .env). */
   configurable: boolean;
@@ -43,7 +43,7 @@ export interface AiModelsResult {
   options: AiModelOption[];
 }
 
-/** Modelo para las búsquedas; null = el Opus más reciente de la cuenta. */
+/** Modelo para las búsquedas; null = el Sonnet más reciente de la cuenta. */
 export const AiModelSchema = z.object({
   model: z
     .string()

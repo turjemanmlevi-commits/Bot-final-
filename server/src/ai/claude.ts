@@ -77,8 +77,12 @@ export function priceOf(model: string): Price {
   return PRICES.find(([re]) => re.test(model))?.[1] ?? OPUS_5_5;
 }
 
-/** Familia de modelos que se usa si no se elige otro (ANTHROPIC_MODEL): el más reciente de la cuenta. */
-const PREFERRED_FAMILY = /^claude-opus-/;
+/**
+ * Modelo que se usa si no se elige otro (ANTHROPIC_MODEL): el Sonnet más
+ * reciente de la cuenta (la mitad de precio que Opus y de sobra para leer
+ * eventos); si la cuenta no tiene Sonnet, el Opus más reciente.
+ */
+const PREFERRED_FAMILIES = [/^claude-sonnet-/, /^claude-opus-/];
 /**
  * Modelos que se pueden elegir: Opus y Sonnet con búsqueda web avanzada (4.6 en
  * adelante). Haiku y los anteriores no tienen las herramientas web que se usan aquí.
@@ -95,8 +99,11 @@ const RESEARCH_TIMEOUT_MS = 10 * 60_000;
 const EVENTS_TTL_MS = 6 * 3_600_000;
 const DETAILS_TTL_MS = 12 * 3_600_000;
 const PLAN_TTL_MS = 7 * DAY;
-/** Texto de una página que Claude mete en la conversación como mucho (tokens). */
-const FETCH_MAX_TOKENS = 30_000;
+/**
+ * Texto de una página que Claude mete en la conversación como mucho (tokens):
+ * lo que se lee se paga, y lo que importa (fechas, límite, precios) cabe de sobra.
+ */
+const FETCH_MAX_TOKENS = 15_000;
 /** Caché de la API: lo ya leído en una búsqueda se vuelve a leer a una fracción del precio. */
 const EPHEMERAL = { type: 'ephemeral' } as const;
 
@@ -114,7 +121,7 @@ export interface ClaudeControlOptions {
   timeZone: string;
   envFile: string | null;
   envTemplate?: string | null;
-  /** Modelo fijo (ANTHROPIC_MODEL); sin él, el Opus más reciente que tenga la cuenta. */
+  /** Modelo fijo (ANTHROPIC_MODEL); sin él, el Sonnet más reciente que tenga la cuenta. */
   model?: string | null;
   /** Solo para pruebas: servidor que imita la API. */
   baseURL?: string;
@@ -441,7 +448,7 @@ export class ClaudeControl {
   private queue: Promise<unknown> = Promise.resolve();
   /** Escrituras del archivo de respuestas, una detrás de otra. */
   private saving: Promise<void> = Promise.resolve();
-  /** Modelo elegido por una persona (ANTHROPIC_MODEL); null: el Opus más reciente de la cuenta. */
+  /** Modelo elegido por una persona (ANTHROPIC_MODEL); null: el Sonnet más reciente de la cuenta. */
   private fixedModel: string | null;
 
   constructor(
@@ -479,7 +486,7 @@ export class ClaudeControl {
       detail: configured
         ? this.health.detail || 'Clave puesta (se comprueba en la primera búsqueda).'
         : 'Sin clave: crea una en platform.claude.com (API keys) y pégala aquí.',
-      model: this.model?.name ?? this.fixedModel ?? 'el más reciente de tu cuenta (se elige al conectar)',
+      model: this.model?.name ?? this.fixedModel ?? 'el Sonnet más reciente de tu cuenta (se elige en la primera búsqueda)',
       modelId: this.model?.id ?? this.fixedModel,
       modelFixed: this.fixedModel !== null,
       configurable: this.opts.envFile !== null,
@@ -539,7 +546,7 @@ export class ClaudeControl {
   }
 
   /**
-   * Elige el modelo de las búsquedas (null: el Opus más reciente de la cuenta) y
+   * Elige el modelo de las búsquedas (null: el Sonnet más reciente de la cuenta) y
    * lo guarda en .env (ANTHROPIC_MODEL). Se usa desde la siguiente búsqueda.
    */
   setModel(id: string | null, actor: string): Promise<AiKeyResult> {
@@ -560,11 +567,11 @@ export class ClaudeControl {
       }
       const warning = await this.persist({ ANTHROPIC_MODEL: id });
       this.fixedModel = id;
-      // Sin modelo fijo: el Opus más reciente (si ahora no se puede mirar, se elige en la próxima búsqueda).
+      // Sin modelo fijo: el Sonnet más reciente (si ahora no se puede mirar, se elige en la próxima búsqueda).
       this.model = chosen ?? (await this.pickModel(quick).catch(() => null));
       this.opts.runtime.ctx.journal.audit('ai.model', { model: id }, { actor });
       this.publish();
-      const text = `Listo: las búsquedas usan ${this.model?.name ?? chosen?.name ?? 'el Opus más reciente de tu cuenta'}.`;
+      const text = `Listo: las búsquedas usan ${this.model?.name ?? chosen?.name ?? 'el Sonnet más reciente de tu cuenta'}.`;
       return this.result(true, warning ? `${text} ${warning}` : text);
     });
   }
@@ -596,7 +603,7 @@ export class ClaudeControl {
           .join(', ')}.`,
         `Cuando acabes, llama a ${EVENTS_TOOL.name}.`,
       ].join('\n');
-      const { input, cost } = await this.research(prompt, EVENTS_TOOL, { effort: 'medium', searches: 8, fetches: 6 });
+      const { input, cost } = await this.research(prompt, EVENTS_TOOL, { effort: 'low', searches: 4, fetches: 3 });
       const raw = input as { events?: unknown[]; notes?: unknown };
       const venues = this.vaultVenues();
       const events: AiEventSummary[] = [];
@@ -658,7 +665,7 @@ export class ClaudeControl {
         '7. La imagen del plano oficial de asientos tal cual se ve al comprar (enlace directo a la imagen, de la web de venta o del recinto). Si no hay, null.',
         `Cuando acabes, llama a ${DETAILS_TOOL_NAME}.`,
       ].join('\n');
-      const { input, cost } = await this.research(prompt, detailsTool(ourZones), { effort: 'high', searches: 8, fetches: 8 });
+      const { input, cost } = await this.research(prompt, detailsTool(ourZones), { effort: 'medium', searches: 5, fetches: 4 });
       const r = input as Record<string, unknown>;
       const when = localFrom(r.date, r.time);
       const venue = str(r.venue, 160) ?? q.venue ?? null;
@@ -771,7 +778,7 @@ export class ClaudeControl {
       `Como mucho ${q.max} partidos. Para cada uno: equipos, competición y ronda, categoría, importancia (1-100) y por qué, fecha y hora, estadio, ciudad, país, la página oficial de venta de entradas y, si ya se sabe, cuándo abre la venta.`,
       'Cuando acabes, llama a entregar_partidos.',
     ].join('\n');
-    const { input, cost } = await this.research(prompt, TOP_TOOL, { effort: 'medium', searches: 6, fetches: 3 });
+    const { input, cost } = await this.research(prompt, TOP_TOOL, { effort: 'low', searches: 4, fetches: 2 });
     const raw = input as { matches?: unknown[]; notes?: unknown };
     const matches: AiTopMatch[] = [];
     for (const item of Array.isArray(raw.matches) ? raw.matches : []) {
@@ -832,7 +839,7 @@ export class ClaudeControl {
         { type: 'image', source: { type: 'url', url: image } },
         { type: 'text', text: prompt },
       ];
-      const { input, cost } = await this.research(content, planTool(zones), { effort: 'medium', searches: 0, fetches: 0 });
+      const { input, cost } = await this.research(content, planTool(zones), { effort: 'low', searches: 0, fetches: 0 });
       const raw = input as { points?: unknown[]; notes?: unknown };
       const byKey = new Map(zones.map((z) => [z.toLowerCase(), z]));
       const seen = new Set<string>();
@@ -864,7 +871,7 @@ export class ClaudeControl {
   private async research(
     prompt: string | Anthropic.Beta.BetaContentBlockParam[],
     tool: Anthropic.Beta.BetaTool,
-    opts: { effort: 'medium' | 'high'; searches: number; fetches: number },
+    opts: { effort: 'low' | 'medium' | 'high'; searches: number; fetches: number },
   ): Promise<{ input: unknown; cost: AiCost }> {
     const client = this.need();
     const started = Date.now();
@@ -986,7 +993,7 @@ export class ClaudeControl {
   }
 
   /**
-   * Modelo para esta clave: el fijado en ANTHROPIC_MODEL o, si no, el Opus más
+   * Modelo para esta clave: el fijado en ANTHROPIC_MODEL o, si no, el Sonnet más
    * reciente de la lista de la cuenta (la consulta es gratuita).
    */
   private async pickModel(client: Anthropic, signal?: AbortSignal): Promise<{ id: string; name: string }> {
@@ -998,7 +1005,7 @@ export class ClaudeControl {
       chosen = all.find((m) => m.id === this.fixedModel);
       if (!chosen) throw new AiError('BAD_REQUEST', `Tu cuenta de Claude no tiene el modelo «${this.fixedModel}» (ANTHROPIC_MODEL en .env): elige otro en Ajustes · Claude.`);
     } else {
-      chosen = all.filter((m) => PREFERRED_FAMILY.test(m.id)).sort(byDate)[0] ?? [...all].sort(byDate)[0];
+      chosen = PREFERRED_FAMILIES.map((re) => all.filter((m) => re.test(m.id) && !TOO_OLD.test(m.id)).sort(byDate)[0]).find(Boolean) ?? [...all].sort(byDate)[0];
     }
     if (!chosen) throw new AiError('AUTH', 'Tu cuenta de Claude no tiene ningún modelo disponible: revisa la cuenta en platform.claude.com.');
     const model = { id: chosen.id, name: chosen.display_name || chosen.id };

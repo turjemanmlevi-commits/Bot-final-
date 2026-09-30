@@ -23,7 +23,7 @@ Al crear un evento ya no se escribe nada a mano: **primero eliges dónde se vend
 
 ### 🤖 Con Claude (recomendado)
 
-Se pone una vez: **Ajustes → Claude (IA)** → pega tu clave de la API (platform.claude.com → *API keys* → *Create key*; empieza por `sk-ant-`) y **Conectar**. Se guarda en el archivo `.env` de la carpeta del proyecto (si esa carpeta está en OneDrive, OneDrive también lo sube a tu nube: mejor instalar fuera de OneDrive). Se paga por consulta a Anthropic. Las respuestas se guardan (también al reiniciar): repetir la misma búsqueda es gratis (lista de eventos 6 h, datos de un evento 12 h); **Buscar otra vez** pregunta de nuevo. En el mismo sitio eliges el modelo: **Sonnet** cuesta la mitad que **Opus**.
+Se pone una vez: **Ajustes → Claude (IA)** → pega tu clave de la API (platform.claude.com → *API keys* → *Create key*; empieza por `sk-ant-`) y **Conectar**. Se guarda en el archivo `.env` de la carpeta del proyecto (si esa carpeta está en OneDrive, OneDrive también lo sube a tu nube: mejor instalar fuera de OneDrive). Se paga por consulta a Anthropic. Las respuestas se guardan (también al reiniciar): repetir la misma búsqueda es gratis (lista de eventos 6 h, datos de un evento 12 h); **Buscar otra vez** pregunta de nuevo. Por defecto usa **Sonnet** (la mitad de precio que **Opus**); en el mismo sitio puedes elegir Opus si un evento sale incompleto.
 
 Cada vez:
 

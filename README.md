@@ -114,12 +114,13 @@ Es orientativo: los sectores exactos están en el plano oficial de cada venta.
 
 ## Claude (IA)
 
-**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda en el `.env` de la carpeta del proyecto (variable `ANTHROPIC_API_KEY`; si la carpeta está en OneDrive, OneDrive también lo sube a tu nube); usa el Opus más reciente de tu cuenta, o el modelo que elijas ahí mismo (se guarda en `ANTHROPIC_MODEL`; **Sonnet cuesta la mitad que Opus**). Se paga por consulta a Anthropic.
+**Ajustes · Claude (IA)**: pega tu clave de la API (platform.claude.com → *API keys*, empieza por `sk-ant-`) → **Conectar**. Se comprueba y se guarda en el `.env` de la carpeta del proyecto (variable `ANTHROPIC_API_KEY`; si la carpeta está en OneDrive, OneDrive también lo sube a tu nube); usa el **Sonnet más reciente** de tu cuenta (lo más barato: la mitad que Opus), o el modelo que elijas ahí mismo (se guarda en `ANTHROPIC_MODEL`). Se paga por consulta a Anthropic.
 
 Para gastar menos:
 
 - **Caché de la API**: en cada búsqueda, Claude da muchas vueltas y en cada una vuelve a leer todo lo anterior (las páginas que ya ha leído incluidas). Esas relecturas salen de la caché, a una fracción del precio (en Opus 5.5, 0,20 $ en vez de 4 $ por millón de tokens).
 - **Respuestas guardadas** en `claude-respuestas.json`, en la carpeta de datos (también al reiniciar): repetir la misma búsqueda es gratis (lista de eventos 6 h, datos de un evento 12 h, plano 7 días). **Buscar otra vez** / **Volver a analizar** preguntan de nuevo.
+- **Lo justo en cada búsqueda**: pocas búsquedas y lecturas de páginas (lista: 4 y 3; un evento: 5 y 4), páginas recortadas a 15 000 tokens y esfuerzo bajo o medio. Si un evento sale incompleto, elige Opus en Ajustes y **Volver a analizar**.
 - Cada respuesta dice lo que ha costado, y la ventana negra anota cada consulta (`Claude: consulta`: modelo, dólares, tokens leídos y cuántos de la caché).
 
 - **Lista de eventos** de la web de venta elegida (búsqueda y lectura web de Claude, en los servidores de Anthropic).
