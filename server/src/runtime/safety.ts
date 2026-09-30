@@ -13,6 +13,8 @@ import { killSwitchKey, type CapabilityName, type CircuitState, type Id, type Ki
 import { iso } from '../util/time';
 import type { Ctx } from './context';
 
+const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 export class SafetyService {
   private readonly halfOpenTrial = new Set<string>();
 
@@ -43,18 +45,50 @@ export class SafetyService {
       this.ctx.alerts.raise({
         kind: 'KILL_SWITCH',
         severity: 'CRITICAL',
-        title: `Kill switch activado (${scope}${targetId ? `: ${targetId}` : ''})`,
+        title: `Kill switch ${this.describe(ks)} activado`,
         message: reason ? `Motivo: ${reason}` : 'Toda acción automática en este ámbito está detenida.',
         operationId: scope === 'OPERATION' ? targetId : null,
         accountId: scope === 'ACCOUNT' ? targetId : null,
         dedupeKey: `kill:${key}`,
       });
       this.ctx.runners?.onKillSwitch(ks);
+      if (ks.scope === 'ACCOUNT' && ks.targetId) this.tellAccountToStop(ks.targetId, reason);
     } else {
       this.ctx.alerts.resolveKey(`kill:${key}`, actor);
     }
     this.ctx.hub.publish({ type: 'system', data: this.ctx.ops.systemStatus() });
     return ks;
+  }
+
+  /** Ámbito con nombres, no ids: «global», «de la cuenta «Eva»», «de la operación «Real Madrid»». */
+  private describe(ks: Pick<KillSwitch, 'scope' | 'targetId'>): string {
+    const id = ks.targetId ?? '';
+    switch (ks.scope) {
+      case 'GLOBAL':
+        return 'global';
+      case 'PROVIDER':
+        return `del proveedor ${this.ctx.registry.descriptor(id)?.name ?? id}`;
+      case 'OPERATION':
+        return `de la operación «${this.ctx.store.operations.get(id)?.config.name ?? id}»`;
+      case 'ACCOUNT':
+        return `de la cuenta «${this.ctx.store.accounts.get(id)?.label ?? id}»`;
+    }
+  }
+
+  /**
+   * Parar una cuenta no pausa la operación, pero si esa persona tiene una tarea de compra
+   * abierta (asistencia manual) está comprando ahora mismo en la web oficial: se le dice que pare.
+   */
+  private tellAccountToStop(accountId: Id, reason: string | null): void {
+    const buying = [...this.ctx.store.humanTasks.values()].some((t) => t.accountId === accountId && t.kind === 'ADD_TO_CART' && t.state === 'OPEN');
+    if (!buying) return;
+    const label = this.ctx.store.accounts.get(accountId)?.label ?? accountId;
+    this.ctx.notifier?.announce?.(
+      `⏸ <b>Cuenta «${esc(label)}» parada</b>${reason ? ` (${esc(reason)})` : ''}\n` +
+        'No añadas nada más al carrito con esta cuenta. Si ya tienes entradas en el carrito, respóndelo en tu tarea; si no, pulsa «No pude» para que se repartan.',
+      [accountId],
+      null,
+    );
   }
 
   engagedFor(scope: { providerId?: string | null; operationId?: Id | null; accountId?: Id | null }): KillSwitch | null {

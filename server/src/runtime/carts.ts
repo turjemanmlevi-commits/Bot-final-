@@ -120,7 +120,8 @@ export class CartService {
     this.ctx.store.putCart(next);
     if (paidAfterExpiry) this.ctx.claims.recommitPaidAfterExpiry(next);
     this.ctx.journal.audit(state === 'PAID' ? 'cart.paid_by_human' : 'cart.released', { cartId, qty: cart.qty, total: cart.total, note: note ?? null }, { operationId: cart.operationId, actor });
-    this.ctx.alerts.resolveWhere((a) => a.cartId === cartId && a.kind !== 'CART_CONFIRMED', actor);
+    // Carrito cerrado: fuera todas sus alertas, también «N entradas en carrito» (su «Abrir carrito» ya no sirve).
+    this.ctx.alerts.resolveWhere((a) => a.cartId === cartId, actor);
     if (state === 'RELEASED') this.ctx.claims.onCartReleased(next);
     this.checkAllSettled(cart.operationId);
     return next;
@@ -176,7 +177,8 @@ export class CartService {
         const next: Cart = { ...cart, state: 'EXPIRED', updatedAt: iso(now) };
         this.ctx.store.putCart(next);
         this.ctx.journal.audit('cart.expired', { cartId: cart.id, qty: cart.qty }, { operationId: cart.operationId });
-        this.ctx.alerts.resolveWhere((a) => a.cartId === cart.id && a.kind === 'CART_EXPIRING');
+        // Queda solo el aviso de que ha caducado (el de «en carrito» y los de caducidad sobran).
+        this.ctx.alerts.resolveWhere((a) => a.cartId === cart.id);
         this.ctx.alerts.raise({
           kind: 'CART_EXPIRED',
           severity: 'CRITICAL',

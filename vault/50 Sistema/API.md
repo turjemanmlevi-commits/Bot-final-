@@ -25,7 +25,7 @@ Servidor en `http://localhost:8787`. Si `OPERATOR_TOKEN` está definido, hay que
 | GET/POST | `/api/operations` | Listar / crear |
 | GET | `/api/operations/:id` | Detalle |
 | PUT | `/api/operations/:id/config` | Nueva versión de la configuración (solo borrador/validada) |
-| POST | `/api/operations/:id/commands` | `validate`, `arm`, `disarm`, `readiness`, `start-now`, `pause`, `resume`, `stop`, `cancel`, `reduce-qty`, `lower-max-price`, `close` |
+| POST | `/api/operations/:id/commands` | `validate`, `arm`, `disarm`, `readiness`, `start-now`, `pause`, `resume`, `stop`, `cancel`, `reduce-qty`, `lower-max-price`, `close`. `close` con carritos reales por pagar responde 422 con `needsConfirm: true`; se repite con `{ confirm: true }` |
 | GET | `/api/operations/:id/decisions?limit=` | Últimas decisiones del motor (máx. 500) |
 | POST | `/api/operations/:id/replay` | Replay |
 | GET | `/api/alerts` · POST `/api/alerts/:id/ack`, `/resolve` | Alertas |
