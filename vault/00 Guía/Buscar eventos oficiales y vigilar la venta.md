@@ -23,7 +23,7 @@ Al crear un evento ya no se escribe nada a mano: **primero eliges dónde se vend
 
 ### 🤖 Con Claude (recomendado)
 
-Se pone una vez: **Ajustes → Claude (IA)** → pega tu clave de la API (platform.claude.com → *API keys* → *Create key*; empieza por `sk-ant-`) y **Conectar**. Se guarda solo en este ordenador (archivo `.env`). Se paga por consulta a Anthropic (unos céntimos cada una; la misma búsqueda repetida en 30 minutos es gratis).
+Se pone una vez: **Ajustes → Claude (IA)** → pega tu clave de la API (platform.claude.com → *API keys* → *Create key*; empieza por `sk-ant-`) y **Conectar**. Se guarda en el archivo `.env` de la carpeta del proyecto (si esa carpeta está en OneDrive, OneDrive también lo sube a tu nube: mejor instalar fuera de OneDrive). Se paga por consulta a Anthropic (unos céntimos cada una; la misma búsqueda repetida en 30 minutos es gratis).
 
 Cada vez:
 
@@ -77,7 +77,7 @@ Con las claves de **Ajustes · Fuentes de eventos** sale aquí mismo la lista, s
 
 Cada evento enseña fecha y hora, estado, recinto (**«recinto de la sala»** o **«recinto nuevo, se crea al guardar»**), cuándo abre cada venta, el límite con la frase oficial y el precio. **Usar este evento** (o **Usar · Preventa…**) lo rellena todo.
 
-Para ponerlas: **Ticketmaster** → *Crear la clave gratis* (developer.ticketmaster.com) → *My Apps* → copia la **Consumer Key**. **Partidos** → *Pedir el token gratis* (football-data.org → Register, plan Free) → te llega por email. Pégalas y **Conectar**. Se guardan solo en este ordenador (archivo `.env`).
+Para ponerlas: **Ticketmaster** → *Crear la clave gratis* (developer.ticketmaster.com) → *My Apps* → copia la **Consumer Key**. **Partidos** → *Pedir el token gratis* (football-data.org → Register, plan Free) → te llega por email. Pégalas y **Conectar**. Se guardan en el archivo `.env` de la carpeta del proyecto (si esa carpeta está en OneDrive, también se sube a tu nube).
 
 > [!tip] Lo mejor de los dos
 > Si tienes la clave y traes un evento con el botón (de Ticketmaster o un partido del Real Madrid), la sala lo busca también en la lista oficial y lo **vincula**: así la vigilancia avisa de los **cambios** oficiales, no solo de los recordatorios.
