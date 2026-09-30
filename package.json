@@ -7,7 +7,8 @@
   "workspaces": [
     "shared",
     "server",
-    "dashboard"
+    "dashboard",
+    "prueba"
   ],
   "engines": {
     "node": ">=20.11"
@@ -23,6 +24,9 @@
     "seed:demo": "npm run seed:demo -w @to/server",
     "bench": "npm run bench -w @to/server",
     "gates": "npm run gates -w @to/server",
-    "replay": "npm run replay -w @to/server"
+    "replay": "npm run replay -w @to/server",
+    "prueba": "npm run start -w @to/prueba",
+    "prueba:smoke": "npm run smoke -w @to/prueba",
+    "prueba:chat-id": "npm run chat-id -w @to/prueba"
   }
 }

@@ -1,0 +1,22 @@
+{
+  "name": "@to/prueba",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Prueba local end-to-end: sesión → selección → carrito → aviso por Telegram. El pago siempre lo hace el humano.",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "chat-id": "tsx scripts/chat-id.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@to/shared": "0.4.0",
+    "playwright": "~1.56.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
+  }
+}
