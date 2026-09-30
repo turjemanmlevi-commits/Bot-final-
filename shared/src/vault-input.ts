@@ -13,13 +13,26 @@ import { FEEDS } from './feeds';
 /** Fecha y hora local sin zona, como la escribe Obsidian: 2026-09-29T10:00 (se interpreta en VAULT_TZ). */
 export const LOCAL_DATETIME_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
-const localDateTime = z.string().trim().regex(LOCAL_DATETIME_RE, 'Usa el formato AAAA-MM-DDTHH:MM (hora de Madrid)');
+/** ¿Existe esa fecha y hora? (el 30 de febrero o las 25:00 se moverían a otro día sin avisar). */
+export function isRealLocalDateTime(s: string): boolean {
+  if (!LOCAL_DATETIME_RE.test(s)) return false;
+  const [y, mo, d, h, mi] = [s.slice(0, 4), s.slice(5, 7), s.slice(8, 10), s.slice(11, 13), s.slice(14, 16)].map(Number) as [number, number, number, number, number];
+  const t = new Date(Date.UTC(y, mo - 1, d, h, mi));
+  return h < 24 && mi < 60 && t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
+}
+
+const localDateTime = z
+  .string()
+  .trim()
+  .regex(LOCAL_DATETIME_RE, 'Usa el formato AAAA-MM-DDTHH:MM (hora de Madrid)')
+  .refine((s) => !LOCAL_DATETIME_RE.test(s) || isRealLocalDateTime(s), 'Esa fecha u hora no existe');
 
 /** Enlace oficial: http(s) completo. Solo se enseña como enlace, el servidor nunca lo visita. */
 export const officialUrl = z
   .string()
   .trim()
-  .max(500)
+  // Igual que los enlaces que entrega Claude (hasta 1000): un enlace largo no impide crear el evento.
+  .max(1000)
   .refine((s) => {
     try {
       const u = new URL(s);

@@ -6,7 +6,8 @@ export function splitFrontmatter(text: string): { yaml: string | null; body: str
   const lines = src.split(/\r?\n/);
   if ((lines[0] ?? '').trim() !== '---') return { yaml: null, body: src };
   for (let i = 1; i < lines.length; i++) {
-    const line = (lines[i] ?? '').trim();
+    // El cierre va al principio de la línea: un «---» sangrado es texto de un valor de varias líneas.
+    const line = (lines[i] ?? '').trimEnd();
     if (line === '---' || line === '...') {
       return { yaml: lines.slice(1, i).join('\n'), body: lines.slice(i + 1).join('\n') };
     }

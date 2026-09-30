@@ -6,13 +6,19 @@ import { describe, it } from 'node:test';
 import { resolveLabel, resolvePreference } from '../domain/venue';
 import { withFixtureVault } from '../gates/fixtures';
 import { artifactForEvent, compileVault } from '../vault/compiler';
-import { parseLink, splitFrontmatter } from '../vault/markdown';
+import { parseFrontmatter, parseLink, splitFrontmatter } from '../vault/markdown';
 import { parseVaultDate } from '../util/time';
 
 describe('markdown', () => {
   it('separa frontmatter con CRLF y BOM', () => {
     const r = splitFrontmatter('﻿---\r\ntype: venue\r\nname: X\r\n---\r\ncuerpo');
     assert.equal(r.yaml, 'type: venue\nname: X');
+    assert.equal(r.body, 'cuerpo');
+  });
+  it('un «---» sangrado dentro de un valor de varias líneas no cierra las propiedades', () => {
+    const r = splitFrontmatter('---\nname: |-\n  Concierto\n  ---\n  Gira\ntype: event\n---  \ncuerpo');
+    assert.equal(r.yaml, 'name: |-\n  Concierto\n  ---\n  Gira\ntype: event');
+    assert.deepEqual(parseFrontmatter(r.yaml ?? ''), { name: 'Concierto\n---\nGira', type: 'event' });
     assert.equal(r.body, 'cuerpo');
   });
   it('entiende enlaces de Obsidian', () => {
@@ -25,6 +31,10 @@ describe('markdown', () => {
     assert.equal(new Date(parseVaultDate('2026-10-09T10:00', 'Europe/Madrid') as number).toISOString(), '2026-10-09T08:00:00.000Z');
     assert.equal(new Date(parseVaultDate('2026-11-21T21:00', 'Europe/Madrid') as number).toISOString(), '2026-11-21T20:00:00.000Z');
     assert.equal(new Date(parseVaultDate('2026-10-09T10:00:00Z', 'Europe/Madrid') as number).toISOString(), '2026-10-09T10:00:00.000Z');
+  });
+  it('una fecha que no existe no se mueve a otro día: no es válida', () => {
+    for (const bad of ['2027-02-30T21:00', '2026-10-20T25:00', '2026-13-05', '2026-04-31', '2026-10-09T10:61']) assert.equal(parseVaultDate(bad, 'Europe/Madrid'), null, bad);
+    assert.equal(new Date(parseVaultDate('2028-02-29T21:00', 'Europe/Madrid') as number).toISOString(), '2028-02-29T20:00:00.000Z');
   });
 });
 

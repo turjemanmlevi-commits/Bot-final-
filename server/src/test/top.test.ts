@@ -386,3 +386,69 @@ describe('⭐ Grandes partidos', () => {
     }
   });
 });
+
+describe('⭐ Grandes partidos enlazados con su evento', () => {
+  let dir = '';
+  let dataDir = '';
+  let app: App;
+
+  before(async () => {
+    setLogSilent(true);
+    dir = await mkdtemp(path.join(tmpdir(), 'to-top-link-'));
+    await writeFixtureVault(dir);
+    dataDir = await mkdtemp(path.join(tmpdir(), 'to-top-link-data-'));
+    app = await createApp({ driver: new MemoryDriver(), vaultDir: dir, timeZone: TZ, publicBaseUrl: 'http://x', clock: new ManualClock(NOW), ids: new SeqIdGen() });
+  });
+
+  after(async () => {
+    await app.stop();
+    await rm(dir, { recursive: true, force: true });
+    await rm(dataDir, { recursive: true, force: true });
+    setLogSilent(false);
+  });
+
+  it('un partido sin preparar no sale como «Preparado» por el evento de otro partido del mismo día', async () => {
+    const r = await new VaultAuthoring(app).createEvent(
+      {
+        name: 'Real Madrid - FC Barcelona',
+        venueId: 'recinto-test',
+        providerId: 'manual',
+        startsAt: '2026-10-25T16:15',
+        currency: 'EUR',
+        limitPerAccount: 4,
+        limitPerGroup: 4,
+        limitPerOperation: 8,
+        limitSemantics: 'PER_HOLDER',
+        limitsVerified: false,
+        limitsSource: '',
+      },
+      'prueba',
+    );
+    assert.ok(r.event);
+    const match = (home: string, away: string, time = '21:00') => ({
+      name: `${home} - ${away}`,
+      home,
+      away,
+      competition: 'LaLiga',
+      category: 'LALIGA',
+      importance: 80,
+      why: '',
+      startsAtLocal: `2026-10-25T${time}`,
+      timeTBA: false,
+      venue: null,
+      city: null,
+      country: null,
+      ticketUrl: null,
+      saleOpensLocal: null,
+    });
+    const file = path.join(dataDir, 'top-partidos.json');
+    const matches = [match('Real Madrid CF', 'FC Barcelona', '16:15'), match('Atlético de Madrid', 'Real Sociedad'), match('Real Betis', 'Real Oviedo')];
+    await writeFile(file, JSON.stringify({ at: new Date(NOW).toISOString(), matches, notes: [], cost: null }));
+    const top = new TopMatches({ app, ai: {} as never, file, timeZone: TZ });
+    await top.load();
+    const eventOf = (home: string) => top.state().matches.find((m) => m.home === home)?.eventId;
+    assert.equal(eventOf('Real Madrid CF'), r.event?.id, 'el Clásico sí está preparado');
+    assert.equal(eventOf('Atlético de Madrid'), null, '«de Madrid» y «Real» no bastan');
+    assert.equal(eventOf('Real Betis'), null);
+  });
+});

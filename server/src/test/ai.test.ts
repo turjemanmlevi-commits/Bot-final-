@@ -10,6 +10,8 @@
  * - Respaldo del servidor, entrega que no llega, rechazo, API del dashboard.
  * - Crear el evento con lo que ha leído Claude (recinto nuevo con sus zonas,
  *   vigilancia, plano) y hacerlo entero desde Telegram con /evento.
+ * - «Buscar otra vez» renueva la caché, fases con el mismo nombre, y de qué
+ *   webs vale la frase del límite (la del proveedor o la elegida por una persona).
  */
 
 import assert from 'node:assert/strict';
@@ -19,7 +21,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import type { Hono } from 'hono';
-import { aiEventDraft, aiLayoutText, parseSaleZone, type AiEventDetails, type AiEventsResult, type AiKeyResult, type AiStatus } from '@to/shared';
+import { AiDetailsQuerySchema, aiEventDraft, aiLayoutText, aiSaleZonesText, parseSaleZone, type AiEventDetails, type AiEventsResult, type AiKeyResult, type AiStatus } from '@to/shared';
 import { createApp, type App } from '../app';
 import { EventAssistant } from '../ai/assistant';
 import { AiError, ClaudeControl } from '../ai/claude';
@@ -288,17 +290,20 @@ describe('Claude (API de Anthropic)', () => {
     );
     const draft = aiEventDraft(d, { today: '2026-10-01', nowLocal: '2026-10-01T10:00' });
     assert.equal(draft.onSaleAt, '2026-10-22T10:00', 'la venta general próxima es la apertura por defecto');
-    assert.equal(draft.limit?.verified, true);
     assert.equal(draft.limit?.perAccount, 4, 'el límite de la fase elegida (venta general: 4)');
+    assert.equal(draft.limit?.verified, false, 'la fase no trae fuente y da más que la frase oficial (2): hay que comprobarlo');
+    assert.match(draft.limit?.source ?? '', /^Según realmadrid\.com/);
+    assert.match(draft.limit?.notes ?? '', /frase oficial dice 2/);
     const socios = aiEventDraft(d, { saleName: 'Venta socios', today: '2026-10-01', nowLocal: '2026-10-01T10:00' });
     assert.equal(socios.limit?.perAccount, 2, 'en la fase de socios, 2');
+    assert.equal(socios.limit?.verified, true, 'lo mismo que dice la frase oficial');
     assert.deepEqual(draft.saleZones, [
       'Lateral Este Grada Baja: Sector 101, Sector 102 · 120–250 € → Lateral Este',
       'Fondo Sur Grada Alta · 60–90 € → Fondo Sur',
       'Zona VIP Castellana: Palco 1',
     ]);
     assert.deepEqual(parseSaleZone(draft.saleZones[0] ?? ''), { zone: 'Lateral Este Grada Baja', sections: ['Sector 101', 'Sector 102'], standing: false, price: '120–250 €', venueZone: 'Lateral Este' });
-    assert.match(draft.limit?.source ?? '', /Condiciones oficiales realmadrid\.com/);
+    assert.match(socios.limit?.source ?? '', /Condiciones oficiales realmadrid\.com/);
     assert.match(draft.notes, /Fases de venta: Venta socios/);
 
     fake.script.push(deliver('entregar_evento', detailsInput({ name: 'Real Madrid - Juventus', limitSource: 'https://www.marca.com/futbol/entradas.html', planImage: 'https://127.0.0.1/plano.png' })));
@@ -500,7 +505,7 @@ describe('Claude (API de Anthropic)', () => {
       const ev = [...app.runtime.store.events.values()].find((e) => e.name === BARCA.name);
       assert.deepEqual(ev?.preferredTargets, ['Fondo Sur', 'Lateral Este', 'Fondo Norte']);
       assert.equal(ev?.venueId, 'estadio-santiago-bernabeu');
-      assert.equal(ev?.limits.verified, true);
+      assert.equal(ev?.limits.verified, false, 'la venta general (4) da más que la frase oficial (2): hay que comprobarlo');
       await until(() => (app.runtime.store.events.get(ev?.id ?? '')?.seatMap?.points.length ?? 0) > 0, 'zonas situadas en el plano');
     } finally {
       bot.stop();
@@ -519,5 +524,153 @@ describe('Claude (API de Anthropic)', () => {
     assert.equal(reqs[1]?.body.fallbacks, undefined);
     assert.ok(!String(reqs[1]?.headers['anthropic-beta'] ?? '').includes('server-side-fallback'));
     assert.equal(r.events.length, 0);
+  });
+});
+
+describe('Claude: caché, fases de venta y límite «oficial»', () => {
+  let fake: FakeAnthropic;
+  let dir = '';
+  let app: App;
+  let ai: ClaudeControl;
+
+  before(async () => {
+    setLogSilent(true);
+    fake = new FakeAnthropic();
+    const base = await fake.listen();
+    dir = await mkdtemp(path.join(tmpdir(), 'to-ai-cache-'));
+    await writeAiVault(dir);
+    app = await createApp({ driver: new MemoryDriver(), vaultDir: dir, timeZone: TZ, publicBaseUrl: 'http://x', clock: new ManualClock(NOW), ids: new SeqIdGen() });
+    ai = new ClaudeControl({ runtime: app.runtime, timeZone: TZ, envFile: null, baseURL: base }, { apiKey: AI_KEY });
+  });
+
+  after(async () => {
+    await app.stop();
+    await fake.close();
+    await rm(dir, { recursive: true, force: true });
+    setLogSilent(false);
+  });
+
+  it('tras «Buscar otra vez», la respuesta nueva sustituye a la guardada (también para Telegram)', async () => {
+    fake.script.push(deliver('entregar_eventos', { events: [{ ...BARCA, name: 'Lista vieja' }], notes: '' }));
+    await ai.findEvents({ providerId: 'real-madrid', days: 30 });
+    fake.script.push(deliver('entregar_eventos', { events: [{ ...BARCA, name: 'Lista nueva' }], notes: '' }));
+    await ai.findEvents({ providerId: 'real-madrid', days: 30, fresh: true });
+    const events = await ai.findEvents({ providerId: 'real-madrid', days: 30 });
+    assert.deepEqual(
+      events.events.map((e) => e.name),
+      ['Lista nueva'],
+    );
+    assert.equal(events.cached, true);
+
+    const opens = (at: string) => ({ ...detailsInput({ name: 'Real Madrid - Inter', limitSource: 'https://www.realmadrid.com/x', planImage: null }), sales: [{ name: 'Venta general', opensAt: at, limit: null }] });
+    const q = { providerId: 'real-madrid', name: 'Real Madrid - Inter', venue: 'Bernabéu' };
+    fake.script.push(deliver('entregar_evento', opens('2026-10-10T10:00')));
+    await ai.eventDetails(q);
+    fake.script.push(deliver('entregar_evento', opens('2026-10-12T12:00')));
+    await ai.eventDetails({ ...q, fresh: true });
+    assert.equal((await ai.eventDetails(q)).sales[0]?.opensAtLocal, '2026-10-12T12:00', 'la apertura nueva, no la de antes');
+
+    const plan = { imageUrl: PLAN, zones: ['Fondo Sur'] };
+    fake.script.push(deliver('entregar_plano', { points: [{ zone: 'Fondo Sur', x: 50, y: 10 }], notes: '' }, 0, 0));
+    await ai.seatMap(plan);
+    fake.script.push(deliver('entregar_plano', { points: [{ zone: 'Fondo Sur', x: 50, y: 90 }], notes: '' }, 0, 0));
+    await ai.seatMap({ ...plan, fresh: true });
+    assert.equal((await ai.seatMap(plan)).points[0]?.y, 90);
+  });
+
+  it('dos fases con el mismo nombre se distinguen (se elige la tocada) y las fechas imposibles no pasan', async () => {
+    fake.script.push(
+      deliver('entregar_evento', {
+        ...detailsInput({ name: 'Final de Copa', limitSource: 'https://www.realmadrid.com/x', planImage: null }),
+        sales: [
+          { name: 'Venta general', opensAt: '2026-10-20T10:00', limit: 2 },
+          { name: 'Venta general', opensAt: '2026-10-05T10:00', limit: 4 },
+          { name: 'venta general', opensAt: '2026-10-20T10:00', limit: 2 },
+          { name: 'Preventa', opensAt: '2026-02-30T10:00', limit: null },
+          { name: 'Socios', opensAt: '2026-10-03T25:00', limit: null },
+        ],
+      }),
+    );
+    const d = await ai.eventDetails({ providerId: 'real-madrid', name: 'Final de Copa' });
+    assert.deepEqual(
+      d.sales.map((x) => x.name),
+      ['Venta general', 'Venta general (20/10 10:00)', 'venta general (2)'],
+    );
+    // Telegram y el dashboard pasan el nombre de la fase tocada: la 2ª (20 de octubre, máx. 2).
+    const draft = aiEventDraft(d, { saleName: d.sales[1]?.name ?? null, today: '2026-10-01', nowLocal: '2026-10-01T10:00' });
+    assert.equal(draft.onSaleAt, '2026-10-20T10:00');
+    assert.equal(draft.limit?.perAccount, 2);
+  });
+
+  it('el límite solo es «oficial» si la frase sale de la web del proveedor o del enlace elegido por una persona', async () => {
+    const buy = 'https://www.eticketing.co.uk/chelseafc/EDP/Event/Index/1234';
+    const chelsea = (limitSource: string) => ({ ...detailsInput({ name: 'Chelsea FC - Real Madrid', limitSource, planImage: null, url: buy }), venue: 'Stamford Bridge', city: 'London' });
+    const q = { providerId: 'manual', name: 'Chelsea FC - Real Madrid', url: buy };
+    // Sufijos de dos niveles: dailymail.co.uk no es eticketing.co.uk.
+    fake.script.push(deliver('entregar_evento', chelsea('https://www.dailymail.co.uk/sport/football/article-1/chelsea-real-madrid-tickets.html')));
+    assert.equal((await ai.eventDetails(q)).limit.official, false, 'un periódico .co.uk no es la web de venta');
+    fake.script.push(deliver('entregar_evento', chelsea('https://help.eticketing.co.uk/chelseafc/terms')));
+    assert.equal((await ai.eventDetails({ ...q, fresh: true })).limit.official, true, 'las condiciones de la web que eligió la persona');
+
+    // El enlace que da el propio Claude no certifica su fuente (una noticia sigue siendo una noticia).
+    const news = 'https://as.com/futbol/entradas-real-madrid-milan';
+    fake.script.push(deliver('entregar_evento', detailsInput({ name: 'Real Madrid - Milan', limitSource: news, planImage: null, url: news })));
+    const milan = await ai.eventDetails({ providerId: 'real-madrid', name: 'Real Madrid - Milan' });
+    assert.equal(milan.url, news);
+    assert.equal(milan.limit.official, false);
+    // Sin web del proveedor ni enlace elegido no hay referencia fiable.
+    const inter = 'https://www.inter.it/biglietti/inter-real-madrid';
+    fake.script.push(deliver('entregar_evento', detailsInput({ name: 'Inter - Real Madrid', limitSource: inter, planImage: null, url: inter })));
+    assert.equal((await ai.eventDetails({ providerId: 'manual', name: 'Inter - Real Madrid' })).limit.official, false);
+  });
+});
+
+describe('de lo que lee Claude a un evento de la sala', () => {
+  const details = (p: Partial<AiEventDetails>): AiEventDetails => ({
+    name: 'Real Madrid - FC Barcelona',
+    startsAtLocal: '2026-10-25T16:15',
+    timeTBA: false,
+    venue: 'Estadio Santiago Bernabéu',
+    city: 'Madrid',
+    url: BARCA.url,
+    seller: null,
+    urlWarning: null,
+    sales: [],
+    limit: { perPerson: 4, semantics: 'PER_HOLDER', quote: 'Máximo 4 entradas por persona', sourceUrl: 'https://www.realmadrid.com/es-ES/entradas/condiciones', official: true },
+    price: null,
+    layout: null,
+    planImageUrl: null,
+    status: null,
+    notes: '',
+    sources: [],
+    vaultVenueId: null,
+    cost: { usd: 0, searches: 0, fetches: 0, inputTokens: 0, outputTokens: 0, seconds: 0 },
+    cached: false,
+    ...p,
+  });
+  const opts = { today: '2026-10-01', nowLocal: '2026-10-01T10:00' };
+
+  it('una fase sin fuente propia nunca queda verificada por encima de la frase oficial', () => {
+    const above = aiEventDraft(details({ sales: [{ name: 'Venta general', opensAtLocal: '2026-10-22T10:00', limit: 6 }] }), opts);
+    assert.equal(above.limit?.perAccount, 6);
+    assert.equal(above.limit?.verified, false);
+    assert.match(above.limit?.source ?? '', /^Según realmadrid\.com .*6 por persona en «Venta general»/);
+    assert.match(above.limit?.notes ?? '', /«Venta general» da 6 por persona y la frase oficial dice 4/);
+    const below = aiEventDraft(details({ sales: [{ name: 'Venta socios', opensAtLocal: '2026-10-22T10:00', limit: 2 }] }), opts);
+    assert.deepEqual([below.limit?.perAccount, below.limit?.verified], [2, true], 'por debajo de lo oficial, sí');
+    const same = aiEventDraft(details({ sales: [{ name: 'Venta general', opensAtLocal: '2026-10-22T10:00', limit: null }] }), opts);
+    assert.deepEqual([same.limit?.perAccount, same.limit?.verified], [4, true]);
+  });
+
+  it('la estructura de la venta va y vuelve igual aunque los nombres lleven « · » (como las secciones del vault)', () => {
+    const layout = [{ zone: 'Shed End', sections: ['Shed End · Grada alta', 'Shed End · Grada baja'], standing: false, price: '60–90 £', venueZone: 'Shed End' }];
+    const line = aiSaleZonesText(layout)[0] ?? '';
+    assert.deepEqual(parseSaleZone(line), { zone: 'Shed End', sections: ['Shed End - Grada alta', 'Shed End - Grada baja'], standing: false, price: '60–90 £', venueZone: 'Shed End' });
+  });
+
+  it('un enlace largo de la lista de Claude se puede abrir en el dashboard', () => {
+    const url = `${BARCA.url}?${'utm_x=1&'.repeat(70)}`;
+    assert.ok(url.length > 600 && url.length <= 1000);
+    assert.equal(AiDetailsQuerySchema.safeParse({ providerId: 'real-madrid', name: BARCA.name, url }).success, true);
   });
 });
