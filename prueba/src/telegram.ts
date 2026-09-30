@@ -159,3 +159,17 @@ export class TelegramClient {
     }
   }
 }
+
+/** Busca el chat del último mensaje que alguien ha escrito al bot (para no tener que buscar el chat ID a mano). */
+export async function detectChatId(token: string, apiBase = 'https://api.telegram.org'): Promise<string | null> {
+  const res = await fetch(`${apiBase}/bot${token}/getUpdates`, { method: 'POST' });
+  const body = (await res.json().catch(() => ({ ok: false }))) as {
+    ok: boolean;
+    description?: string;
+    result?: Array<{ message?: { chat: { id: number; type: string } } }>;
+  };
+  if (!body.ok) throw new TelegramError('getUpdates', body.description ?? `HTTP ${res.status}`);
+  const chats = (body.result ?? []).map((u) => u.message?.chat).filter((c) => c && c.type === 'private');
+  const last = chats.at(-1);
+  return last ? String(last.id) : null;
+}

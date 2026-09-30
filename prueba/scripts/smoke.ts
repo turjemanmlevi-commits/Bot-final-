@@ -6,7 +6,7 @@
  *   npm run prueba:smoke
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -44,6 +44,10 @@ const fakeTelegram: Server = createServer((req, res) => {
       sent.push({ method, text: fields['text'] ?? fields['caption'] ?? '', keyboard: markup.inline_keyboard });
       return ok({ message_id: sent.length });
     }
+    if (method === 'getUpdates' && buf.length === 0) {
+      // detectChatId: el usuario ha escrito «hola» al bot.
+      return ok([{ update_id: 1, message: { chat: { id: 42, type: 'private' } } }]);
+    }
     if (method === 'getUpdates') {
       const offset = Number(JSON.parse(buf.toString() || '{}').offset ?? 0);
       if (offset === -1) return ok([]);
@@ -64,6 +68,7 @@ const tgPort = (fakeTelegram.address() as { port: number }).port;
 process.env['TELEGRAM_BOT_TOKEN'] = 'TEST';
 process.env['TELEGRAM_CHAT_ID'] = '42';
 process.env['TELEGRAM_API_BASE'] = `http://127.0.0.1:${tgPort}`;
+process.env['PRUEBA_ENV_FILE'] = path.join(mkdtempSync(path.join(tmpdir(), 'prueba-env-')), '.env');
 
 // --- App bajo prueba ------------------------------------------------------
 const { loadConfig } = await import('../src/config.js');
@@ -170,6 +175,20 @@ await step('validación: modo real exige URL de tickets.realmadrid.com', async (
   const r = await api('/api/prueba', { mode: 'real', eventUrl: 'https://example.com/x' });
   assert.equal(r.status, 400);
   assert.match(String(r.json['error']), /tickets\.realmadrid\.com/);
+});
+
+await step('conectar Telegram desde el panel: detecta el chat, avisa y guarda en .env', async () => {
+  sent.length = 0;
+  const bad = await api('/api/telegram', { token: 'no-es-un-token' });
+  assert.equal(bad.status, 400);
+  const r = await api('/api/telegram', { token: '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ', chatId: '' });
+  assert.equal(r.status, 200, String(r.json['error']));
+  assert.equal(r.json['username'], 'bot_de_prueba');
+  assert.ok(sent.some((s) => /Conectado con la prueba local/.test(s.text)));
+  assert.equal(runner.state.telegram.detail, 'Conectado como @bot_de_prueba');
+  const saved = readFileSync(process.env['PRUEBA_ENV_FILE']!, 'utf8');
+  assert.match(saved, /^TELEGRAM_BOT_TOKEN=123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ$/m);
+  assert.match(saved, /^TELEGRAM_CHAT_ID=42$/m);
 });
 
 await runner.closeSession();

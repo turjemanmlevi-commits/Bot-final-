@@ -2,7 +2,7 @@
  * Configuración de la prueba local. Se lee de `prueba/.env` o del `.env` de la raíz
  * (ambos ignorados por git). Nada de esto se sube al repositorio.
  */
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -94,4 +94,17 @@ export function loadConfig(): PruebaConfig {
     humanWaitMs: num('PRUEBA_ESPERA_HUMANO_MIN', 5) * 60_000,
     cartHoldMs: num('PRUEBA_RETENCION_CARRITO_MIN', 10) * 60_000,
   };
+}
+
+/** Guarda (o actualiza) valores en prueba/.env para que se mantengan entre arranques. */
+export function saveEnvValues(values: Record<string, string>): void {
+  const file = process.env['PRUEBA_ENV_FILE'] ?? path.join(PACKAGE_DIR, '.env');
+  const lines = existsSync(file) ? readFileSync(file, 'utf8').split(/\r?\n/) : [];
+  for (const [key, value] of Object.entries(values)) {
+    const i = lines.findIndex((l) => l.trim().startsWith(`${key}=`));
+    if (i >= 0) lines[i] = `${key}=${value}`;
+    else lines.push(`${key}=${value}`);
+    process.env[key] = value;
+  }
+  writeFileSync(file, lines.join('\n').replace(/\n*$/, '\n'));
 }

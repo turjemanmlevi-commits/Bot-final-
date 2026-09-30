@@ -4,9 +4,9 @@
  */
 import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
-import type { PruebaConfig } from './config.js';
+import { saveEnvValues, type PruebaConfig } from './config.js';
 import { runBot, type BotSession, type HumanReason, type LogLevel, type RunOptions, type SecuredCart } from './bot.js';
-import { escapeHtml, isTelegramButtonUrl, TelegramClient, type Keyboard } from './telegram.js';
+import { detectChatId, escapeHtml, isTelegramButtonUrl, TelegramClient, TelegramError, type Keyboard } from './telegram.js';
 import { releaseMockCart } from './mock-site.js';
 
 export type RunStatus = 'IDLE' | 'RUNNING' | 'WAITING_HUMAN' | 'CART_SECURED' | 'OPENED' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
@@ -46,7 +46,7 @@ function clock(iso: string): string {
 
 export class Runner extends EventEmitter {
   readonly state: RunState;
-  private readonly telegram: TelegramClient | null;
+  private telegram: TelegramClient | null;
   private abort: AbortController | null = null;
   private poll: AbortController | null = null;
   private session: BotSession | null = null;
@@ -85,6 +85,37 @@ export class Runner extends EventEmitter {
       this.state.telegram.detail = `Error: ${(err as Error).message}`;
     }
     this.changed();
+  }
+
+  /** Configura Telegram desde el panel: valida el token, detecta el chat, manda un mensaje de prueba y lo guarda. */
+  async configureTelegram(rawToken: string, rawChatId: string): Promise<string> {
+    if (this.busy) throw new Error('Espera a que termine la prueba en marcha.');
+    const token = rawToken.trim();
+    if (!/^\d+:[\w-]{20,}$/.test(token)) throw new Error('Ese token no parece válido. Cópialo entero de @BotFather (tiene la forma 123456:ABC…).');
+    const apiBase = this.cfg.telegram.apiBase;
+    try {
+      const chatId = rawChatId.trim() || (await detectChatId(token, apiBase));
+      if (!chatId) throw new Error('Abre tu bot en Telegram, escríbele «hola» y vuelve a pulsar «Guardar y probar».');
+      const client = new TelegramClient(token, chatId, apiBase);
+      const username = await client.whoAmI();
+      await client.sendMessage('✅ <b>Conectado con la prueba local.</b>\nAquí te avisaré cuando haya entradas en el carrito.');
+      saveEnvValues({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_CHAT_ID: chatId });
+      this.telegram = client;
+      this.state.telegram = { configured: true, detail: `Conectado como @${username}` };
+      this.changed();
+      return username;
+    } catch (err) {
+      if (err instanceof TelegramError && /conflict|webhook/i.test(err.description)) {
+        throw new Error('Tu bot está conectado a otro programa (webhook u otro bot en marcha). Escribe tu chat ID a mano o para el otro programa.');
+      }
+      if (err instanceof TelegramError && /unauthorized|not found/i.test(err.description)) {
+        throw new Error('Telegram no reconoce ese token. Cópialo otra vez de @BotFather.');
+      }
+      if (err instanceof TelegramError && /chat not found/i.test(err.description)) {
+        throw new Error('No encuentro ese chat. Escribe «hola» a tu bot y deja el chat ID vacío.');
+      }
+      throw err;
+    }
   }
 
   get busy(): boolean {

@@ -75,6 +75,15 @@ export function panelHtml(d: PanelDefaults): string {
       <button class="primary" id="go" type="submit">Hacer prueba</button>
     </form>
     <p class="note" id="tg"></p>
+    <details id="tgbox" style="margin-top:8px">
+      <summary style="cursor:pointer;font-weight:600">Conectar Telegram</summary>
+      <label for="tgToken">Token del bot (te lo dio @BotFather)</label>
+      <input id="tgToken" type="password" autocomplete="off" placeholder="123456789:ABC…">
+      <label for="tgChat">Chat ID (déjalo vacío: escribe «hola» a tu bot y lo detecto)</label>
+      <input id="tgChat" type="text" placeholder="automático">
+      <button class="ghost" id="tgSave" type="button" style="margin-top:10px;width:100%">Guardar y probar</button>
+      <p class="note" id="tgMsg"></p>
+    </details>
   </section>
 
   <section style="display:grid;gap:16px;align-content:start">
@@ -118,6 +127,14 @@ document.querySelectorAll('[data-d]').forEach((b) => b.addEventListener('click',
   if (!r.ok) alert((await r.json()).error);
 }));
 $('#stop').addEventListener('click', () => fetch('/api/parar', { method: 'POST' }));
+$('#tgSave').addEventListener('click', async () => {
+  $('#tgMsg').textContent = 'Comprobando…';
+  const r = await fetch('/api/telegram', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ token: $('#tgToken').value, chatId: $('#tgChat').value }) });
+  const j = await r.json();
+  $('#tgMsg').textContent = r.ok ? '¡Listo! Te he mandado un mensaje de prueba a Telegram.' : j.error;
+  if (r.ok) $('#tgToken').value = '';
+});
+let tgOpened = false;
 
 let shownShot = null;
 function render(s) {
@@ -125,6 +142,7 @@ function render(s) {
   const busy = ['RUNNING','WAITING_HUMAN','CART_SECURED'].includes(s.status);
   $('#go').disabled = busy; $('#go').textContent = busy ? 'Prueba en marcha…' : 'Hacer prueba';
   $('#tg').textContent = 'Telegram: ' + s.telegram.detail;
+  if (!tgOpened) { tgOpened = true; $('#tgbox').open = !s.telegram.configured; }
   $('#log').innerHTML = s.log.length ? s.log.map((l) => '<li class="l-' + l.level + '">' + new Date(l.at).toLocaleTimeString('es-ES') + '  ' + esc(l.message) + '</li>').join('') : '<li class="muted">Pulsa «Hacer prueba» para empezar.</li>';
   $('#log').scrollTop = $('#log').scrollHeight;
   const c = s.cart;

@@ -95,6 +95,11 @@ export function createAppServer(cfg: PruebaConfig, runner: Runner): Server {
           const opts = parseRunOptions(await readJson(req), cfg, port);
           return json(res, 202, { id: runner.start(opts) });
         }
+        if (url.pathname === '/api/telegram' && req.method === 'POST') {
+          const body = await readJson(req);
+          const username = await runner.configureTelegram(String(body['token'] ?? ''), String(body['chatId'] ?? ''));
+          return json(res, 200, { ok: true, username });
+        }
         if (url.pathname === '/api/decision' && req.method === 'POST') {
           const body = await readJson(req);
           const d = body['decision'];
