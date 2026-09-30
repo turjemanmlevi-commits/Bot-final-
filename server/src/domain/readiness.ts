@@ -82,12 +82,25 @@ export function evaluateReadiness(input: ReadinessInput): ReadinessReport {
   }
 
   // Kill switches
-  const ksText = (list: KillSwitch[]) => list.map((k) => `${k.scope}${k.targetId ? `:${k.targetId}` : ''}${k.reason ? ` — ${k.reason}` : ''}`).join(' · ');
+  // Con nombres, no ids (el texto llega a las alertas y a Telegram).
+  const ksName = (k: KillSwitch) =>
+    k.scope === 'GLOBAL'
+      ? 'Global'
+      : k.scope === 'PROVIDER'
+        ? `Proveedor ${p?.id === k.targetId ? p.name : k.targetId}`
+        : k.scope === 'OPERATION'
+          ? 'Esta operación'
+          : (input.accounts.find((a) => a.id === k.targetId)?.label ?? k.targetId ?? '');
+  const ksText = (list: KillSwitch[]) => list.map((k) => `${ksName(k)}${k.reason ? ` — ${k.reason}` : ''}`).join(' · ');
   const hardKill = input.killSwitchesEngaged.filter((k) => k.scope !== 'ACCOUNT');
   if (input.killSwitchesEngaged.length === 0) add('kill', 'Kill switches', 'PASS', 'Ninguno activo.');
   // Parar UNA cuenta no debe tumbar la operación del resto: solo avisa.
   else if (hardKill.length === 0) add('kill', 'Kill switches', 'WARN', `Cuentas paradas (no participarán): ${ksText(input.killSwitchesEngaged)}`);
-  else add('kill', 'Kill switches', 'FAIL', ksText(hardKill));
+  // No se reparte nada; si sigue activo en T0, la operación queda retenida en pausa (no termina).
+  else {
+    const next = input.t0Ms > input.now ? 'Suéltalo antes de T0: si sigue activo, la operación queda en pausa sin repartir nada' : 'No se reparte nada';
+    add('kill', 'Kill switches', 'FAIL', `${ksText(hardKill)}. ${next} hasta que lo sueltes y pulses «Reanudar».`);
+  }
 
   // Journal
   if (!input.journal.healthy) add('journal', 'Journal', 'FAIL', 'El journal no está persistiendo: sin auditoría no se automatiza.');

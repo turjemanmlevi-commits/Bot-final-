@@ -26,7 +26,8 @@ export const STATE_TRANSITIONS: Record<OperationState, readonly OperationState[]
   DRAFT: ['VALIDATED', 'CANCELLED'],
   VALIDATED: ['DRAFT', 'ARMED', 'CANCELLED'],
   ARMED: ['VALIDATED', 'FROZEN', 'RUNNING', 'ENDED', 'CANCELLED'],
-  FROZEN: ['VALIDATED', 'RUNNING', 'ENDED', 'CANCELLED'],
+  // PAUSED: en T0 con un kill switch global, de proveedor o de la operación, se retiene sin arrancar.
+  FROZEN: ['VALIDATED', 'RUNNING', 'PAUSED', 'ENDED', 'CANCELLED'],
   RUNNING: ['PAUSED', 'RECOVERING', 'CART_SECURED', 'ENDED', 'CANCELLED'],
   PAUSED: ['RUNNING', 'RECOVERING', 'CART_SECURED', 'ENDED', 'CANCELLED'],
   RECOVERING: ['RUNNING', 'PAUSED', 'CART_SECURED', 'ENDED', 'CANCELLED'],

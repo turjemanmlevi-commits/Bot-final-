@@ -17,8 +17,9 @@ stateDiagram-v2
   ARMED --> RUNNING: empezar ya
   FROZEN --> RUNNING: T0 y readiness sin FAIL
   FROZEN --> ENDED: readiness FAIL en T0
+  FROZEN --> PAUSED: kill switch activo en T0 (retenida)
   RUNNING --> PAUSED: pausa, kill switch, journal, drift
-  PAUSED --> RUNNING: reanudar
+  PAUSED --> RUNNING: reanudar (si no llegó a arrancar, con readiness sin FAIL)
   RUNNING --> RECOVERING: reinicio del servidor
   RECOVERING --> RUNNING: claims reconciliados
   RUNNING --> CART_SECURED: cantidad completa
@@ -53,7 +54,7 @@ Las reglas viven en `shared/src/rules.ts` y las comparten servidor y dashboard: 
 
 - Fases de readiness T−12 h, T−1 h, T−5 min (si se arma tarde, solo la más reciente).
 - `ARMED → FROZEN` a `T0 − freezeLeadSeconds`.
-- `FROZEN → RUNNING` en T0 (o `ENDED` con motivo `READINESS_FAILED`).
+- `FROZEN → RUNNING` en T0 (o `ENDED` con motivo `READINESS_FAILED`). Con un kill switch global, de proveedor o de la operación activo en T0 pasa a `PAUSED` sin repartir nada: suéltalo y pulsa **Reanudar** (se repite el readiness y, en asistencia manual, llega «¡Abre la venta!»).
 - `RUNNING/PAUSED → ENDED` al agotarse la ventana.
 - T0 se **compensa** con el desfase medido del reloj del proveedor.
 

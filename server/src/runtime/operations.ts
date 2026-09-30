@@ -78,6 +78,15 @@ const READINESS_PHASES: Array<{ phase: ReadinessPhase; beforeMs: number }> = [
   { phase: 'T-5m', beforeMs: 5 * 60_000 },
 ];
 
+const escHtml = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** Motivo de una pausa en lenguaje llano para las personas (los códigos internos no se entienden). */
+function pauseText(reason: string | null): string {
+  if (reason?.startsWith('KILL_SWITCH')) return 'parada de seguridad';
+  if (!reason || /^[A-Z_]+$/.test(reason)) return 'pausa del sistema';
+  return reason;
+}
+
 export class OperationService {
   constructor(private readonly ctx: Ctx) {}
 
@@ -151,6 +160,7 @@ export class OperationService {
       validation: null,
       readiness: [],
       readinessPhasesDone: [],
+      entryRemindersDone: [],
       amendments: [],
       endReason: null,
       pausedReason: null,
@@ -209,11 +219,18 @@ export class OperationService {
       endedAt: to === 'ENDED' || to === 'CANCELLED' || to === 'CLOSED' ? (r.endedAt ?? now) : r.endedAt,
     });
     this.ctx.journal.audit('operation.state_changed', { from: r.state, to, reason: meta.reason ?? null, endReason: meta.endReason ?? null }, { operationId: r.id, actor: meta.actor });
-    this.afterTransition(r.state, next);
+    this.afterTransition(r.state, next, to === 'RUNNING' && r.startedAt === null);
     return this.ctx.store.operations.get(next.id) ?? next;
   }
 
-  private afterTransition(from: OperationState, r: OperationRecord): void {
+  /** Asistencia manual: compran personas en la web oficial (mismo criterio que el runner). */
+  private manual(r: OperationRecord): boolean {
+    const p = r.config.providerId;
+    return !(this.ctx.registry.automated(p, 'cart.add') && this.ctx.registry.automated(p, 'inventory.read'));
+  }
+
+  /** `firstStart`: primera vez EN MARCHA (desde armada, congelada o retenida en T0). */
+  private afterTransition(from: OperationState, r: OperationRecord, firstStart: boolean): void {
     const { ctx } = this;
     if (['CART_SECURED', 'ENDED', 'CANCELLED', 'CLOSED'].includes(r.state)) {
       // La automatización ha terminado: los avisos de preparación ya no aplican.
@@ -235,12 +252,31 @@ export class OperationService {
         break;
       case 'RUNNING':
         ctx.metrics.start(r.id);
-        if ((from === 'ARMED' || from === 'FROZEN') && ctx.runners.kindFor(r.id) === 'MANUAL') this.openSale(r);
-        else ctx.runners.start(r.id);
+        // Primera vez en marcha en asistencia manual: «¡Abre la venta!» y las tareas (openSale arranca el runner).
+        if (firstStart && this.manual(r)) {
+          this.openSale(r);
+          break;
+        }
+        ctx.runners.start(r.id);
+        if (from === 'PAUSED' && this.manual(r)) {
+          ctx.notifier?.announce?.(`▶️ <b>${escHtml(r.config.name)}: seguimos</b>\nLa operación vuelve a estar en marcha: continuad con vuestra tarea.`, r.config.accountIds, null);
+        }
         break;
       case 'PAUSED':
       case 'RECOVERING':
         ctx.runners.stop(r.id);
+        // Asistencia manual: quien compra es una persona en la web oficial y hay que decirle que pare
+        // (pausa, /pausa o kill switch global, de proveedor o de la operación).
+        if (r.state === 'PAUSED' && this.manual(r)) {
+          const why = escHtml(pauseText(r.pausedReason));
+          ctx.notifier?.announce?.(
+            r.startedAt === null
+              ? `⏸ <b>${escHtml(r.config.name)}: retenida en T0</b> (${why})\nNo compréis nada hasta nuevo aviso. Cuando se reanude os llegará «¡Abre la venta!» con vuestra tarea.`
+              : `⏸ <b>${escHtml(r.config.name)}: EN PAUSA</b> (${why})\nNo añadáis nada más al carrito hasta nuevo aviso. Si ya tenéis entradas en el carrito, respondedlo en vuestra tarea: cuentan igual.`,
+            r.config.accountIds,
+            null,
+          );
+        }
         break;
       case 'CART_SECURED': {
         ctx.runners.stop(r.id);
@@ -348,7 +384,9 @@ export class OperationService {
       scenarioIds: scenarioInfos().map((s) => s.id),
       leasedBy: (accountId) => {
         const leased = store.accounts.get(accountId)?.leasedBy ?? null;
-        return leased && leased !== r.id ? leased : null;
+        if (!leased || leased === r.id) return null;
+        const other = store.operations.get(leased);
+        return { id: leased, name: other?.config.name ?? leased, state: other?.state ?? null };
       },
       forArm,
     });
@@ -555,7 +593,12 @@ export class OperationService {
         if (!this.ctx.journal.healthy) return fail('El journal no está persistiendo.');
         const manual = this.ctx.safety.openCircuitsFor(r.config.providerId).find((c) => c.requiresManualReset);
         if (manual) return fail(`El circuito ${manual.key} necesita reinicio manual.`);
-        this.transition(r, 'RUNNING', { actor, reason: 'Reanudada' });
+        // Retenida en T0 sin llegar a arrancar: la misma comprobación que «Empezar ya».
+        if (!r.startedAt) {
+          const readiness = this.runReadiness(r, 'MANUAL');
+          if (readiness.overall === 'FAIL') return fail('No se puede reanudar: el readiness falla.', { readiness });
+        }
+        this.transition(this.get(id), 'RUNNING', { actor, reason: 'Reanudada' });
         return ok('Reanudada.');
       }
 
@@ -589,9 +632,23 @@ export class OperationService {
         return ok(`Precio máximo bajado a ${formatMoney(value, r.config.currency)}.`);
       }
 
-      case 'close':
-        this.transition(r, 'CLOSED', { actor, reason: req.reason ?? 'Cerrada' });
+      case 'close': {
+        // Cerrar da la operación por terminada y libera sus cuentas: con carritos reales
+        // por pagar se pide confirmación explícita (en el simulador no se paga nada).
+        const pending = [...this.ctx.store.carts.values()].filter((c) => c.operationId === id && (c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED'));
+        const real = this.ctx.registry.descriptor(r.config.providerId)?.mode !== 'SIMULATED';
+        if (real && pending.length > 0 && !req.confirm) {
+          const n = pending.length;
+          const who = pending.map((c) => `${this.ctx.store.accounts.get(c.accountId)?.label ?? c.accountId} (${c.qty})`).join(', ');
+          return fail(
+            `Queda${n === 1 ? '' : 'n'} ${n} carrito${n === 1 ? '' : 's'} por pagar: ${who}. Págalo${n === 1 ? '' : 's'} y márcalo${n === 1 ? '' : 's'} como pagado${n === 1 ? '' : 's'} o libéralo${n === 1 ? '' : 's'} en Carritos antes de cerrar, o confirma que quieres cerrarla igualmente.`,
+            { needsConfirm: true },
+          );
+        }
+        const note = real && pending.length > 0 ? ` con ${pending.length} carrito${pending.length === 1 ? '' : 's'} por pagar (confirmado)` : '';
+        this.transition(r, 'CLOSED', { actor, reason: `${req.reason ?? 'Cerrada'}${note}` });
         return ok('Cerrada.');
+      }
     }
   }
 
@@ -640,8 +697,6 @@ export class OperationService {
 
   private lastClockSync = new Map<string, number>();
   private lastNoProgressCheck = new Map<Id, number>();
-  /** Avisos «entrad ya» ya enviados («operación:minutos»). */
-  private readonly entryReminded = new Set<string>();
 
   scheduleTick(): void {
     const now = this.ctx.now();
@@ -686,7 +741,11 @@ export class OperationService {
           if (now > end) this.transition(this.get(r.id), 'ENDED', { actor: 'scheduler', endReason: 'NOT_STARTED_IN_WINDOW' });
           else if (now >= t0) {
             const report = this.runReadiness(this.get(r.id), 'T-5m');
-            if (report.overall === 'FAIL') this.transition(this.get(r.id), 'ENDED', { actor: 'scheduler', endReason: 'READINESS_FAILED', reason: 'Readiness FAIL en T0' });
+            // Kill switch global, de proveedor o de la operación en T0: no se reparte nada, pero la
+            // operación no se pierde; queda retenida en pausa hasta que se suelte y se reanude.
+            const ks = this.ctx.safety.engagedFor({ providerId: r.config.providerId, operationId: r.id });
+            if (ks) this.transition(this.get(r.id), 'PAUSED', { actor: 'scheduler', reason: `Kill switch ${ks.key} activo en T0`, pausedReason: `KILL_SWITCH ${ks.key}` });
+            else if (report.overall === 'FAIL') this.transition(this.get(r.id), 'ENDED', { actor: 'scheduler', endReason: 'READINESS_FAILED', reason: 'Readiness FAIL en T0' });
             else this.transition(this.get(r.id), 'RUNNING', { actor: 'scheduler', reason: 'T0' });
           }
         } else if (r.state === 'RUNNING' || r.state === 'PAUSED' || r.state === 'RECOVERING') {
@@ -703,19 +762,18 @@ export class OperationService {
   }
 
   /**
-   * T0 en asistencia manual. Primero «¡Abre la venta!» en el chat principal y después las
-   * tareas: cada persona recibe UN mensaje, su tarea con el aviso dentro (sin esperar a otro
-   * mensaje). El aviso aparte va también a quien no recibe tarea (sesión sin confirmar o sin
-   * entradas que repartirle).
+   * T0 en asistencia manual (o la reanudación de una operación retenida en T0). Primero
+   * «¡Abre la venta!» en el chat principal y después las tareas: cada persona recibe UN mensaje,
+   * su tarea con el aviso dentro (sin esperar a otro mensaje). El aviso aparte va también a
+   * quien no recibe tarea (sesión sin confirmar o sin entradas que repartirle).
    */
   private openSale(r: OperationRecord): void {
     const { ctx } = this;
     const event = ctx.store.events.get(r.config.eventId);
     const provider = ctx.registry.descriptor(r.config.providerId)?.name ?? r.config.providerId;
     const notReady = r.config.accountIds.filter((id) => ctx.store.accounts.get(id)?.session.state !== 'READY').length;
-    const esc = (x: string) => x.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const text =
-      `🚦 <b>¡Abre la venta! ${esc(r.config.name)}</b>\nEntrad ya en la web oficial de ${esc(provider)} (cola incluida). Las tareas con la zona, la cantidad y el precio máximo llegan ahora.` +
+      `🚦 <b>¡Abre la venta! ${escHtml(r.config.name)}</b>\nEntrad ya en la web oficial de ${escHtml(provider)} (cola incluida). Las tareas con la zona, la cantidad y el precio máximo llegan ahora.` +
       (notReady > 0 ? `\n⚠️ ${notReady} cuenta${notReady === 1 ? '' : 's'} sin «Sesión lista»: inicia sesión y púlsalo para recibir tu tarea.` : '');
     const link = event?.url ?? ctx.registry.authorization(r.config.providerId)?.url ?? null;
     ctx.notifier?.announce?.(text, [], link);
@@ -732,11 +790,16 @@ export class OperationService {
   private entryReminders(r: OperationRecord, now: number, t0: number): void {
     const ctx = this.ctx;
     if (ctx.registry.descriptor(r.config.providerId)?.mode !== 'MANUAL_ASSIST' || now >= t0) return;
-    const due = ENTRY_REMINDERS_MIN.filter((m) => now >= t0 - m * 60_000 && !this.entryReminded.has(`${r.id}:${m}`));
+    // Con el T0 en la clave: si se desarma y se vuelve a armar con otra hora, salen los de la nueva.
+    const key = (m: number) => `${r.config.t0}:${m}`;
+    const sent = r.entryRemindersDone ?? [];
+    const due = ENTRY_REMINDERS_MIN.filter((m) => now >= t0 - m * 60_000 && !sent.includes(key(m)));
     const latest = due.at(-1);
     if (latest === undefined) return;
-    // Si vencen varios a la vez (se armó tarde), solo se manda el más cercano.
-    for (const m of due) this.entryReminded.add(`${r.id}:${m}`);
+    // Si vencen varios a la vez (se armó tarde), solo se manda el más cercano. Se guardan
+    // en la operación (journal) antes de enviar: tras un reinicio no se repiten.
+    const cur = this.get(r.id);
+    this.save({ ...cur, entryRemindersDone: [...new Set([...(cur.entryRemindersDone ?? []), ...due.map(key)])] });
     const notReady = r.config.accountIds
       .map((id) => ctx.store.accounts.get(id))
       .filter((a): a is NonNullable<typeof a> => a !== undefined && a.session.state !== 'READY');

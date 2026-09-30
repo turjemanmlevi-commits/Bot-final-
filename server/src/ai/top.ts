@@ -44,6 +44,16 @@ export const TOP_SEARCHES: Array<{ key: string; focus: string; max: number }> = 
   },
 ];
 
+/** Palabras que llevan muchos clubes y no distinguen a uno de otro. */
+const CLUB_WORDS = new Set(['real', 'fc', 'cf', 'cd', 'ud', 'sd', 'rc', 'rcd', 'ca', 'club', 'atletico', 'athletic', 'deportivo', 'union', 'sad', 'afc', 'ac', 'as', 'ssc', 'sc', 'united', 'city']);
+
+/** Palabras propias de un equipo («Real Madrid» → madrid; «FC Barcelona» → barcelona). */
+function teamTokens(team: string): string[] {
+  const all = nameTokens(team);
+  const own = all.filter((t) => !CLUB_WORDS.has(t));
+  return own.length > 0 ? own : all;
+}
+
 const EMPTY_COST: AiCost = { usd: 0, searches: 0, fetches: 0, inputTokens: 0, outputTokens: 0, seconds: 0 };
 
 interface Saved {
@@ -214,13 +224,15 @@ export class TopMatches {
     const isRM = /real madrid/i.test(m.home ?? '') && (vaultVenueId === null || /bernab/i.test(m.venue ?? '') || /bernab/i.test(vaultVenueId));
     const providerId = (isRM ? providers.find((p) => p.providerId === 'real-madrid') : undefined)?.providerId ?? providers.find((p) => p.providerId === 'manual')?.providerId ?? providers[0]?.providerId ?? null;
     const day = m.startsAtLocal?.slice(0, 10) ?? null;
-    const teams = new Set([...nameTokens(m.home ?? ''), ...nameTokens(m.away ?? '')]);
+    // Cada equipo tiene que salir en el nombre del evento con una palabra propia
+    // («Real», «FC», «Atlético»… no bastan: «Atlético de Madrid - Real Sociedad» no es «Real Madrid - FC Barcelona»).
+    const teams = [m.home, m.away].filter((t): t is string => Boolean(t)).map(teamTokens).filter((t) => t.length > 0);
     const event =
-      day && teams.size > 0
+      day && teams.length > 0
         ? [...store.events.values()].find((e) => {
             if (localDateTime(Date.parse(e.startsAt), this.opts.timeZone).slice(0, 10) !== day) return false;
-            const hits = nameTokens(e.name).filter((t) => teams.has(t)).length;
-            return hits >= Math.min(2, teams.size);
+            const words = new Set(nameTokens(e.name));
+            return teams.every((t) => t.some((w) => words.has(w)));
           })
         : undefined;
     return {

@@ -66,6 +66,10 @@ export function parseVaultDate(value: unknown, timeZone: string): number | null 
     Number(m[5] ?? 0),
     Number(m[6] ?? 0),
   );
+  // El 30 de febrero o las 25:00 no existen: no se mueven a otro día sin avisar.
+  const d = new Date(guess);
+  const same = [d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].every((v, i) => v === Number(m[i + 1] ?? 0));
+  if (!same) return null;
   const first = guess - timeZoneOffsetMs(guess, timeZone);
   const second = timeZoneOffsetMs(first, timeZone);
   return guess - second;

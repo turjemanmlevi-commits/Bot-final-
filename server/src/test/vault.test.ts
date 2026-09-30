@@ -5,14 +5,20 @@ import path from 'node:path';
 import { describe, it } from 'node:test';
 import { resolveLabel, resolvePreference } from '../domain/venue';
 import { withFixtureVault } from '../gates/fixtures';
-import { artifactForEvent, compileVault } from '../vault/compiler';
-import { parseLink, splitFrontmatter } from '../vault/markdown';
+import { artifactForEvent, compileVault, readVaultNotes } from '../vault/compiler';
+import { parseFrontmatter, parseLink, splitFrontmatter } from '../vault/markdown';
 import { parseVaultDate } from '../util/time';
 
 describe('markdown', () => {
   it('separa frontmatter con CRLF y BOM', () => {
     const r = splitFrontmatter('﻿---\r\ntype: venue\r\nname: X\r\n---\r\ncuerpo');
     assert.equal(r.yaml, 'type: venue\nname: X');
+    assert.equal(r.body, 'cuerpo');
+  });
+  it('un «---» sangrado dentro de un valor de varias líneas no cierra las propiedades', () => {
+    const r = splitFrontmatter('---\nname: |-\n  Concierto\n  ---\n  Gira\ntype: event\n---  \ncuerpo');
+    assert.equal(r.yaml, 'name: |-\n  Concierto\n  ---\n  Gira\ntype: event');
+    assert.deepEqual(parseFrontmatter(r.yaml ?? ''), { name: 'Concierto\n---\nGira', type: 'event' });
     assert.equal(r.body, 'cuerpo');
   });
   it('entiende enlaces de Obsidian', () => {
@@ -25,6 +31,10 @@ describe('markdown', () => {
     assert.equal(new Date(parseVaultDate('2026-10-09T10:00', 'Europe/Madrid') as number).toISOString(), '2026-10-09T08:00:00.000Z');
     assert.equal(new Date(parseVaultDate('2026-11-21T21:00', 'Europe/Madrid') as number).toISOString(), '2026-11-21T20:00:00.000Z');
     assert.equal(new Date(parseVaultDate('2026-10-09T10:00:00Z', 'Europe/Madrid') as number).toISOString(), '2026-10-09T10:00:00.000Z');
+  });
+  it('una fecha que no existe no se mueve a otro día: no es válida', () => {
+    for (const bad of ['2027-02-30T21:00', '2026-10-20T25:00', '2026-13-05', '2026-04-31', '2026-10-09T10:61']) assert.equal(parseVaultDate(bad, 'Europe/Madrid'), null, bad);
+    assert.equal(new Date(parseVaultDate('2028-02-29T21:00', 'Europe/Madrid') as number).toISOString(), '2028-02-29T20:00:00.000Z');
   });
 });
 
@@ -41,6 +51,27 @@ describe('compilador del vault', () => {
       assert.ok(ev);
       assert.equal(ev?.limits.semantics, 'PER_HOLDER');
       assert.ok(artifactForEvent(a.artifacts, ev as { id: string; venueId: string }));
+    });
+  });
+
+  it('las propiedades ya leídas se reutilizan por contenido sin mezclarse entre lecturas', async () => {
+    await withFixtureVault(async (dir) => {
+      const first = await readVaultNotes(dir, []);
+      const venue = first.find((n) => n.data.type === 'venue');
+      assert.ok(venue);
+      // Lo que haga el compilador con una lectura no se cuela en la siguiente.
+      (venue as { data: Record<string, unknown> }).data.name = 'Cambiado en memoria';
+      const second = await readVaultNotes(dir, []);
+      assert.equal(second.find((n) => n.file === venue?.file)?.data.name, 'Recinto Test');
+      assert.deepEqual(
+        second.map((n) => n.file),
+        first.map((n) => n.file),
+        'mismo orden',
+      );
+      // Una nota que cambia en disco se vuelve a interpretar.
+      await writeFile(path.join(dir, venue?.file ?? ''), '---\ntype: venue\nid: recinto-test\nname: Recinto Renombrado\nsource: x\n---\n');
+      const c = await compileVault({ vaultDir: dir, timeZone: 'Europe/Madrid' });
+      assert.equal(c.report.venues[0]?.name, 'Recinto Renombrado');
     });
   });
 

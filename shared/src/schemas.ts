@@ -9,13 +9,22 @@ import { CHALLENGE_TYPES, KILL_SCOPES, OPERATION_COMMANDS } from './domain';
 
 const isoDateTime = z.iso.datetime({ offset: true });
 
+/**
+ * ¿Parece un dato personal? Emails y 7 o más cifras seguidas (teléfonos,
+ * tarjetas, documentos) aunque vayan separadas por espacios, puntos, guiones,
+ * barras, paréntesis o «+»: «(612) 345-678», «4111/1111/1111/1111».
+ */
+export function looksPersonal(s: string): boolean {
+  return s.includes('@') || /\d{7,}/.test(s.replace(/[\s.\-_/()+]/g, ''));
+}
+
 /** Rechaza cosas que parecen datos personales: el titular se identifica con un alias. */
 const alias = z
   .string()
   .trim()
   .min(1)
   .max(60)
-  .refine((s) => !s.includes('@') && !/\d{7,}/.test(s.replace(/[\s.-]/g, '')), {
+  .refine((s) => !looksPersonal(s), {
     message: 'Usa un alias, nunca emails, teléfonos ni documentos',
   });
 
@@ -49,7 +58,13 @@ export const OperationConfigSchema = z.object({
 });
 
 export const AccountInputSchema = z.object({
-  label: z.string().trim().min(1).max(60),
+  // Sale en cada mensaje de Telegram: un nombre o alias, nunca un email o un teléfono.
+  label: z
+    .string()
+    .trim()
+    .min(1)
+    .max(60)
+    .refine((s) => !looksPersonal(s), { message: 'Usa un nombre o alias, nunca emails, teléfonos ni documentos' }),
   providerId: z.string().min(1),
   holderRef: alias,
   householdRef: alias.nullable().optional(),
@@ -70,6 +85,8 @@ export const CommandRequestSchema = z.object({
   command: z.enum(OPERATION_COMMANDS),
   value: z.number().int().optional(),
   reason: z.string().max(500).optional(),
+  /** La persona confirma una acción con consecuencias (cerrar con carritos por pagar). */
+  confirm: z.boolean().optional(),
 });
 
 export const HumanTaskResponseInputSchema = z.object({

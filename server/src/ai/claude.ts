@@ -16,6 +16,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import {
   bestVenueMatch,
+  isRealLocalDateTime,
   venueMentioned,
   type AiCost,
   type AiDetailsQuery,
@@ -291,10 +292,6 @@ const SYSTEM = [
 ].join('\n');
 
 // Validación de lo que llega (defensa extra aunque el esquema sea estricto).
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_RE = /^\d{2}:\d{2}$/;
-const LOCAL_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-
 function str(v: unknown, max = 300): string | null {
   return typeof v === 'string' && v.trim() !== '' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : null;
 }
@@ -325,9 +322,10 @@ const VISION_RE = /\.(png|jpe?g|webp|gif)(?:[?#]|$)/i;
 
 function localFrom(date: unknown, time: unknown): { local: string | null; timeTBA: boolean } {
   const d = str(date, 10);
-  if (!d || !DATE_RE.test(d)) return { local: null, timeTBA: true };
+  // Solo fechas y horas que existen (el 30 de febrero o las 25:00 no).
+  if (!d || !isRealLocalDateTime(`${d}T00:00`)) return { local: null, timeTBA: true };
   const t = str(time, 5);
-  if (t && TIME_RE.test(t) && Number(t.slice(0, 2)) < 24 && Number(t.slice(3)) < 60) return { local: `${d}T${t}`, timeTBA: false };
+  if (t && isRealLocalDateTime(`${d}T${t}`)) return { local: `${d}T${t}`, timeTBA: false };
   return { local: `${d}T00:00`, timeTBA: true };
 }
 
@@ -475,7 +473,7 @@ export class ClaudeControl {
           venue,
           city,
           url: httpUrl(e.url),
-          saleOpensLocal: sale && LOCAL_RE.test(sale) ? sale : null,
+          saleOpensLocal: sale && isRealLocalDateTime(sale) ? sale : null,
           sourceUrl: httpUrl(e.sourceUrl),
           vaultVenueId: (venue ? bestVenueMatch(venues, venue, city) : null) ?? venueMentioned(venues, `${venue ?? ''} ${name}`),
         });
@@ -483,7 +481,8 @@ export class ClaudeControl {
       events.sort((a, b) => (a.startsAtLocal ?? '9').localeCompare(b.startsAtLocal ?? '9'));
       return { providerId: q.providerId, events: events.slice(0, 40), notes: str(raw.notes, 600) ?? '', cost, cached: false };
     };
-    if (q.fresh) return load();
+    // «Buscar otra vez»: la respuesta nueva sustituye a la guardada (también la ven Telegram y las demás pantallas).
+    if (q.fresh) this.eventsCache.delete(key);
     return this.cached(this.eventsCache, key, load);
   }
 
@@ -533,16 +532,26 @@ export class ClaudeControl {
           opensAtLocal: str(x.opensAt, 20) ?? '',
           limit: typeof x.limit === 'number' && Number.isInteger(x.limit) && x.limit >= 1 && x.limit <= 50 ? x.limit : null,
         }))
-        .filter((x) => LOCAL_RE.test(x.opensAtLocal))
+        .filter((x) => isRealLocalDateTime(x.opensAtLocal))
         .sort((a, b) => a.opensAtLocal.localeCompare(b.opensAtLocal));
+      // Telegram y el dashboard eligen la fase por su nombre: si se repite, la siguiente lleva su fecha.
+      const saleNames = new Set<string>();
+      for (const x of sales) {
+        let name = x.name;
+        if (saleNames.has(name.toLowerCase())) name = `${x.name} (${x.opensAtLocal.slice(8, 10)}/${x.opensAtLocal.slice(5, 7)} ${x.opensAtLocal.slice(11, 16)})`;
+        for (let n = 2; saleNames.has(name.toLowerCase()); n++) name = `${x.name} (${n})`;
+        saleNames.add(name.toLowerCase());
+        x.name = name;
+      }
       const lim = (r.limit ?? {}) as Record<string, unknown>;
       const perPerson = typeof lim.perPerson === 'number' && Number.isInteger(lim.perPerson) && lim.perPerson >= 1 && lim.perPerson <= 50 ? lim.perPerson : null;
       const scope = typeof lim.scope === 'string' ? lim.scope : null;
       const quote = str(lim.quote, 300);
       const limitSourceRaw = httpUrl(lim.sourceUrl);
       const limitSource = limitSourceRaw && !isResale(limitSourceRaw) ? limitSourceRaw : null;
-      // «Oficial» solo si la frase sale de la web de venta (o del club/recinto que vende).
-      const official = Boolean(perPerson && quote && limitSource && sameSite(limitSource, [provider.url, url, q.url]));
+      // «Oficial» solo si la frase sale de la web del proveedor o del enlace que ha elegido una persona:
+      // el enlace que da el propio Claude no sirve de referencia (podría ser una noticia).
+      const official = Boolean(perPerson && quote && limitSource && sameSite(limitSource, [provider.url, q.url]));
       const price = r.price && typeof r.price === 'object' ? (r.price as Record<string, unknown>) : null;
       const zoneByKey = new Map(ourZones.map((z) => [z.toLowerCase(), z]));
       const layout = Array.isArray(r.layout)
@@ -590,7 +599,7 @@ export class ClaudeControl {
         cached: false,
       };
     };
-    if (q.fresh) return load();
+    if (q.fresh) this.detailsCache.delete(key);
     return this.cached(this.detailsCache, key, load);
   }
 
@@ -642,7 +651,7 @@ export class ClaudeControl {
         city: str(m.city, 80),
         country: str(m.country, 60),
         ticketUrl: httpUrl(m.ticketUrl),
-        saleOpensLocal: sale && LOCAL_RE.test(sale) ? sale : null,
+        saleOpensLocal: sale && isRealLocalDateTime(sale) ? sale : null,
       });
     }
     return { matches: matches.slice(0, q.max), notes: str(raw.notes, 400) ?? '', cost };
@@ -688,7 +697,7 @@ export class ClaudeControl {
       }
       return { imageUrl: image, points, notes: str(raw.notes, 400) ?? '', cost, cached: false };
     };
-    if (q.fresh) return load();
+    if (q.fresh) this.planCache.delete(key);
     return this.cached(this.planCache, key, load);
   }
 
@@ -951,9 +960,19 @@ function sameSite(url: string, officials: Array<string | null | undefined>): boo
   return officials.some((o) => {
     const oh = hostOf(o ?? null);
     if (!oh) return false;
-    const base = oh.split('.').slice(-2).join('.');
+    const base = registrableDomain(oh);
     return h === oh || h.endsWith(`.${base}`) || h === base;
   });
+}
+
+/** Sufijos de dos niveles habituales (co.uk, com.ar…): la web es el nivel siguiente. */
+const SECOND_LEVEL = /^(co|com|org|net|gov|gob|ac|edu|or|ne|go)$/;
+
+/** «tickets.realmadrid.com» → «realmadrid.com»; «www.eticketing.co.uk» → «eticketing.co.uk». */
+function registrableDomain(host: string): string {
+  const parts = host.split('.');
+  if (parts.length >= 3 && (parts.at(-1) ?? '').length === 2 && SECOND_LEVEL.test(parts.at(-2) ?? '')) return parts.slice(-3).join('.');
+  return parts.slice(-2).join('.');
 }
 
 /** Código técnico de un fallo de red (ECONNRESET, SELF_SIGNED_CERT_IN_CHAIN…) para el mensaje y la ventana negra. */

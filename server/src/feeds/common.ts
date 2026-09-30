@@ -137,6 +137,11 @@ export class TtlCache<T> {
     return value;
   }
 
+  /** Olvida una respuesta guardada (p. ej. al pedir una nueva con «Buscar otra vez»). */
+  delete(key: string): void {
+    this.map.delete(key);
+  }
+
   clear(): void {
     this.map.clear();
   }
