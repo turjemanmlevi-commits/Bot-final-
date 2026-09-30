@@ -1,15 +1,51 @@
 /**
- * Cambia variables de un archivo .env desde el propio servidor (el dashboard
+ * Lee y cambia el archivo .env desde el propio servidor (el dashboard
  * configura Telegram sin que haya que abrir el Bloc de notas).
  *
- * Conserva todo lo demás: comentarios, orden, BOM y saltos de línea (CRLF en
- * Windows). Si el archivo no existe se parte de la plantilla (.env.example).
+ * Lo entiende lo guarde como lo guarde el Bloc de notas (UTF-8 con o sin BOM,
+ * UTF-16 o ANSI) y, al cambiarlo, conserva todo lo demás: comentarios, orden y
+ * saltos de línea (CRLF en Windows); lo escribe en UTF-8 sin BOM. Si el
+ * archivo no existe se parte de la plantilla (.env.example).
  */
 
-import { existsSync } from 'node:fs';
+import { isUtf8 } from 'node:buffer';
+import { existsSync, readFileSync } from 'node:fs';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { parseEnv } from 'node:util';
 
 const KEY_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+/** Claves que se guardan desde el dashboard: si el .env tiene valor, manda sobre una variable de entorno con el mismo nombre. */
+export const DASHBOARD_KEYS: readonly string[] = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'ANTHROPIC_API_KEY', 'TICKETMASTER_API_KEY', 'FOOTBALL_DATA_TOKEN'];
+
+/** Texto del .env sea cual sea la codificación: UTF-16 (LE o BE), UTF-8 (sin el BOM) o ANSI. */
+export function decodeEnvText(raw: Buffer): string {
+  if (raw[0] === 0xff && raw[1] === 0xfe) return raw.subarray(2).toString('utf16le');
+  if (raw[0] === 0xfe && raw[1] === 0xff) return Buffer.from(raw.subarray(2, raw.length - (raw.length % 2))).swap16().toString('utf16le');
+  // «ANSI» del Bloc de notas (Windows-1252) no es UTF-8 válido: las letras con acento coinciden con latin1.
+  const text = isUtf8(raw) ? raw.toString('utf8') : raw.toString('latin1');
+  return text.startsWith('\uFEFF') ? text.slice(1) : text;
+}
+
+/**
+ * Carga el .env en `target` (process.env). Como process.loadEnvFile, no pisa
+ * las variables que ya existen, salvo las del dashboard (DASHBOARD_KEYS): ahí
+ * manda el .env si tiene valor, o la clave guardada en Ajustes se perdería en
+ * cada reinicio. Devuelve las variables del sistema que el .env ha tapado.
+ */
+export function loadEnvInto(file: string, target: NodeJS.ProcessEnv = process.env): string[] {
+  const shadowed: string[] = [];
+  for (const [key, value = ''] of Object.entries(parseEnv(decodeEnvText(readFileSync(file))))) {
+    const current = target[key];
+    if (current === undefined) target[key] = value;
+    else if (DASHBOARD_KEYS.includes(key) && value.trim() !== '' && current.trim() !== value.trim()) {
+      if (current.trim() !== '') shadowed.push(key);
+      target[key] = value;
+    }
+  }
+  return shadowed;
+}
 
 /**
  * Aplica `changes` al texto de un .env: sustituye la primera línea de cada
@@ -42,13 +78,29 @@ export function applyEnvChanges(text: string, changes: Record<string, string | n
   return bom + lines.join(eol) + eol;
 }
 
+/** Un guardado cada vez por archivo, aunque Telegram, Claude y las fuentes guarden a la vez. */
+const queues = new Map<string, Promise<void>>();
+let tmpSeq = 0;
+
 /** Guarda los cambios en el archivo (escritura atómica cuando se puede). */
-export async function updateEnvFile(file: string, changes: Record<string, string | null>, template?: string | null): Promise<void> {
+export function updateEnvFile(file: string, changes: Record<string, string | null>, template?: string | null): Promise<void> {
+  const key = path.resolve(file);
+  const run = (queues.get(key) ?? Promise.resolve()).then(() => writeEnvChanges(file, changes, template));
+  const tail = run.catch(() => undefined);
+  queues.set(key, tail);
+  void tail.then(() => {
+    if (queues.get(key) === tail) queues.delete(key);
+  });
+  return run;
+}
+
+async function writeEnvChanges(file: string, changes: Record<string, string | null>, template?: string | null): Promise<void> {
   let text = '';
-  if (existsSync(file)) text = await readFile(file, 'utf8');
-  else if (template && existsSync(template)) text = await readFile(template, 'utf8');
+  if (existsSync(file)) text = decodeEnvText(await readFile(file));
+  else if (template && existsSync(template)) text = decodeEnvText(await readFile(template));
   const out = applyEnvChanges(text, changes);
-  const tmp = `${file}.${process.pid}.tmp`;
+  // Nombre único: dos guardados no comparten el temporal.
+  const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
   try {
     await writeFile(tmp, out, 'utf8');
     await rename(tmp, file);

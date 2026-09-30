@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { rename } from 'node:fs/promises';
 import path from 'node:path';
 import { serve } from '@hono/node-server';
-import { ENV_FILE, ENV_TEMPLATE, env } from './env';
+import { ENV_FILE, ENV_LOAD, ENV_TEMPLATE, env } from './env';
 import { APP_VERSION, createApp } from './app';
 import { EventAssistant } from './ai/assistant';
 import { ClaudeControl } from './ai/claude';
@@ -16,7 +16,7 @@ import { TopMatches } from './ai/top';
 import { createHttpApp } from './http/app';
 import { FeedControl } from './feeds/control';
 import { EventWatcher } from './feeds/watcher';
-import { asideName, probePglite } from './store/dbcheck';
+import { asideName, claimDataDir, copyLegacyData, probePglite, releaseDataDir } from './store/dbcheck';
 import { MemoryDriver, PgliteDriver, PostgresDriver, type JournalDriver } from './store/drivers';
 import { TelegramControl } from './telegram/control';
 import { TelegramNotifier } from './telegram/telegram';
@@ -40,10 +40,10 @@ process.on('unhandledRejection', (reason) => {
   log.error('Error no controlado (el servidor sigue en marcha)', { error: reason instanceof Error ? reason.message : String(reason) });
 });
 
-/** ¿Ya hay algo escuchando en nuestro puerto? (otra ventana con la sala de control abierta) */
-async function portOwner(): Promise<'ours' | 'other' | null> {
+/** ¿Ya hay algo escuchando en ese puerto? (otra ventana con la sala de control abierta) */
+async function portOwner(port = env.port): Promise<'ours' | 'other' | null> {
   try {
-    const res = await fetch(`http://127.0.0.1:${env.port}/api/health`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
     const text = await res.text();
     return text.includes('"journal"') || text.includes('UNAUTHORIZED') ? 'ours' : 'other';
   } catch {
@@ -76,20 +76,61 @@ async function checkDatabase(): Promise<string | null> {
   return notice;
 }
 
+/** La sala ya está abierta en otra ventana: se usa esa. */
+function alreadyOpen(): never {
+  console.log('');
+  console.log(`  La sala de control YA está abierta en http://localhost:${env.port} (en otra ventana).`);
+  console.log('  Usa esa: no hace falta abrirla dos veces. Para reiniciarla, cierra su ventana negra y vuelve a abrir «Sala de control».');
+  console.log('');
+  process.exit(0);
+}
+
+const portBusy = () =>
+  `El puerto ${env.port} lo está usando otro programa. Ciérralo o pon otro puerto en el archivo .env (PORT=${env.port + 1}; si tu .env tiene PUBLIC_BASE_URL, cámbiale también el puerto).`;
+
 async function main(): Promise<void> {
-  const owner = await portOwner();
-  if (owner === 'ours') {
-    console.log('');
-    console.log(`  La sala de control YA está abierta en http://localhost:${env.port} (en otra ventana).`);
-    console.log('  Usa esa: no hace falta abrirla dos veces. Para reiniciarla, cierra su ventana negra y vuelve a abrir «Sala de control».');
-    console.log('');
-    process.exit(0);
+  if (ENV_LOAD.error) log.warn(`No se pudo leer el archivo ${ENV_FILE} (${ENV_LOAD.error}): se usan los valores por defecto.`);
+  if (ENV_LOAD.shadowed.length > 0) {
+    log.warn(
+      `Hay variables de entorno del sistema con otro valor para ${ENV_LOAD.shadowed.join(', ')}: se usa lo del archivo .env (lo que guardaste en Ajustes). Si no las usa otro programa, bórralas (en Windows: Inicio → «Editar las variables de entorno de esta cuenta»).`,
+    );
   }
+  const owner = await portOwner();
+  if (owner === 'ours') alreadyOpen();
   if (owner === 'other') {
-    log.error(`El puerto ${env.port} lo está usando otro programa. Ciérralo o pon otro puerto en el archivo .env (PORT=${env.port + 1}).`);
+    log.error(portBusy());
     process.exit(1);
   }
 
+  if (env.journalDriver === 'pglite') {
+    // Dos salas con la misma carpeta de datos se pisan, aunque estén en puertos distintos.
+    const busyPort = await claimDataDir(env.dataDir, env.port, {
+      isRoom: async (port) => (await portOwner(port)) === 'ours',
+      onWait: () => console.log('  Otra ventana está abriendo la sala de control con estos mismos datos: esperando a que termine…'),
+    });
+    if (busyPort === env.port) alreadyOpen();
+    if (busyPort !== null) {
+      log.error(
+        `Ya hay una sala de control abierta con estos mismos datos en http://localhost:${busyPort} (en otra ventana). Usa esa, o ciérrala antes de abrir esta: dos a la vez se pisan los datos.`,
+      );
+      process.exit(1);
+    }
+    process.on('exit', () => releaseDataDir(env.dataDir));
+  }
+
+  // Proyecto en OneDrive actualizado desde una versión anterior: sus datos se copian a la carpeta nueva.
+  let legacy: Awaited<ReturnType<typeof copyLegacyData>> = null;
+  if (env.journalDriver === 'pglite' && env.legacyDataDir) {
+    try {
+      legacy = await copyLegacyData(env.legacyDataDir, env.dataDir);
+    } catch (err) {
+      log.error(
+        `No se pudieron copiar tus datos de la versión anterior (${(err as Error).message}). Siguen en ${env.legacyDataDir}, sin tocar. Cierra las demás ventanas negras de la sala de control, comprueba que OneDrive está conectado (o páusalo un momento) y vuelve a abrir «Sala de control». Si no necesitas esos datos, cámbiale el nombre a esa carpeta y se empezará con una base de datos nueva.`,
+      );
+      process.exit(1);
+    }
+    if (legacy) log.warn(legacy.notice);
+  }
   const dbNotice = await checkDatabase();
   const notifier = env.telegramToken
     ? new TelegramNotifier({ token: env.telegramToken, chatId: env.telegramChatId, apiBase: env.telegramApiBase, timeZone: env.timeZone })
@@ -114,6 +155,10 @@ async function main(): Promise<void> {
     log.warn('Se arranca SIN guardar (solo en memoria): funciona, pero al cerrar esta ventana se pierden cuentas y operaciones.');
     app = await createApp({ ...appOptions, driver: new MemoryDriver() });
     inMemory = true;
+  }
+  if (legacy) {
+    const title = { copied: 'Datos traídos de la versión anterior', unreadable: 'Base de datos nueva', unused: 'Datos de la versión anterior sin usar' }[legacy.state];
+    app.runtime.ctx.alerts.raise({ kind: 'RECOVERY_REQUIRED', severity: legacy.state === 'copied' ? 'INFO' : 'WARNING', title, message: legacy.notice, dedupeKey: 'db:legacy' });
   }
   if (dbNotice) {
     app.runtime.ctx.alerts.raise({ kind: 'RECOVERY_REQUIRED', severity: 'WARNING', title: 'Base de datos nueva', message: dbNotice, dedupeKey: 'db:aside' });
@@ -171,6 +216,9 @@ async function main(): Promise<void> {
     console.log(`  API         ${url}/api/state`);
     console.log(`  Vault       ${env.vaultDir}${existsSync(env.vaultDir) ? '' : '  (NO EXISTE)'}`);
     console.log(
+      `  .env        ${ENV_FILE}${!existsSync(ENV_FILE) ? '  (no existe: valores por defecto)' : /onedrive/i.test(ENV_FILE) ? '  (en OneDrive: se sincroniza con tu nube, claves incluidas)' : ''}`,
+    );
+    console.log(
       `  Journal     ${inMemory ? 'SOLO EN MEMORIA (no se guarda: lee el aviso de arriba)' : `${env.journalDriver}${env.journalDriver === 'pglite' ? ` → ${path.join(env.dataDir, 'pglite')}` : ''}`}`,
     );
     console.log(
@@ -187,12 +235,16 @@ async function main(): Promise<void> {
   });
 
   server.on('error', (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE') {
-      log.error(`El puerto ${env.port} ya está en uso: ¿hay otro servidor abierto? Ciérralo (Ctrl+C en su terminal) o arranca con PORT=${env.port + 1}.`);
-    } else {
-      log.error('Error del servidor HTTP', { error: err.message });
-    }
-    void app.stop().finally(() => process.exit(1));
+    void (async () => {
+      const inUse = err.code === 'EADDRINUSE';
+      // Dos arranques casi a la vez (doble clic): si el puerto lo ganó la propia sala, se usa esa.
+      const ours = inUse && (await portOwner()) === 'ours';
+      if (!inUse) log.error('Error del servidor HTTP', { error: err.message });
+      else if (!ours) log.error(portBusy());
+      await app.stop().catch(() => undefined);
+      if (ours) alreadyOpen();
+      process.exit(1);
+    })();
   });
 
   let closing = false;

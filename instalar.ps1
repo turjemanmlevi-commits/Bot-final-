@@ -7,7 +7,9 @@
 #
 #  1) Instala Node.js LTS si falta (winget).
 #  2) Descarga el proyecto en "Escritorio\bot final" SIN borrar nada tuyo:
-#     conserva .env (tu configuracion) y data\ (cuentas, operaciones...).
+#     conserva .env (tu configuracion y tus claves) y tus datos (cuentas,
+#     operaciones...): data\ o, si la carpeta esta en OneDrive,
+#     %LOCALAPPDATA%\TicketOrchestrator\data (ahi no los toca).
 #  3) Crea el acceso directo "Sala de control" en el Escritorio.
 #  4) Opcional: instala Obsidian.
 #  5) Cierra la sala de control si estaba abierta y la arranca en esta misma

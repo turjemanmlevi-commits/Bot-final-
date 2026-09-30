@@ -252,8 +252,8 @@ function TelegramCard() {
         ) : null}
       </div>
       <div className="small muted">
-        Es la línea larga que va debajo de «Use this token to access the HTTP API». Se comprueba con Telegram y se guarda solo en este ordenador (archivo <code>.env</code>, que
-        no se sube a ningún sitio). No hace falta reiniciar.
+        Es la línea larga que va debajo de «Use this token to access the HTTP API». Se comprueba con Telegram y se guarda en el archivo <code>.env</code> de la carpeta del
+        proyecto; si esa carpeta está en OneDrive (el Escritorio suele estarlo), OneDrive también sube ese archivo a tu nube. No hace falta reiniciar.
       </div>
     </div>
   );
@@ -504,8 +504,8 @@ function TelegramCard() {
             alertas y tareas.
           </p>
           <p style={{ margin: 0 }}>
-            <b>Seguridad:</b> el token es secreto; solo está en el archivo <code>.env</code> de este ordenador. Si se filtra, en @BotFather usa <code>/revoke</code> y pega aquí el
-            nuevo. Otros chats que escriban al bot solo reciben su número: no ven nada ni pueden tocar nada.
+            <b>Seguridad:</b> el token es secreto; está en el archivo <code>.env</code> de la carpeta del proyecto (y en tu nube, si esa carpeta está en OneDrive). Si se
+            filtra, en @BotFather usa <code>/revoke</code> y pega aquí el nuevo. Otros chats que escriban al bot solo reciben su número: no ven nada ni pueden tocar nada.
           </p>
         </div>
       </div>
@@ -777,8 +777,8 @@ function ClaudeCard() {
                 ) : null}
               </div>
               <div className="small muted">
-                Se comprueba al momento y se guarda solo en este ordenador (archivo .env, que no se sube a ningún sitio). Nunca la pegues en un chat: si lo has hecho,
-                bórrala en platform.claude.com y crea otra.
+                Se comprueba al momento y se guarda en el archivo .env de la carpeta del proyecto; si esa carpeta está en OneDrive (el Escritorio suele estarlo), OneDrive
+                también sube ese archivo a tu nube. Nunca la pegues en un chat: si lo has hecho, bórrala en platform.claude.com y crea otra.
               </div>
             </>
           )}
@@ -919,7 +919,10 @@ function FeedBlock({ feed, status, configurable }: { feed: FeedId; status: FeedS
           </button>
         ) : null}
       </div>
-      <div className="small muted">Se comprueba al momento y se guarda solo en este ordenador (archivo .env, que no se sube a ningún sitio). No hace falta reiniciar.</div>
+      <div className="small muted">
+        Se comprueba al momento y se guarda en el archivo .env de la carpeta del proyecto; si esa carpeta está en OneDrive (el Escritorio suele estarlo), OneDrive también
+        sube ese archivo a tu nube. No hace falta reiniciar.
+      </div>
     </div>
   );
 
