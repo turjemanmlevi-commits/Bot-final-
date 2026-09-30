@@ -1,0 +1,33 @@
+filters:
+  and:
+    - 'note.type == "section"'
+views:
+  - type: table
+    name: Todas las secciones
+    order:
+      - file.name
+      - note.venue
+      - note.zone
+      - note.kind
+      - note.level
+      - note.capacity
+      - note.view
+      - note.distance
+      - note.obstructed
+      - note.accessible
+      - note.confidence
+  - type: table
+    name: Revisar (confianza baja o marcas)
+    filters:
+      or:
+        - 'note.confidence < 0.7'
+        - 'note.obstructed == true'
+        - 'note.accessible == true'
+    order:
+      - file.name
+      - note.venue
+      - note.zone
+      - note.confidence
+      - note.obstructed
+      - note.accessible
+      - note.verifiedAt

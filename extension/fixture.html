@@ -1,0 +1,36 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Prueba local · No reserva entradas</title>
+<style>body{font:16px/1.5 system-ui;max-width:760px;margin:40px auto;padding:0 20px;color:#25382e}section{border:1px solid #a9b5ac;padding:20px;margin:20px 0}label{display:block;margin:12px 0}button,input,select{font:inherit;padding:8px}button{cursor:pointer}#challenge{position:fixed;inset:12%;background:white;border:4px solid #b36219;padding:30px;z-index:2}[hidden]{display:none!important}small{color:#58655d}</style></head>
+<body><h1>Prueba local de carrito</h1><p><strong>Simulación: esta página no reserva ni vende entradas reales.</strong></p><p>Evento de prueba: <code id="event-label"></code></p>
+<section data-ticket-fixture="inventory"><h2>Inventario simulado</h2>
+<div data-offer-ref="fixture-pista" data-section="Pista" data-unit-price="12500" data-qty-max="4"><label><input type="radio" name="offer" value="fixture-pista"> Pista · 125,00 € · hasta 4 entradas</label></div>
+<label>Cantidad <input data-ticket-quantity type="number" value="1" min="1" max="4"></label><button data-ticket-add type="button">Añadir al carrito de prueba</button></section>
+<section data-ticket-fixture="cart" data-cart-ready="true" data-cart-ref="fixture-cart"><h2>Carrito simulado</h2><p id="empty">El carrito está vacío.</p><div id="cart-items"></div></section>
+<section><h2>Comprobaciones controladas</h2><label>Resultado del botón <select id="behavior"><option value="success">Carrito correcto</option><option value="noop">El botón no hace nada</option><option value="wrong">Cantidad incorrecta</option><option value="challenge">Reto humano simulado antes de confirmar</option></select></label>
+<p>Veces que se pulsó añadir: <b id="clicks">0</b></p><button id="reset" type="button">Vaciar carrito de prueba</button><p><small>Si el resultado es incierto, el bot debe detenerse para revisar. No debe volver a pulsar automáticamente ni anunciar éxito.</small></p></section>
+<section id="challenge" data-ticket-challenge="captcha" hidden><h2>Intervención humana simulada</h2><p>No es un CAPTCHA real. Pulsa el botón tú para terminar este paso de prueba.</p><button id="solve" type="button">He terminado la comprobación de prueba</button></section>
+<script>
+const eventRef = new URL(location.href).searchParams.get('eventRef') || 'fixture-event';
+document.getElementById('event-label').textContent = eventRef;
+document.querySelectorAll('[data-ticket-fixture]').forEach((root) => root.setAttribute('data-event-ref', eventRef));
+let deferred = null, clicks = 0;
+function commit(qty) {
+  const row = document.createElement('p');
+  Object.entries({'data-cart-item':'','data-offer-ref':'fixture-pista','data-section':'Pista','data-unit-price':'12500','data-qty':String(qty)}).forEach(([key,value]) => row.setAttribute(key,value));
+  row.textContent = qty + ' × Pista · 125,00 € por entrada';
+  document.getElementById('cart-items').replaceChildren(row);
+  document.getElementById('empty').hidden = true;
+  document.querySelector('[data-ticket-fixture="cart"]').setAttribute('data-expires-at',new Date(Date.now()+600000).toISOString());
+}
+document.querySelector('[data-ticket-add]').onclick = () => {
+  if (!document.querySelector('input[name="offer"]:checked')) return;
+  const qty = Number(document.querySelector('[data-ticket-quantity]').value);
+  if (!Number.isInteger(qty) || qty < 1 || qty > 4) return;
+  document.getElementById('clicks').textContent = String(++clicks);
+  const behavior = document.getElementById('behavior').value;
+  if (behavior === 'noop') return;
+  if (behavior === 'challenge') { deferred=()=>commit(qty); document.getElementById('challenge').hidden=false; return; }
+  setTimeout(()=>commit(behavior === 'wrong' ? Math.max(1,qty-1) : qty),250);
+};
+document.getElementById('solve').onclick = () => { document.getElementById('challenge').hidden=true; const done=deferred; deferred=null; if(done) done(); };
+document.getElementById('reset').onclick = () => { document.getElementById('cart-items').replaceChildren(); document.getElementById('empty').hidden=false; };
+</script></body></html>

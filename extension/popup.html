@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><title>Conectar pestaña</title><link rel="stylesheet" href="popup.css"></head>
+<body><main><h1>Conecta esta pestaña</h1><p>Abre el evento en la cuenta que vas a usar. Copia aquí el código de conexión de la sala.</p>
+<form id="pair"><label for="code">Código de conexión</label><input id="code" autocomplete="off" required placeholder="Código de la sala"><button id="connect" type="submit">Conectar esta cuenta y evento</button></form>
+<p id="status" role="status" aria-live="polite">Comprobando conexión…</p><button id="disconnect" type="button" hidden>Desconectar esta pestaña</button>
+<p class="note">Si aparece una comprobación humana, resuélvela en esta pestaña. La extensión continúa al terminar. El pago siempre lo haces tú.</p></main><script src="popup.js"></script></body></html>
