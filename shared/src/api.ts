@@ -71,6 +71,11 @@ export interface CatalogEvent extends TicketEvent {
    * cuentas a la vez, una cada una), o null = hasta el límite oficial.
    */
   perAccountQty: number | null;
+  /**
+   * Cuentas preparadas para comprar este evento (hasta 10): la operación que se
+   * crea desde el evento empieza con ellas marcadas. Vacía = se eligen en la operación.
+   */
+  accountIds: Id[];
   /** Cómo está estructurada la venta de este evento (zonas de la web, precio y zona de nuestro plano). */
   saleZones: Array<{ zone: string; sections: string[]; standing: boolean; price: string | null; venueZone: string | null }>;
   /** Plano oficial (imagen tal cual se ve al comprar) y dónde está cada zona en él, o null. */

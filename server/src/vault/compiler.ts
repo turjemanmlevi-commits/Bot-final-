@@ -637,7 +637,7 @@ class Compiler {
   }
 
   /** Evento elegido de una fuente oficial y vigilancia (propiedades opcionales). */
-  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap' | 'perAccountQty' | 'saleZones'> {
+  private official(note: VaultNote): Pick<CatalogEvent, 'officialFeed' | 'officialId' | 'officialSale' | 'watchDaysBefore' | 'preferredTargets' | 'seatMap' | 'perAccountQty' | 'accountIds' | 'saleZones'> {
     const feedRaw = asString(note.data.officialFeed);
     const idRaw = asString(note.data.officialId) ?? (typeof note.data.officialId === 'number' ? String(note.data.officialId) : null);
     let officialFeed: FeedId | null = null;
@@ -659,6 +659,7 @@ class Compiler {
       preferredTargets: asStringList(note.data.preferredTargets).slice(0, 30),
       seatMap: this.seatMap(note),
       perAccountQty: this.perAccountQty(note),
+      accountIds: this.accountIds(note),
       saleZones: asStringList(note.data.saleZones)
         .slice(0, 60)
         .map(parseSaleZone)
@@ -675,6 +676,13 @@ class Compiler {
       return null;
     }
     return n;
+  }
+
+  /** Cuentas preparadas para comprar el evento (accountIds: ids de cuenta, hasta 10, sin repetir). */
+  private accountIds(note: VaultNote): string[] {
+    const ids = [...new Set(asStringList(note.data.accountIds).filter((id) => /^[A-Za-z0-9_-]{1,80}$/.test(id)))];
+    if (ids.length > 10) this.warn(note.file, '`accountIds`: como mucho 10 cuentas por compra; se usan las 10 primeras');
+    return ids.slice(0, 10);
   }
 
   /** Plano oficial (planImage) y dónde está cada zona en él (planPoints: «Zona @ x,y»). */

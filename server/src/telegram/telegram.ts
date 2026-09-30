@@ -16,7 +16,7 @@
 
 import http from 'node:http';
 import https from 'node:https';
-import type { Account, Alert, HumanTask, TelegramChatSeen, TelegramStatus } from '@to/shared';
+import type { Account, AiStatus, Alert, Cart, HumanTask, TelegramChatSeen, TelegramStatus } from '@to/shared';
 import { formatMoney, OPERATION_STATE_LABEL } from '@to/shared';
 import type { Notifier } from '../runtime/context';
 import type { Runtime } from '../runtime/runtime';
@@ -61,6 +61,23 @@ const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replac
 const ICON: Record<Alert['severity'], string> = { INFO: 'ℹ️', WARNING: '⚠️', CRITICAL: '🚨' };
 const ALWAYS_SEND = new Set<Alert['kind']>(['CART_SECURED', 'CART_CONFIRMED']);
 
+/**
+ * Enlace que se puede poner en un botón: http(s) y un servidor público. Telegram
+ * rechaza el mensaje entero si un botón apunta a localhost, a una IP o a un nombre
+ * sin punto (el carrito del simulador en el PC): esos van como texto.
+ */
+export function buttonUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/\.$/, '');
+    const isPublic = host.includes('.') && !/(^|\.)(localhost|local|internal|lan|home\.arpa)$/.test(host) && !/^[\d.]+$/.test(host) && !host.includes(':');
+    return (u.protocol === 'https:' || u.protocol === 'http:') && isPublic ? u.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Cómo responder rápido (/ayuda, /start y bienvenida). */
 export const HELP =
   '<b>Cómo ir rápido</b>\n' +
@@ -73,7 +90,7 @@ export const HELP =
   '/evento — crear un evento con Claude: web de venta → evento → dónde sentaros (chat principal)\n' +
   '/top — los grandes partidos del año (Clásico, Champions, finales…), listos para preparar (chat principal)\n' +
   '/tareas — tus tareas abiertas, con botones\n' +
-  '/estado — cómo va cada operación\n' +
+  '/estado — cómo va cada operación y si Claude está conectado\n' +
   '/pausa — pausar lo que está en marcha (chat principal)\n' +
   '/parar_todo — parar todo al instante (chat principal)\n' +
   '/id — número de este chat';
@@ -83,7 +100,7 @@ export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: 'evento', description: 'Crear un evento con Claude (chat principal)' },
   { command: 'top', description: 'Grandes partidos del año (chat principal)' },
   { command: 'tareas', description: 'Tus tareas abiertas, con botones' },
-  { command: 'estado', description: 'Cómo va cada operación' },
+  { command: 'estado', description: 'Cómo va cada operación y si Claude está conectado' },
   { command: 'ayuda', description: 'Cómo responder rápido' },
   { command: 'pausa', description: 'Pausar lo que está en marcha (chat principal)' },
   { command: 'parar_todo', description: 'Parar todo al instante (chat principal)' },
@@ -294,6 +311,14 @@ function chatName(chat: TgChat): string {
   const full = [chat.first_name, chat.last_name].filter(Boolean).join(' ');
   if (full && chat.username) return `${full} (@${chat.username})`;
   return full || (chat.username ? `@${chat.username}` : `chat ${chat.id}`);
+}
+
+/** Línea de /estado: si el bot tiene Claude conectado (la misma clave que el dashboard). */
+export function claudeLine(ai: AiStatus | null): string {
+  if (!ai?.configured) return '🤖 <b>Claude: sin conectar.</b> /evento y /top no funcionan hasta que pongas la clave en el dashboard: <b>Ajustes → Claude (IA)</b>.';
+  if (ai.ok === false) return `🤖 <b>Claude: la clave no funciona.</b> ${esc(ai.detail)}`;
+  const spent = ai.spentUsd > 0 ? ` · gastado ${ai.spentUsd.toFixed(2).replace('.', ',')} $ desde que se abrió la sala` : '';
+  return `🤖 <b>Claude: conectado</b>${ai.ok === null ? ' (aún sin usar)' : ''} · ${esc(ai.model || 'modelo por defecto')}${spent}. Lo usan /evento y /top.`;
 }
 
 /** «/estado ahora» → «/estado» (sin el @nombre_del_bot de los grupos). */
@@ -663,17 +688,54 @@ export class TelegramNotifier implements Notifier {
   notifyAlert(alert: Alert): void {
     if (alert.severity === 'INFO' && !ALWAYS_SEND.has(alert.kind)) return;
     if (alert.kind === 'HUMAN_TASK') return; // la tarea llega con sus propios botones
-    const text = `${ICON[alert.severity]} <b>${esc(alert.title)}</b>\n${esc(alert.message)}`;
+    let text = `${ICON[alert.severity]} <b>${esc(alert.title)}</b>\n${esc(alert.message)}`;
     // Carrito a punto de caducar (o tiempo agotado): se responde con un toque.
     const cart = alert.cartId ? this.runtime?.store.carts.get(alert.cartId) : undefined;
-    const keyboard: Button[][] | undefined =
+    let keyboard: Button[][] | undefined =
       alert.kind === 'CART_EXPIRING' && cart && (cart.state === 'ACTIVE' || cart.state === 'REVIEW_REQUIRED')
         ? [
             [{ text: '💳 Ya lo he pagado', callback_data: `p:${cart.id}` }],
             [5, 10, 15].map((m) => ({ text: `⏱ Quedan ${m} min`, callback_data: `x:${cart.id}:${m}` })),
           ]
         : undefined;
+    // Entradas en el carrito: el enlace para verlas y pagarlas.
+    if (alert.kind === 'CART_CONFIRMED' || alert.kind === 'CART_SECURED') {
+      const links = this.cartLinks(alert);
+      text += links.text;
+      if (links.keyboard.length > 0) keyboard = links.keyboard;
+    }
     for (const chat of this.chatsFor(alert.accountId)) this.send(chat, text, keyboard);
+  }
+
+  /**
+   * Enlaces de los carritos de un aviso: el del carrito («N entradas en carrito») o los
+   * de todos los carritos vivos de la operación («¡entradas aseguradas!»). En la web
+   * oficial es la página de compra del evento; en el simulador, su carrito.
+   */
+  private cartLinks(alert: Alert): { text: string; keyboard: Button[][] } {
+    const store = this.runtime?.store;
+    if (!store) return { text: '', keyboard: [] };
+    const alive = (c: Cart) => c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED';
+    const carts = alert.cartId
+      ? [store.carts.get(alert.cartId)].filter((c): c is Cart => c !== undefined && alive(c))
+      : [...store.carts.values()].filter((c) => c.operationId === alert.operationId && alive(c));
+    const withUrl = carts.filter((c) => c.openUrl);
+    if (withUrl.length === 0) return { text: '', keyboard: [] };
+    const official = withUrl.every((c) => c.confirmation === 'HUMAN');
+    const label = (c: Cart) => store.accounts.get(c.accountId)?.label ?? c.accountId;
+    const urls = [...new Set(withUrl.map((c) => c.openUrl as string))];
+    // Una sola dirección (la página oficial del evento, igual para todas las cuentas): un botón.
+    const entries =
+      urls.length === 1 ? [{ name: null as string | null, url: urls[0] as string }] : withUrl.slice(0, 10).map((c) => ({ name: label(c), url: c.openUrl as string }));
+    const keyboard: Button[][] = [];
+    const plain: string[] = [];
+    for (const e of entries) {
+      const url = buttonUrl(e.url);
+      const title = official ? `🛒 Ir al carrito en la web oficial${e.name ? ` · ${e.name}` : ''}` : `🛒 Abrir el carrito${e.name ? ` · ${e.name}` : ''}`;
+      if (url) keyboard.push([{ text: title, url }]);
+      else plain.push(`🛒 ${e.name ? `${esc(e.name)}: ` : 'Carrito: '}${esc(e.url)}`);
+    }
+    return { text: plain.length > 0 ? `\n\n${plain.join('\n')}` : '', keyboard };
   }
 
   private clock(iso: string): string {
@@ -1015,6 +1077,8 @@ export class TelegramNotifier implements Notifier {
       if (cmd === '/top') await this.flow.startTop(chat);
       else await this.flow.start(chat);
     } else if (cmd === '/estado') {
+      // En el chat principal, primero si este bot tiene Claude (lo usan /evento y /top).
+      if (main) this.send(chat, claudeLine(rt.ctx.aiStatus?.() ?? null));
       const ops = rt.ctx.ops.summaries().filter((o) => !['CLOSED', 'CANCELLED', 'ENDED'].includes(o.state));
       const lines = ops.map((o) => `• <b>${esc(o.name)}</b>: ${OPERATION_STATE_LABEL[o.state]} · ${o.cartedQty}/${o.requestedQty} en carrito`);
       if (lines.length === 0) this.send(chat, 'No hay operaciones activas.');

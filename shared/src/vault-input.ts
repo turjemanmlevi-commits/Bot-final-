@@ -79,6 +79,12 @@ export const EventNoteInputSchema = z
     saleZones: z.array(z.string().trim().min(1).max(400)).max(60).optional(),
     /** Entradas por cuenta en la compra (1 en los grandes partidos; null = hasta el límite oficial). */
     perAccountQty: z.number().int().min(1).max(20).nullable().optional(),
+    /** Cuentas preparadas para comprar este evento (la operación empieza con ellas marcadas). */
+    accountIds: z
+      .array(z.string().trim().regex(/^[A-Za-z0-9_-]{1,80}$/, 'Cuenta no válida'))
+      .max(10, 'Como mucho 10 cuentas por compra')
+      .refine((ids) => new Set(ids).size === ids.length, 'Hay una cuenta repetida')
+      .optional(),
     /** Imagen del plano oficial (tal cual se ve al comprar) y dónde está cada zona en ella. */
     planImage: z.string().trim().max(1000).regex(/^https:\/\/\S+$/i, 'La imagen del plano tiene que ser un enlace https://').nullable().optional(),
     planPoints: z

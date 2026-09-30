@@ -355,6 +355,14 @@ export function EventsPage() {
                           <dd className="small">{e.perAccountQty} entrada{e.perAccountQty === 1 ? '' : 's'}</dd>
                         </>
                       ) : null}
+                      {e.accountIds.length > 0 ? (
+                        <>
+                          <dt>Cuentas</dt>
+                          <dd className="small">
+                            {e.accountIds.map((aid) => s.accounts[aid]?.label ?? 'cuenta borrada').join(', ')}
+                          </dd>
+                        </>
+                      ) : null}
                       {e.closedSectionIds.length ? (
                         <>
                           <dt>Cerradas</dt>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { LIMIT_SEMANTICS_LABEL, perAccountRequestedQty, PREFERENCE_COLORS, type Account, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
+import { LIMIT_SEMANTICS_LABEL, perAccountRequestedQty, PREFERENCE_COLORS, type Account, type CatalogEvent, type EventLimits, type LimitSemantics, type OperationConfig } from '@to/shared';
 import { Icon } from '../components/Icon';
 import { VenueMap } from '../components/VenueMap';
 import { Callout, Card, Empty, Pill } from '../components/ui';
@@ -203,6 +203,18 @@ export function OperationFormPage() {
       .filter((a) => a.providerId === providerId && a.enabled)
       .map((a) => a.id)
       .slice(0, 10);
+  /**
+   * Cuentas con las que empieza la compra de un evento: las preparadas en el evento
+   * (6 · Con qué cuentas se compra) o, en un gran partido (1 por cuenta), todas las de esa web.
+   */
+  const eventAccounts = (ev: CatalogEvent, fallback: string[]) => {
+    const prepared = ev.accountIds.filter((aid) => {
+      const a = s.accounts[aid];
+      return a?.providerId === ev.providerId && a.enabled;
+    });
+    if (prepared.length > 0) return prepared.slice(0, 10);
+    return ev.perAccountQty ? allAccountsOf(ev.providerId) : fallback;
+  };
 
   // Evento por defecto: el de la URL o el primero verificado.
   useEffect(() => {
@@ -217,8 +229,8 @@ export function OperationFormPage() {
         name: x.name || ev.name,
         // Dónde queréis las entradas, elegido al crear el evento (1ª, 2ª y 3ª preferencia).
         targets: x.targets.length > 0 ? x.targets : (ev.preferredTargets ?? []),
-        // Gran partido (1 por cuenta): van todas las cuentas de esa web.
-        accountIds: ev.perAccountQty && x.accountIds.length === 0 ? allAccountsOf(ev.providerId) : x.accountIds,
+        // Las cuentas preparadas en el evento; en un gran partido (1 por cuenta), todas las de esa web.
+        accountIds: x.accountIds.length === 0 ? eventAccounts(ev, x.accountIds) : x.accountIds,
         t0: ev.onSaleAt && Date.parse(ev.onSaleAt) > Date.now() ? toLocalInput(ev.onSaleAt) : x.t0,
         requestedQty: String(Math.min(Number(x.requestedQty), ev.limits.perOperation || Number(x.requestedQty))),
         // Las colas de las webs reales son largas: la ventana por defecto se amplía.
@@ -256,11 +268,7 @@ export function OperationFormPage() {
         ...x,
         eventId,
         targets: next?.preferredTargets ?? [],
-        accountIds: next
-          ? next.perAccountQty
-            ? allAccountsOf(next.providerId)
-            : x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId)
-          : [],
+        accountIds: next ? eventAccounts(next, x.accountIds.filter((aid) => s.accounts[aid]?.providerId === next.providerId)) : [],
         name: nameFollowsEvent ? (next?.name ?? '') : x.name,
         t0: next?.onSaleAt && Date.parse(next.onSaleAt) > Date.now() ? toLocalInput(next.onSaleAt) : x.t0,
         requestedQty: next && Number.isFinite(qty) && qty > 0 && next.limits.perOperation > 0 ? String(Math.min(qty, next.limits.perOperation)) : x.requestedQty,
@@ -633,6 +641,11 @@ export function OperationFormPage() {
 
         <div className="form-section">
           <h3 className="sign">5 · Con qué cuentas (máx. 10)</h3>
+          {!id && event && event.accountIds.length > 0 ? (
+            <div className="small muted" style={{ marginBottom: 10 }}>
+              Empiezan marcadas las {event.accountIds.length} cuenta{event.accountIds.length === 1 ? '' : 's'} preparada{event.accountIds.length === 1 ? '' : 's'} en el evento.
+            </div>
+          ) : null}
           {accountsFull && accounts.some((a) => a.enabled && !f.accountIds.includes(a.id)) ? (
             <div className="small" role="status" style={{ color: 'var(--warning-ink)', marginBottom: 10 }}>
               Ya hay 10 cuentas elegidas, el máximo por operación: desmarca una para elegir otra.

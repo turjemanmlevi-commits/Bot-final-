@@ -124,6 +124,8 @@ interface FormState {
   plan: PlanState | null;
   /** Entradas por cuenta en la compra ('' = hasta el límite oficial; '1' en los grandes partidos). */
   perAccountQty: string;
+  /** Cuentas preparadas para comprar (la operación empieza con ellas marcadas). */
+  accountIds: string[];
   /** Cómo está estructurada la venta de este evento (de Claude). */
   saleZones: AiSaleZone[];
 }
@@ -166,6 +168,7 @@ const FIELDS: readonly Field[] = [
   'planImage',
   'planPoints',
   'perAccountQty',
+  'accountIds',
   'saleZones',
 ];
 
@@ -265,6 +268,7 @@ function blank(providerId: string): FormState {
     seats: [],
     plan: null,
     perAccountQty: '',
+    accountIds: [],
     saleZones: [],
   };
 }
@@ -295,6 +299,7 @@ function fromEvent(e: CatalogEvent): FormState {
     seats: e.preferredTargets ?? [],
     plan: e.seatMap ?? null,
     perAccountQty: e.perAccountQty ? String(e.perAccountQty) : '',
+    accountIds: e.accountIds ?? [],
     saleZones: e.saleZones ?? [],
   };
 }
@@ -1226,6 +1231,8 @@ export function EventForm({
       watchDaysBefore: Number(f.watchDaysBefore) || 0,
       preferredTargets: f.seats,
       perAccountQty: f.perAccountQty === '' ? null : Number(f.perAccountQty),
+      // Solo cuentas de la web elegida (si se cambia de web, las de la anterior no valen).
+      accountIds: f.accountIds.filter((aid) => s.accounts[aid]?.providerId === f.providerId),
       saleZones: aiSaleZonesText(f.saleZones),
       planImage: f.plan?.image ?? null,
       planPoints: f.plan?.points ?? [],
@@ -1905,6 +1912,15 @@ export function EventForm({
         )}
       </div>
 
+      <BuyerAccounts
+        providerId={f.providerId}
+        providerName={provider?.name ?? null}
+        simulated={provider?.mode === 'SIMULATED'}
+        value={f.accountIds}
+        onChange={(v) => set('accountIds', v)}
+        error={errors.accountIds}
+      />
+
       <div className="form-section">
         <div className="stack">
           {outcome && outcome.blocking.length > 0 ? (
@@ -1963,5 +1979,83 @@ export function EventForm({
         </div>
       </div>
     </Card>
+  );
+}
+
+/** 6 · Con qué cuentas: las cuentas preparadas para comprar este evento (hasta 10). */
+function BuyerAccounts(props: {
+  providerId: string;
+  providerName: string | null;
+  simulated: boolean;
+  value: string[];
+  onChange: (v: string[]) => void;
+  error: string | undefined;
+}) {
+  const s = useLive();
+  const accounts = useMemo(
+    () => Object.values(s.accounts).filter((a) => a.providerId === props.providerId).sort((a, b) => a.label.localeCompare(b.label, 'es')),
+    [s.accounts, props.providerId],
+  );
+  const chosen = props.value.filter((aid) => accounts.some((a) => a.id === aid));
+  const usable = accounts.filter((a) => a.enabled).map((a) => a.id);
+  const full = chosen.length >= 10;
+  const toggle = (aid: string) =>
+    props.onChange(chosen.includes(aid) ? chosen.filter((x) => x !== aid) : full ? chosen : [...chosen, aid]);
+  return (
+    <div className="form-section">
+      <h3 className="sign">6 · Con qué cuentas se compra</h3>
+      {!props.providerId ? (
+        <div className="small muted">Elige primero dónde se vende (1): salen sus cuentas.</div>
+      ) : accounts.length === 0 ? (
+        <Callout tone="warning">
+          Aún no hay cuentas de {props.providerName ?? props.providerId}. <Link to="/cuentas">Crea una cuenta</Link> por persona que va a comprar
+          {props.simulated ? ' (o usa «Nueva demo» en el resumen para ensayar).' : '.'}
+        </Callout>
+      ) : (
+        <>
+          <div className="row small" style={{ gap: 8, marginBottom: 10 }}>
+            <span className="muted">
+              {chosen.length === 0
+                ? 'Ninguna marcada: las eliges al preparar la compra.'
+                : `${chosen.length} cuenta${chosen.length === 1 ? '' : 's'} preparada${chosen.length === 1 ? '' : 's'}: la compra de este evento empieza con ${chosen.length === 1 ? 'ella marcada' : 'ellas marcadas'}.`}
+            </span>
+            <button type="button" className="btn sm" onClick={() => props.onChange(usable.slice(0, 10))} disabled={usable.length === 0}>
+              Todas{usable.length > 10 ? ' (10)' : ''}
+            </button>
+            <button type="button" className="btn sm" onClick={() => props.onChange([])} disabled={chosen.length === 0}>
+              Ninguna
+            </button>
+          </div>
+          {full && accounts.some((a) => a.enabled && !chosen.includes(a.id)) ? (
+            <div className="small" role="status" style={{ color: 'var(--warning-ink)', marginBottom: 10 }}>
+              Ya hay 10 cuentas, el máximo por compra: desmarca una para elegir otra.
+            </div>
+          ) : null}
+          <div className="form-grid">
+            {accounts.map((a) => (
+              <label key={a.id} className="check" style={{ opacity: a.enabled && (!full || chosen.includes(a.id)) ? 1 : 0.5 }}>
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(a.id)}
+                  onChange={() => toggle(a.id)}
+                  disabled={!a.enabled || (full && !chosen.includes(a.id))}
+                />
+                <span>
+                  <b>{a.label}</b>
+                  <br />
+                  <span className="small muted">
+                    titular {a.holderRef}
+                    {!a.enabled ? ' · desactivada' : ''}
+                    {a.verification !== 'VERIFIED' ? ' · sin verificar' : ''}
+                    {a.telegramChatId ? ' · con Telegram' : ' · sin Telegram'}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+      <FieldError msg={props.error} />
+    </div>
   );
 }

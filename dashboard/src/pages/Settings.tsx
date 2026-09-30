@@ -66,7 +66,7 @@ function extractToken(raw: string): string | null {
 
 const BOT_COMMANDS: Array<[string, string]> = [
   ['/tareas', 'tus tareas abiertas, con botones'],
-  ['/estado', 'cómo va cada operación'],
+  ['/estado', 'cómo va cada operación y si Claude está conectado'],
   ['/ayuda', 'cómo responder rápido'],
   ['/pausa', 'pausar lo que está en marcha (chat principal)'],
   ['/parar_todo', 'parar todo al instante (chat principal)'],

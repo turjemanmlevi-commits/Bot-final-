@@ -207,6 +207,21 @@ describe('notas del vault desde el dashboard y Telegram', () => {
     assert.equal(loaded?.zones.length, 2, 'las dos zonas están en la sala');
   });
 
+  it('las cuentas preparadas del evento se guardan en la nota, se conservan al editar sin ellas y se pueden quitar', async () => {
+    const created = await authoring.createEvent(EventNoteInputSchema.parse(input({ name: 'Real Madrid Femenino - Espanyol', accountIds: ['acc_1', 'acc_2', 'acc_3'] })), 'prueba');
+    assert.deepEqual(created.event?.accountIds, ['acc_1', 'acc_2', 'acc_3']);
+    assert.match(await readFile(path.join(dir, created.file), 'utf8'), /Cuentas preparadas: 3/);
+    const id = created.event?.id ?? '';
+    // Editar desde otra pantalla (sin el campo) no las borra.
+    const kept = await authoring.updateEvent(id, input({ name: 'Real Madrid Femenino - Espanyol', limitsNotes: 'otra cosa' }), 'prueba');
+    assert.deepEqual(kept.event?.accountIds, ['acc_1', 'acc_2', 'acc_3']);
+    const cleared = await authoring.updateEvent(id, input({ name: 'Real Madrid Femenino - Espanyol', accountIds: [] }), 'prueba');
+    assert.deepEqual(cleared.event?.accountIds, []);
+    // Más de 10 o repetidas no pasan del formulario.
+    assert.equal(EventNoteInputSchema.safeParse(input({ accountIds: Array.from({ length: 11 }, (_, i) => `acc_${i}`) })).success, false);
+    assert.equal(EventNoteInputSchema.safeParse(input({ accountIds: ['acc_1', 'acc_1'] })).success, false);
+  });
+
   it('las fechas que se escriben en las notas salen del reloj de la sala', async () => {
     const r = await authoring.createEvent(input({ name: 'Real Madrid - Alavés', limitsVerified: true, limitsSource: 'https://www.example.org/condiciones' }), 'prueba');
     assert.match(await readFile(path.join(dir, r.file), 'utf8'), /limitsVerifiedAt: "?2030-03-10"?/);

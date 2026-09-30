@@ -113,6 +113,7 @@ function eventProps(input: EventNoteInput, ctx: EventWriteContext): Record<strin
     // Sin el campo (p. ej. al editar desde otra pantalla) se conservan los que hubiera.
     ...(input.preferredTargets !== undefined ? { preferredTargets: input.preferredTargets } : {}),
     ...(input.perAccountQty !== undefined ? { perAccountQty: input.perAccountQty } : {}),
+    ...(input.accountIds !== undefined ? { accountIds: input.accountIds } : {}),
     ...(input.saleZones !== undefined ? { saleZones: input.saleZones } : {}),
     ...(input.planImage !== undefined ? { planImage: input.planImage } : {}),
     ...(input.planPoints !== undefined ? { planPoints: input.planPoints.map(formatPlanPoint) } : {}),
@@ -130,6 +131,7 @@ function eventBody(input: EventNoteInput, providerNote: string): string {
   if (input.officialFeed && input.officialId) lines.push(`- Elegido de la fuente oficial (${OFFICIAL_LABEL[input.officialFeed]}): \`${input.officialId}\``);
   if (input.preferredTargets && input.preferredTargets.length > 0) lines.push(`- Dónde queremos sentarnos (en orden): ${input.preferredTargets.join(' → ')}`);
   if (input.perAccountQty) lines.push(`- Entradas por cuenta: ${input.perAccountQty} (todas las cuentas a la vez)`);
+  if (input.accountIds && input.accountIds.length > 0) lines.push(`- Cuentas preparadas: ${input.accountIds.length} (la operación empieza con ellas marcadas)`);
   if (input.saleZones && input.saleZones.length > 0) {
     lines.push('- Cómo está estructurada la venta (zona: secciones · precio → zona de nuestro plano):');
     for (const z of input.saleZones) lines.push(`  - ${z}`);
@@ -182,6 +184,7 @@ export async function createEventNote(input: EventNoteInput, eventId: string, ct
     ...eventProps(input, ctx),
     preferredTargets: input.preferredTargets ?? [],
     perAccountQty: input.perAccountQty ?? null,
+    accountIds: input.accountIds ?? [],
     saleZones: input.saleZones ?? [],
     planImage: input.planImage ?? null,
     planPoints: (input.planPoints ?? []).map(formatPlanPoint),

@@ -11,7 +11,8 @@ import type { EventAssistant } from '../ai/assistant';
 import { createHarness, manualConfig, type Harness } from '../gates/harness';
 import { writeFixtureVault } from '../gates/fixtures';
 import { TelegramEventFlow, type FlowButton } from '../telegram/event-flow';
-import { TelegramNotifier, type TelegramOptions } from '../telegram/telegram';
+import { buttonUrl, claudeLine, TelegramNotifier, type TelegramOptions } from '../telegram/telegram';
+import type { Alert, Cart } from '@to/shared';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -78,6 +79,8 @@ describe('Telegram', () => {
     const before = tg.messagesTo('555').length;
     tg.message(555, '/estado');
     await until(() => tg.messagesTo('555').slice(before).some((t) => /No hay operaciones activas/.test(t)), 'respuesta a /estado');
+    // /estado dice si el bot tiene Claude (aquí no hay clave).
+    assert.ok(tg.messagesTo('555').slice(before).some((t) => t.includes('Claude: sin conectar')));
 
     // Tarea para la cuenta de Bea, que tiene su propio chat.
     const rt = h.app.runtime;
@@ -154,6 +157,89 @@ describe('Telegram', () => {
     await until(() => rt.store.carts.get(cart?.id ?? '')?.expiresAt !== null, 'caducidad anotada');
     assert.equal(Date.parse(rt.store.carts.get(cart?.id ?? '')?.expiresAt ?? ''), h.clock.now() + 10 * 60_000);
     n.stop();
+  });
+
+  it('«en carrito» y «¡entradas aseguradas!» llegan con el enlace para ver el carrito (texto si es del PC)', async () => {
+    const n = start('555');
+    await until(() => n.status().connected, 'conexión');
+    const rt = h.app.runtime;
+    const now = new Date(h.clock.now()).toISOString();
+    const lia = rt.ctx.accounts.create({ label: 'Lía', providerId: 'manual', holderRef: 'lia', verification: 'VERIFIED' }, 't');
+    const mar = rt.ctx.accounts.create({ label: 'Mar', providerId: 'manual', holderRef: 'mar', verification: 'VERIFIED' }, 't');
+    const cart = (id: string, operationId: string, accountId: string, openUrl: string, confirmation: Cart['confirmation']): Cart => ({
+      id,
+      operationId,
+      accountId,
+      providerCartRef: id,
+      items: [{ claimId: null, sectionId: null, sectionLabel: 'Tribuna', row: null, seats: [], qty: 1, unitPrice: 1_000 }],
+      qty: 1,
+      total: 1_000,
+      currency: 'EUR',
+      confirmation,
+      state: 'ACTIVE',
+      reviewReason: null,
+      expiresAt: null,
+      confirmedAt: now,
+      updatedAt: now,
+      openUrl,
+    });
+    const official = 'https://www.realmadrid.com/entradas/femenino';
+    rt.store.putCart(cart('cart_rm_1', 'op_rm', lia.id, official, 'HUMAN'));
+    rt.store.putCart(cart('cart_rm_2', 'op_rm', mar.id, official, 'HUMAN'));
+    rt.store.putCart(cart('cart_sim_1', 'op_sim', lia.id, 'http://localhost:8787/sim/cart/ev/a1', 'READBACK'));
+    rt.store.putCart(cart('cart_sim_2', 'op_sim', mar.id, 'http://localhost:8787/sim/cart/ev/a2', 'READBACK'));
+    const alert = (p: Partial<Alert>): Alert => ({
+      id: `al_${p.dedupeKey}`,
+      operationId: null,
+      accountId: null,
+      cartId: null,
+      claimId: null,
+      kind: 'CART_CONFIRMED',
+      severity: 'INFO',
+      title: 'Aviso',
+      message: '',
+      actions: ['OPEN_CART'],
+      state: 'OPEN',
+      dedupeKey: 'x',
+      createdAt: now,
+      updatedAt: now,
+      ...p,
+    });
+    type Kb = { inline_keyboard: Array<Array<{ text: string; url?: string }>> } | undefined;
+    const lastTo = (chat: string, title: string) => tg.sent.filter((s) => s.method === 'sendMessage' && s.body.chat_id === chat && String(s.body.text).includes(title)).at(-1);
+
+    n.notifyAlert(alert({ title: 'Lía: 1 entrada en carrito', operationId: 'op_rm', accountId: lia.id, cartId: 'cart_rm_1', dedupeKey: 'a' }));
+    await until(() => lastTo('555', 'Lía: 1 entrada en carrito') !== undefined, 'aviso de carrito');
+    const one = lastTo('555', 'Lía: 1 entrada en carrito');
+    assert.deepEqual((one?.body.reply_markup as Kb)?.inline_keyboard, [[{ text: '🛒 Ir al carrito en la web oficial', url: official }]]);
+
+    // Todas las cuentas compran en la misma página oficial: un solo botón.
+    n.notifyAlert(alert({ kind: 'CART_SECURED', severity: 'CRITICAL', title: 'RM: ¡2 entradas aseguradas en carrito!', operationId: 'op_rm', dedupeKey: 'b' }));
+    await until(() => lastTo('555', 'RM: ¡2 entradas aseguradas') !== undefined, 'aviso de aseguradas');
+    assert.equal((lastTo('555', 'RM: ¡2 entradas aseguradas')?.body.reply_markup as Kb)?.inline_keyboard.length, 1);
+
+    // Carritos del simulador en este PC: Telegram rechazaría un botón a localhost, van como texto.
+    n.notifyAlert(alert({ kind: 'CART_SECURED', severity: 'CRITICAL', title: 'Sim: ¡2 entradas aseguradas en carrito!', operationId: 'op_sim', dedupeKey: 'c' }));
+    await until(() => lastTo('555', 'Sim: ¡2 entradas aseguradas') !== undefined, 'aviso del simulador');
+    const sim = lastTo('555', 'Sim: ¡2 entradas aseguradas');
+    assert.equal(sim?.body.reply_markup, undefined);
+    assert.match(String(sim?.body.text), /🛒 Lía: http:\/\/localhost:8787\/sim\/cart\/ev\/a1/);
+    assert.match(String(sim?.body.text), /🛒 Mar: http:\/\/localhost:8787\/sim\/cart\/ev\/a2/);
+    n.stop();
+  });
+
+  it('/estado: Claude conectado, con el modelo y lo gastado, o la clave que falla', () => {
+    const ai = { configured: true, ok: true, detail: 'ok', model: 'Claude Sonnet 5.5', modelId: 'claude-sonnet-5-5', modelFixed: false, configurable: true, spentUsd: 0.4 };
+    assert.equal(claudeLine(ai), '🤖 <b>Claude: conectado</b> · Claude Sonnet 5.5 · gastado 0,40 $ desde que se abrió la sala. Lo usan /evento y /top.');
+    assert.match(claudeLine({ ...ai, ok: false, detail: 'La clave no es válida (401)' }), /la clave no funciona.*401/);
+    assert.match(claudeLine(null), /sin conectar/);
+  });
+
+  it('solo los enlaces públicos van en un botón', () => {
+    assert.equal(buttonUrl('https://www.ticketmaster.es/event/123'), 'https://www.ticketmaster.es/event/123');
+    for (const bad of ['http://localhost:8787/sim/cart/a/b', 'http://127.0.0.1:8787/x', 'http://192.168.1.50:8787/x', 'http://sala/x', 'ftp://www.example.org/x', 'no es un enlace', null]) {
+      assert.equal(buttonUrl(bad), null, String(bad));
+    }
   });
 
   it('un token incorrecto se explica en el estado', async () => {
