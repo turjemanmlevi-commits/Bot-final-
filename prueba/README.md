@@ -17,6 +17,10 @@ Si aparece login, verificación o algo que no sabe seleccionar, te avisa por Tel
 
 ## Puesta en marcha (en tu PC)
 
+**Lo más fácil:** doble clic en `iniciar.bat` (Windows) o `./iniciar.sh` (Mac/Linux) en la raíz del proyecto. Instala todo, arranca y abre `http://127.0.0.1:3000`.
+
+A mano:
+
 ```bash
 npm install
 npx playwright install chromium          # solo la primera vez
