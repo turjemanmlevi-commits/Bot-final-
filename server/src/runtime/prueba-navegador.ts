@@ -9,8 +9,21 @@
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { chromium, type BrowserContext } from 'playwright';
-import { runBot as defaultRunBot, REAL_MADRID_CHANNEL_HOME, type BotSession, type HumanReason, type LogLevel, type RunOptions, type SecuredCart } from '@to/prueba';
+import { chromium } from 'playwright';
+import {
+  browserAvailable,
+  findSystemBrowser,
+  launchOptionsFor,
+  openLoginBrowser,
+  runBot as defaultRunBot,
+  REAL_MADRID_CHANNEL_HOME,
+  type BotSession,
+  type HumanReason,
+  type LoginBrowser,
+  type LogLevel,
+  type RunOptions,
+  type SecuredCart,
+} from '@to/prueba';
 import type { Account, BrowserTestCartView, BrowserTestLogEntry, BrowserTestStartInput, BrowserTestState, BrowserTestStatus, Id } from '@to/shared';
 import { BROWSER_TEST_QUICK } from '@to/shared';
 import type { App } from '../app';
@@ -77,7 +90,7 @@ export class BrowserTestService {
   private resolveDecision: ((d: Decision) => void) | null = null;
   private messages: Array<{ chatId: string; messageId: number }> = [];
   /** Navegadores abiertos para iniciar sesión (uno por cuenta). */
-  private readonly loginBrowsers = new Map<Id, BrowserContext>();
+  private readonly loginBrowsers = new Map<Id, LoginBrowser>();
   private readonly runBot: typeof defaultRunBot;
   private readonly timeZone: string;
 
@@ -113,11 +126,16 @@ export class BrowserTestService {
 
   isAvailable(): boolean {
     if (this.deps.available) return this.deps.available();
-    try {
-      return existsSync(chromium.executablePath());
-    } catch {
-      return false;
-    }
+    return browserAvailable();
+  }
+
+  /** Chrome o Edge del PC (preferido) o null para usar el Chromium de Playwright. */
+  private systemBrowser() {
+    return findSystemBrowser();
+  }
+
+  private unavailableMessage(): string {
+    return 'No hay navegador para el bot: instala Google Chrome (lo mejor, para poder entrar con Google) o ejecuta «npx playwright install chromium» en la carpeta del proyecto.';
   }
 
   private requireAccount(accountId: Id | undefined): Account {
@@ -139,36 +157,44 @@ export class BrowserTestService {
    */
   async openAccountBrowser(accountId: Id): Promise<{ ok: boolean; message: string }> {
     const account = this.requireAccount(accountId);
-    if (!this.isAvailable()) throw new BrowserTestError('El navegador del bot no está instalado: cierra la ventana negra y vuelve a abrir «Sala de control» (lo instala), o ejecuta «npx playwright install chromium».', 'UNAVAILABLE');
+    if (!this.isAvailable()) throw new BrowserTestError(this.unavailableMessage(), 'UNAVAILABLE');
     if (this.busy && this.account?.id === account.id) throw new BrowserTestError('Esa cuenta está en una prueba ahora mismo.', 'BUSY');
     const existing = this.loginBrowsers.get(account.id);
-    if (existing) {
-      const page = existing.pages().find((p) => !p.isClosed());
-      if (page) {
-        await page.bringToFront().catch(() => undefined);
-        return { ok: true, message: `El navegador de «${account.label}» ya estaba abierto: inicia sesión ahí.` };
-      }
-      await existing.close().catch(() => undefined);
-      this.loginBrowsers.delete(account.id);
-    }
+    if (existing?.running()) return { ok: true, message: `El navegador de «${account.label}» ya estaba abierto: inicia sesión ahí y cierra la ventana.` };
+    this.loginBrowsers.delete(account.id);
     const dir = this.profileDir(account.id);
     mkdirSync(dir, { recursive: true });
-    const context = await chromium.launchPersistentContext(dir, { headless: false, locale: 'es-ES', timezoneId: this.timeZone, viewport: { width: 1366, height: 900 } });
-    this.loginBrowsers.set(account.id, context);
-    context.on('close', () => {
-      if (this.loginBrowsers.get(account.id) === context) this.loginBrowsers.delete(account.id);
-    });
+    const browser = this.systemBrowser();
+    if (browser) {
+      // Chrome normal, sin automatización: Google acepta el inicio de sesión y la sesión queda en el perfil.
+      this.loginBrowsers.set(account.id, openLoginBrowser(browser, dir, REAL_MADRID_CHANNEL_HOME));
+      this.deps.app.runtime.ctx.journal.audit('browser_test.account_browser_opened', { accountId: account.id, browser: browser.name }, { actor: 'dashboard' });
+      return {
+        ok: true,
+        message: `Se ha abierto ${browser.name} con el perfil del bot para «${account.label}». Inicia sesión ahí (Google, Apple o email) y cierra la ventana: queda guardado para las pruebas.`,
+      };
+    }
+    // Sin Chrome ni Edge: Chromium de Playwright (Google puede rechazar el inicio de sesión; email funciona).
+    const context = await chromium.launchPersistentContext(dir, { ...launchOptionsFor(null), headless: false, locale: 'es-ES', timezoneId: this.timeZone, viewport: { width: 1366, height: 900 } });
     const page = context.pages()[0] ?? (await context.newPage());
     await page.goto(REAL_MADRID_CHANNEL_HOME, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => undefined);
     await page.bringToFront().catch(() => undefined);
-    this.deps.app.runtime.ctx.journal.audit('browser_test.account_browser_opened', { accountId: account.id }, { actor: 'dashboard' });
-    return { ok: true, message: `Se ha abierto el navegador de «${account.label}». Inicia sesión ahí (Google, Apple o email) y ciérralo: queda guardado para las pruebas.` };
+    let open = true;
+    context.on('close', () => {
+      open = false;
+    });
+    this.loginBrowsers.set(account.id, { pid: null, running: () => open, close: () => context.close().catch(() => undefined) });
+    this.deps.app.runtime.ctx.journal.audit('browser_test.account_browser_opened', { accountId: account.id, browser: 'chromium' }, { actor: 'dashboard' });
+    return {
+      ok: true,
+      message: `Se ha abierto el navegador del bot para «${account.label}». Inicia sesión ahí con email o Apple (Google no suele dejar en este navegador: instala Google Chrome para eso) y cierra la ventana.`,
+    };
   }
 
   async closeAccountBrowser(accountId: Id): Promise<void> {
-    const ctx = this.loginBrowsers.get(accountId);
+    const b = this.loginBrowsers.get(accountId);
     this.loginBrowsers.delete(accountId);
-    await ctx?.close().catch(() => undefined);
+    await b?.close().catch(() => undefined);
   }
 
   // ---------------------------------------------------------------------------
@@ -197,7 +223,7 @@ export class BrowserTestService {
     const available = this.isAvailable();
     return {
       available,
-      detail: available ? 'Navegador del bot listo.' : 'Falta el navegador del bot (Chromium de Playwright): cierra la ventana negra y vuelve a abrir «Sala de control».',
+      detail: available ? `Navegador: ${this.systemBrowser()?.name ?? 'Chromium de Playwright'}.` : this.unavailableMessage(),
       id: this.id,
       status: this.status,
       startedAt: this.startedAt,
@@ -270,7 +296,7 @@ export class BrowserTestService {
 
   start(input: BrowserTestStartInput, actor: string): BrowserTestState {
     if (this.busy) throw new BrowserTestError('Ya hay una prueba en marcha. Pulsa «Parar» o responde a la que está abierta.', 'BUSY');
-    if (!this.isAvailable()) throw new BrowserTestError('El navegador del bot no está instalado: cierra la ventana negra y vuelve a abrir «Sala de control» (lo instala), o ejecuta «npx playwright install chromium».', 'UNAVAILABLE');
+    if (!this.isAvailable()) throw new BrowserTestError(this.unavailableMessage(), 'UNAVAILABLE');
     const account = this.requireAccount(input.accountId);
     const quick = BROWSER_TEST_QUICK;
     const options: RunOptions = {
@@ -283,8 +309,6 @@ export class BrowserTestService {
       fallbackFewer: input.fallbackFewer ?? quick.fallbackFewer,
       headless: false,
     };
-    void this.closeSession();
-    void this.closeAccountBrowser(account.id);
     this.id = this.deps.app.runtime.ctx.ids.next('pn');
     this.status = 'RUNNING';
     this.startedAt = new Date().toISOString();
@@ -316,9 +340,16 @@ export class BrowserTestService {
     if (!this.profileExists(account.id) && !creds) {
       this.log('warn', 'Esta cuenta no ha iniciado sesión nunca en el navegador del bot: cuando la web lo pida, inicia sesión tú en su ventana (queda guardado).');
     }
+    const browser = this.systemBrowser();
+    if (browser) this.log('info', `Navegador: ${browser.name} con el perfil del bot de esta cuenta.`);
+    else this.log('warn', 'No hay Google Chrome en este PC: se usa el Chromium de Playwright (para entrar con Google hace falta Chrome).');
+    await this.closeSession();
+    if (this.loginBrowsers.get(account.id)?.running()) this.log('info', 'Cierro la ventana de inicio de sesión de esta cuenta para que el perfil quede libre…');
+    await this.closeAccountBrowser(account.id);
     try {
       const session = await this.runBot(options, {
         profileDir: this.profileDir(account.id),
+        browser,
         capturesDir: this.capturesDir(),
         account: { email: creds?.email ?? null, password: creds?.password ?? null },
         humanWaitMs: this.deps.humanWaitMs ?? 10 * 60_000,

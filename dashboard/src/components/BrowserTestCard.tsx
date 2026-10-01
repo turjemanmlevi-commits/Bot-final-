@@ -114,7 +114,7 @@ export function BrowserTestCard() {
             entradas» y te manda la captura por Telegram con los botones <b>Sí</b> / <b>No</b>. Nunca paga.
           </div>
           <div className="small muted">
-            Antes, una sola vez por cuenta: <Link to="/cuentas">Cuentas → Abrir navegador</Link>, inicia sesión ahí (Google, Apple o email) y cierra la ventana. Queda guardada.
+            Antes, una sola vez por cuenta: <Link to="/cuentas">Cuentas → Abrir navegador</Link> (se abre tu Google Chrome con un perfil del bot), inicia sesión ahí (Google, Apple o email) y cierra la ventana. Queda guardada.
           </div>
         </div>
       ) : (

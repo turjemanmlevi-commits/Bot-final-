@@ -223,8 +223,8 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
           </summary>
           <div className="stack" style={{ gap: 8, marginTop: 8 }}>
             <div className="small muted">
-              Lo normal es <b>no</b> rellenar esto: abre el navegador de la cuenta (botón «Abrir navegador» en la lista), inicia sesión ahí una vez (Google, Apple o email) y la sesión
-              queda guardada. Solo si entras con <b>email y contraseña</b> del Real Madrid, puedes guardarlos aquí para que el bot inicie sesión solo cuando la web lo pida. Se guardan
+              Lo normal es <b>no</b> rellenar esto: pulsa «Abrir navegador» en la lista (se abre tu Google Chrome con un perfil nuevo del bot), inicia sesión ahí una vez (Google, Apple o
+              email) y la sesión queda guardada. Solo si entras con <b>email y contraseña</b> del Real Madrid, puedes guardarlos aquí para que el bot inicie sesión solo cuando la web lo pida. Se guardan
               únicamente en este PC (<span className="mono">data/credenciales.json</span>) y nunca se envían a Telegram ni se muestran.
             </div>
             <div className="form-grid">
@@ -410,7 +410,7 @@ export function AccountsPage() {
                                 className="btn sm"
                                 disabled={busy}
                                 onClick={() => void openBrowser(a)}
-                                title="Abre el Chrome del bot con el perfil de esta cuenta: inicia sesión ahí (Google, Apple o email) y cierra la ventana. Queda guardado."
+                                title="Abre tu Google Chrome con un perfil nuevo del bot para esta cuenta: inicia sesión ahí (Google, Apple o email) y cierra la ventana. Queda guardado."
                               >
                                 <Icon name="external" size={12} /> {info?.profileExists ? 'Abrir navegador' : 'Abrir navegador e iniciar sesión'}
                               </button>

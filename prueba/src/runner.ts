@@ -5,6 +5,7 @@
 import { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { saveEnvValues, type PruebaConfig } from './config.js';
+import { findSystemBrowser } from './navegador.js';
 import { runBot, type BotSession, type HumanReason, type LogLevel, type RunOptions, type SecuredCart } from './bot.js';
 import { detectChatId, escapeHtml, isTelegramButtonUrl, TelegramClient, TelegramError, type Keyboard } from './telegram.js';
 
@@ -191,6 +192,7 @@ export class Runner extends EventEmitter {
     try {
       const session = await runBot(options, {
         profileDir: this.cfg.profileDir,
+        browser: findSystemBrowser(),
         capturesDir: this.cfg.capturesDir,
         account,
         humanWaitMs: this.cfg.humanWaitMs,

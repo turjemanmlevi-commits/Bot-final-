@@ -10,6 +10,7 @@
 import path from 'node:path';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 import type { CartItem, Minor } from '@to/shared';
+import { launchOptionsFor, type SystemBrowser } from './navegador.js';
 import {
   OB,
   REAL_MADRID_CHANNEL_HOME,
@@ -70,6 +71,8 @@ export interface BotHooks {
 
 export interface BotDeps {
   profileDir: string;
+  /** Chrome o Edge del PC con el que abrir el perfil (null = Chromium de Playwright). */
+  browser?: SystemBrowser | null;
   capturesDir: string;
   account: { email: string | null; password: string | null };
   humanWaitMs: number;
@@ -755,8 +758,10 @@ function toSecuredCart(page: Page, cart: CartReadback, title: string, strategy: 
 
 export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSession> {
   const { hooks } = deps;
-  hooks.log('info', `Abriendo navegador (${opts.headless ? 'oculto' : 'visible'}) con el perfil guardado…`);
+  const browser = deps.browser ?? null;
+  hooks.log('info', `Abriendo ${browser ? browser.name : 'el navegador del bot'} (${opts.headless ? 'oculto' : 'visible'}) con el perfil guardado…`);
   const context = await chromium.launchPersistentContext(deps.profileDir, {
+    ...launchOptionsFor(browser),
     headless: opts.headless,
     locale: 'es-ES',
     timezoneId: 'Europe/Madrid',
