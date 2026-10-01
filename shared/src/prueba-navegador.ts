@@ -22,6 +22,19 @@ export interface BrowserTestOptionsView {
   contiguous: boolean;
   fallbackFewer: boolean;
   eventUrl: string;
+  /** Partido elegido («Real Madrid vs Paris FC · lun 10 nov 18:45 · Women's Champions League»). */
+  matchTitle: string | null;
+}
+
+/** Partido del femenino con entradas a la venta (de realmadrid.com). */
+export interface BrowserTestMatch {
+  id: string;
+  title: string;
+  label: string;
+  competition: string | null;
+  dateTime: string;
+  venue: string | null;
+  ticketsUrl: string;
 }
 
 export interface BrowserTestCartView {

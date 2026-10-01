@@ -11,6 +11,7 @@ import path from 'node:path';
 import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
 import type { CartItem, Minor } from '@to/shared';
 import { launchOptionsFor, type SystemBrowser } from './navegador.js';
+import { REAL_MADRID_WOMEN_CHANNELS } from './partidos.js';
 import {
   OB,
   REAL_MADRID_CHANNEL_HOME,
@@ -72,6 +73,9 @@ export interface BotHooks {
    */
   needHuman(reason: HumanReason, message: string, url: string): Promise<void>;
 }
+
+/** El catálogo no tiene ningún partido a la venta (se prueba el siguiente catálogo). */
+export class NoMatchOnSale extends Error {}
 
 /** Lanzada desde `needHuman('login')`: el bot cierra su navegador y deja el inicio de sesión a quien lo llama. */
 export class LoginHandoff extends Error {
@@ -299,12 +303,14 @@ async function navigateToSelect(ctx: FlowCtx, deadline: number): Promise<void> {
       await acceptCookies(page);
       if (hops++ > 6) throw new Error('Doy vueltas por el catálogo sin llegar a un partido a la venta.');
       hooks.log('info', kind === 'catalog' ? 'Catálogo del canal: busco el primer partido a la venta…' : 'Ficha del partido: busco la sesión a la venta…');
-      const moved = await goToFirstSession(page, kind, hooks);
-      if (!moved) {
-        await sleep(1500, ctx.deps.signal);
-        const again = await goToFirstSession(page, kind, hooks);
-        if (!again) throw new Error('No hay ningún partido del femenino a la venta ahora mismo en el catálogo.');
+      // El catálogo carga sus tarjetas después de la página: se espera hasta 20 s a que aparezcan.
+      let moved = false;
+      const listEnd = Date.now() + 20_000;
+      while (!moved && Date.now() < listEnd) {
+        moved = await goToFirstSession(page, kind, hooks);
+        if (!moved) await sleep(1500, ctx.deps.signal);
       }
+      if (!moved) throw new NoMatchOnSale(`No hay ningún partido a la venta en este catálogo (${page.url()}).`);
       await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
       await sleep(1500, ctx.deps.signal);
       continue;
@@ -787,12 +793,25 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
   try {
     const page = context.pages()[0] ?? (await context.newPage());
     const ctx: FlowCtx = { page, opts, deps, prefs, hooks: { log: (l, m) => hooks.log(l, m) }, notified: new Set(), loginAttempted: false, limitHit: false };
-    const start = opts.eventUrl ? normalizeEventUrl(opts.eventUrl) : REAL_MADRID_CHANNEL_HOME;
-    hooks.log('info', opts.eventUrl ? `Entrando en ${start}` : `Entrando en el canal del Real Madrid Femenino: ${start}`);
-    await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await acceptCookies(page);
-
-    await navigateToSelect(ctx, Date.now() + deps.humanWaitMs);
+    // Con enlace del partido se va directo; sin él, se recorren los catálogos del femenino (cada competición tiene el suyo).
+    const starts = opts.eventUrl ? [normalizeEventUrl(opts.eventUrl)] : REAL_MADRID_WOMEN_CHANNELS;
+    const deadline = Date.now() + deps.humanWaitMs;
+    for (let i = 0; ; i++) {
+      const start = starts[i]!;
+      hooks.log('info', opts.eventUrl ? `Entrando en ${start}` : `Busco partido a la venta en el catálogo ${start}`);
+      await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      await acceptCookies(page);
+      try {
+        await navigateToSelect(ctx, deadline);
+        break;
+      } catch (err) {
+        if (!(err instanceof NoMatchOnSale)) throw err;
+        if (i + 1 >= starts.length) {
+          throw new Error(opts.eventUrl ? err.message : 'No hay ningún partido del femenino a la venta ahora mismo (he mirado los catálogos de Liga F y Champions).');
+        }
+        hooks.log('warn', `${err.message} Pruebo el siguiente catálogo.`);
+      }
+    }
     hooks.log('ok', 'Página de selección cargada y sesión lista.');
     const title = await eventTitle(page);
     hooks.log('info', `Partido: ${title}`);

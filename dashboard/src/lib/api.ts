@@ -3,6 +3,7 @@ import type {
   AccountCredentialsInput,
   AccountInput,
   BrowserTestDecision,
+  BrowserTestMatch,
   BrowserTestStartInput,
   BrowserTestState,
   AiDetailsQuery,
@@ -177,6 +178,8 @@ export const Api = {
   seedDemo: (body: { startInSeconds?: number; scenarioId?: string }) => post<{ operationId: string; message: string }>('/api/demo/seed', body),
   /** Prueba real con el navegador del bot: estado actual (se consulta cada segundo y medio mientras corre). */
   browserTest: () => api<BrowserTestState>('/api/prueba-navegador'),
+  /** Partidos del femenino con entradas a la venta (de realmadrid.com). */
+  browserTestMatches: () => api<{ matches: BrowserTestMatch[]; error: string | null }>('/api/prueba-navegador/partidos'),
   /** Arranca la prueba: el bot abre su Chrome con la cuenta, mete las entradas y avisa por Telegram. */
   browserTestStart: (input: BrowserTestStartInput) => post<BrowserTestState>('/api/prueba-navegador', input),
   /** Responde a la pregunta del carrito («comprar» = dejar la ventana abierta; «cancelar» = liberar). */

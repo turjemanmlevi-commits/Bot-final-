@@ -733,6 +733,14 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     throw err;
   };
   http.get('/api/prueba-navegador', (c) => c.json(browserTest().state()));
+  /** Partidos del femenino con entradas a la venta (realmadrid.com), para elegir en qué partido se prueba. */
+  http.get('/api/prueba-navegador/partidos', async (c) => {
+    try {
+      return c.json({ matches: await browserTest().matchesView(), error: null });
+    } catch (err) {
+      return c.json({ matches: [], error: `No se pudo leer realmadrid.com: ${(err as Error).message}` });
+    }
+  });
   http.post('/api/prueba-navegador', async (c) => {
     const b = await body(c, BrowserTestStartSchema);
     try {

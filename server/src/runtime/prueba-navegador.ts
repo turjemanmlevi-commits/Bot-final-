@@ -12,6 +12,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 import {
   browserAvailable,
+  fetchWomenMatchesOnSale,
   findSystemBrowser,
   launchOptionsFor,
   LoginHandoff,
@@ -24,11 +25,12 @@ import {
   type HumanReason,
   type LoginBrowser,
   type LogLevel,
+  type OfficialMatch,
   type SystemBrowser,
   type RunOptions,
   type SecuredCart,
 } from '@to/prueba';
-import type { Account, BrowserTestCartView, BrowserTestLogEntry, BrowserTestStartInput, BrowserTestState, BrowserTestStatus, Id } from '@to/shared';
+import type { Account, BrowserTestCartView, BrowserTestMatch, BrowserTestLogEntry, BrowserTestStartInput, BrowserTestState, BrowserTestStatus, Id } from '@to/shared';
 import { BROWSER_TEST_QUICK } from '@to/shared';
 import type { App } from '../app';
 import { log } from '../util/log';
@@ -52,6 +54,10 @@ export interface BrowserTestDeps {
   systemBrowser?: () => SystemBrowser | null;
   /** Argumentos extra para Chrome (pruebas: --no-sandbox). */
   browserArgs?: string[];
+  /** Pruebas: deja usar enlaces de otra web (la réplica local). */
+  allowAnyEventUrl?: boolean;
+  /** Partidos del femenino con entradas a la venta (por defecto, leídos de realmadrid.com). */
+  discoverMatches?: () => Promise<OfficialMatch[]>;
 }
 
 type Button = { text: string; callback_data: string } | { text: string; url: string };
@@ -88,6 +94,9 @@ export class BrowserTestService {
   private id: string | null = null;
   private startedAt: string | null = null;
   private options: RunOptions | null = null;
+  /** Partido de la prueba («Real Madrid vs Paris FC · 10 nov»), si se conoce. */
+  private matchTitle: string | null = null;
+  private matchesCache: { at: number; matches: OfficialMatch[] } | null = null;
   private account: Account | null = null;
   private logEntries: BrowserTestLogEntry[] = [];
   private cart: SecuredCart | null = null;
@@ -200,6 +209,23 @@ export class BrowserTestService {
     };
   }
 
+  /** Partidos del femenino con entradas a la venta ahora (realmadrid.com), con 5 minutos de caché. */
+  async matchesOnSale(fresh = false): Promise<OfficialMatch[]> {
+    if (!fresh && this.matchesCache && Date.now() - this.matchesCache.at < 5 * 60_000) return this.matchesCache.matches;
+    const matches = await (this.deps.discoverMatches ?? (() => fetchWomenMatchesOnSale()))();
+    this.matchesCache = { at: Date.now(), matches };
+    return matches;
+  }
+
+  async matchesView(): Promise<BrowserTestMatch[]> {
+    return (await this.matchesOnSale()).map((m) => ({ id: m.id, title: m.title, label: this.matchLabel(m), competition: m.competition, dateTime: m.dateTime, venue: m.venue, ticketsUrl: m.ticketsUrl }));
+  }
+
+  private matchLabel(m: OfficialMatch): string {
+    const when = new Intl.DateTimeFormat('es-ES', { timeZone: this.timeZone, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(m.dateTime));
+    return `${m.title} · ${when}${m.competition ? ` · ${m.competition}` : ''}`;
+  }
+
   /** La cuenta se va a eliminar: cierra su Chrome y borra su perfil (la sesión guardada). */
   async forgetAccount(accountId: Id): Promise<void> {
     if (this.busy && this.account?.id === accountId) throw new BrowserTestError('Esa cuenta está en una prueba ahora mismo: pulsa «Parar» y vuelve a intentarlo.', 'BUSY');
@@ -251,7 +277,7 @@ export class BrowserTestService {
       status: this.status,
       startedAt: this.startedAt,
       options: this.options
-        ? { quantity: this.options.quantity, zones: this.options.zones, maxUnitPrice: this.options.maxUnitPrice, contiguous: this.options.contiguous, fallbackFewer: this.options.fallbackFewer, eventUrl: this.options.eventUrl }
+        ? { quantity: this.options.quantity, zones: this.options.zones, maxUnitPrice: this.options.maxUnitPrice, contiguous: this.options.contiguous, fallbackFewer: this.options.fallbackFewer, eventUrl: this.options.eventUrl, matchTitle: this.matchTitle }
         : null,
       accountId: this.account?.id ?? null,
       accountLabel: this.account?.label ?? null,
@@ -332,10 +358,14 @@ export class BrowserTestService {
       fallbackFewer: input.fallbackFewer ?? quick.fallbackFewer,
       headless: false,
     };
+    if (options.eventUrl && !/^https:\/\/tickets\.realmadrid\.com\//i.test(options.eventUrl) && !this.deps.allowAnyEventUrl) {
+      throw new BrowserTestError('El enlace del partido tiene que ser de tickets.realmadrid.com.', 'BAD_URL');
+    }
     this.id = this.deps.app.runtime.ctx.ids.next('pn');
     this.status = 'RUNNING';
     this.startedAt = new Date().toISOString();
     this.options = options;
+    this.matchTitle = null;
     this.account = account;
     this.logEntries = [];
     this.cart = null;
@@ -351,13 +381,35 @@ export class BrowserTestService {
 
   private async run(id: string, options: RunOptions, account: Account, signal: AbortSignal, handoffs = 0): Promise<void> {
     if (handoffs > 0) return this.runOnce(id, options, account, signal, handoffs);
+    if (!options.eventUrl) {
+      // Cada competición del femenino se vende en un canal distinto: el partido sale de realmadrid.com.
+      this.log('info', 'Busco en realmadrid.com los partidos del femenino con entradas a la venta…');
+      try {
+        const matches = await this.matchesOnSale(true);
+        if (signal.aborted) return;
+        if (matches.length === 0) {
+          this.log('warn', 'realmadrid.com no tiene ahora ningún partido del femenino con entradas a la venta: miro igualmente los catálogos de la web de entradas.');
+        } else {
+          for (const m of matches) this.log('info', `  · ${this.matchLabel(m)}`);
+          const pick = matches[0]!;
+          options.eventUrl = pick.ticketsUrl;
+          this.matchTitle = this.matchLabel(pick);
+          this.log('ok', `Partido elegido: ${this.matchTitle}.`);
+        }
+      } catch (err) {
+        this.log('warn', `No he podido leer los partidos de realmadrid.com (${(err as Error).message}): miro los catálogos de la web de entradas.`);
+      }
+    } else {
+      const known = this.matchesCache?.matches.find((m) => m.ticketsUrl === options.eventUrl);
+      if (known) this.matchTitle = this.matchLabel(known);
+    }
     const reqs = [
       `${options.quantity} entrada(s)`,
       options.contiguous && options.quantity > 1 ? 'seguidas' : null,
       options.zones.length ? `zonas: ${options.zones.join(' > ')}` : 'zona: la más barata con sitio',
       options.maxUnitPrice !== null ? `máx. ${eur(options.maxUnitPrice)}/entrada` : 'sin tope de precio',
       options.fallbackFewer && options.quantity > 1 ? 'si no hay tantas, menos' : null,
-      options.eventUrl ? null : 'partido: el próximo del femenino a la venta',
+      this.matchTitle ? `partido: ${this.matchTitle}` : options.eventUrl ? `partido: ${options.eventUrl}` : 'partido: el próximo del femenino a la venta',
     ].filter(Boolean);
     this.log('info', `Prueba con la cuenta «${account.label}» — ${reqs.join(', ')}.`);
     const creds = this.deps.credentials.get(account.id);

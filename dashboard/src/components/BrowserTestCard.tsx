@@ -110,7 +110,7 @@ export function BrowserTestCard() {
       {st.status === 'IDLE' ? (
         <div className="stack" style={{ gap: 6 }}>
           <div className="ink2">
-            Pulsa <b>Prueba Real Madrid</b>: el bot abre su Chrome con tu cuenta, mete <b>3 entradas seguidas</b> del próximo partido del femenino en el carrito, pulsa «Comprar
+            Pulsa <b>Prueba Real Madrid</b>: el bot abre su Chrome con tu cuenta, mete <b>3 entradas seguidas</b> de un partido del femenino a la venta (eliges cuál) en el carrito, pulsa «Comprar
             entradas» y te manda la captura por Telegram con los botones <b>Sí</b> / <b>No</b>. Nunca paga.
           </div>
           <div className="small muted">
@@ -124,6 +124,11 @@ export function BrowserTestCard() {
               Cuenta: <b>{st.accountLabel ?? '—'}</b>
               {st.accountHasCredentials ? <span className="tag">con contraseña guardada</span> : null}
             </span>
+            {st.options?.matchTitle ? (
+              <span>
+                Partido: <b>{st.options.matchTitle}</b>
+              </span>
+            ) : null}
             {st.options ? (
               <span className="muted">
                 {st.options.quantity} entrada{st.options.quantity === 1 ? '' : 's'}
