@@ -52,6 +52,8 @@ export interface RunOptions {
   maxUnitPrice: Minor | null;
   /** Exigir asientos seguidos en la misma fila. */
   contiguous: boolean;
+  /** Si no hay `quantity` entradas que cumplan, aceptar menos (hasta 1). */
+  fallbackFewer: boolean;
   headless: boolean;
 }
 
@@ -188,6 +190,8 @@ interface FlowCtx {
   hooks: Hooks;
   notified: Set<HumanReason>;
   loginAttempted: boolean;
+  /** La web ha avisado de un límite de entradas: no insistir con la misma cantidad. */
+  limitHit: boolean;
 }
 
 async function humanOnce(ctx: FlowCtx, reason: HumanReason, message: string): Promise<void> {
@@ -325,13 +329,17 @@ async function waitForCartQty(ctx: FlowCtx, target: number, timeoutMs: number): 
   return last;
 }
 
-/** Atiende diálogos hasta que no quede ninguno (máximo 6). */
+/** Atiende diálogos hasta que no quede ninguno (máximo 6). Devuelve false si la web rechazó algo. */
 async function settleDialogs(ctx: FlowCtx): Promise<boolean> {
   let cancelled = false;
   for (let i = 0; i < 6; i++) {
     const outcome = await handleDialog(ctx.page, ctx.hooks, { contiguous: ctx.prefs.contiguous });
     if (outcome === 'none') break;
     if (outcome === 'alert-cancelled') cancelled = true;
+    if (outcome === 'alert-limit') {
+      cancelled = true;
+      ctx.limitHit = true;
+    }
     await sleep(400, ctx.deps.signal);
   }
   return !cancelled;
@@ -557,9 +565,10 @@ async function selectSeatsOnMap(ctx: FlowCtx, zoneName: string): Promise<boolean
       const cart = await waitForCartQty(ctx, prefs.quantity, 8000);
       if (cart && cart.quantity >= prefs.quantity) return true;
     }
-    hooks.log('warn', 'Bloque incompleto: libero lo añadido y pruebo con otro bloque.');
+    hooks.log('warn', 'Bloque incompleto: libero lo añadido' + (ctx.limitHit ? '.' : ' y pruebo con otro bloque.'));
     await releaseCart(page, hooks);
     await sleep(800, ctx.deps.signal);
+    if (ctx.limitHit) return false;
   }
   return false;
 }
@@ -629,7 +638,23 @@ async function selectInView(ctx: FlowCtx, item: ViewItem, depth = 0): Promise<st
   return null;
 }
 
+/** Intenta con la cantidad pedida y, si se permite, con menos (hasta 1). */
 async function selectTickets(ctx: FlowCtx): Promise<string | null> {
+  const wanted = ctx.opts.quantity;
+  const quantities = ctx.opts.fallbackFewer ? Array.from({ length: wanted }, (_, i) => wanted - i) : [wanted];
+  for (const qty of quantities) {
+    ctx.prefs.quantity = qty;
+    ctx.limitHit = false;
+    if (qty !== wanted) ctx.hooks.log('warn', `No hay ${qty + 1} entradas que cumplan: pruebo con ${qty}.`);
+    const r = await selectTicketsFor(ctx);
+    if (r) return r;
+    if (ctx.deps.signal.aborted) break;
+  }
+  ctx.prefs.quantity = wanted;
+  return null;
+}
+
+async function selectTicketsFor(ctx: FlowCtx): Promise<string | null> {
   const { page, prefs, hooks } = ctx;
   const mode = await waitForSelectContent(page, 30_000);
   if (!mode) {
@@ -714,7 +739,7 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
-    const ctx: FlowCtx = { page, opts, deps, prefs, hooks: { log: (l, m) => hooks.log(l, m) }, notified: new Set(), loginAttempted: false };
+    const ctx: FlowCtx = { page, opts, deps, prefs, hooks: { log: (l, m) => hooks.log(l, m) }, notified: new Set(), loginAttempted: false, limitHit: false };
     const start = opts.eventUrl ? normalizeEventUrl(opts.eventUrl) : REAL_MADRID_CHANNEL_HOME;
     hooks.log('info', opts.eventUrl ? `Entrando en ${start}` : `Entrando en el canal del Real Madrid Femenino: ${start}`);
     await page.goto(start, { waitUntil: 'domcontentloaded', timeout: 60_000 });
@@ -740,7 +765,7 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
       await humanOnce(
         ctx,
         'selection',
-        `No he podido seleccionar ${opts.quantity} entrada(s) que cumplan tus preferencias. Elige tú los asientos en la ventana del bot: yo detecto el carrito y te aviso.`,
+        `No he podido seleccionar ${opts.fallbackFewer ? 'ninguna entrada' : `${opts.quantity} entrada(s)`} que cumpla tus preferencias. Elige tú los asientos en la ventana del bot: yo detecto el carrito y te aviso.`,
       );
       const cart = await waitForCartQty(ctx, 1, deps.humanWaitMs);
       if (!cart || cart.quantity === 0) throw new Error('No se ha llegado al carrito dentro del tiempo de espera.');
@@ -753,6 +778,7 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
       const expensive = cart.items.filter((i) => i.unitPrice !== null && i.unitPrice > prefs.maxUnitPrice!);
       if (expensive.length) hooks.log('warn', `Ojo: ${expensive.length} línea(s) del carrito superan el precio máximo (${eur(prefs.maxUnitPrice)}).`);
     }
+    if (cart.quantity < opts.quantity) hooks.log('warn', `Pedías ${opts.quantity} y hay ${cart.quantity} en el carrito (no había más que cumplieran).`);
     hooks.log('ok', `¡${cart.quantity} entrada(s) en el carrito! Total ${eur(cart.total)}${cart.expiresAt ? `, caduca a las ${new Date(cart.expiresAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' })}` : ''}.`);
     const screenshot = path.join(deps.capturesDir, `carrito-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
     const shotOk = await page.screenshot({ path: screenshot }).then(() => true).catch(() => false);

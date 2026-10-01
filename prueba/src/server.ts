@@ -58,7 +58,9 @@ export function parseRunOptions(body: Record<string, unknown>, cfg: PruebaConfig
   const rawMax = String(body['maxUnitPrice'] ?? '').trim().replace(',', '.');
   const maxEur = rawMax === '' ? null : Number(rawMax);
   if (maxEur !== null && (!Number.isFinite(maxEur) || maxEur <= 0)) throw new Error('El precio máximo no es válido.');
-  const contiguous = body['contiguous'] === undefined ? cfg.defaults.contiguous : body['contiguous'] === true || body['contiguous'] === 'true' || body['contiguous'] === 1;
+  const flag = (key: string, fallback: boolean): boolean => (body[key] === undefined ? fallback : body[key] === true || body[key] === 'true' || body[key] === 1);
+  const contiguous = flag('contiguous', cfg.defaults.contiguous);
+  const fallbackFewer = flag('fallback', cfg.defaults.fallbackFewer);
 
   let eventUrl: string;
   if (mode === 'simulado') {
@@ -91,6 +93,7 @@ export function parseRunOptions(body: Record<string, unknown>, cfg: PruebaConfig
     zones,
     maxUnitPrice: maxEur === null ? null : Math.round(maxEur * 100),
     contiguous,
+    fallbackFewer,
     // En modo real la ventana siempre es visible: puede hacer falta que intervengas.
     headless: mode === 'simulado' && body['headless'] === true,
   };
@@ -113,6 +116,7 @@ export function createAppServer(cfg: PruebaConfig, runner: Runner): Server {
               zones: cfg.defaults.zones.join(', '),
               maxUnitPriceEur: cfg.defaults.maxUnitPriceEur,
               contiguous: cfg.defaults.contiguous,
+              fallbackFewer: cfg.defaults.fallbackFewer,
             }),
           );
           return;

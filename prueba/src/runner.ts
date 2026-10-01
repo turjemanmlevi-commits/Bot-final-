@@ -182,7 +182,8 @@ export class Runner extends EventEmitter {
       `${options.quantity} entrada(s)`,
       options.contiguous && options.quantity > 1 ? 'seguidas' : null,
       options.zones.length ? `zonas: ${options.zones.join(' > ')}` : 'zona: la más barata',
-      options.maxUnitPrice !== null ? `máx. ${eur(options.maxUnitPrice)}/entrada` : null,
+      options.maxUnitPrice !== null ? `máx. ${eur(options.maxUnitPrice)}/entrada` : 'sin tope de precio',
+      options.fallbackFewer && options.quantity > 1 ? 'si no hay tantas, menos' : null,
       options.eventUrl ? null : 'partido: el próximo a la venta',
     ].filter(Boolean);
     this.log('info', `Prueba ${id} en modo ${options.mode.toUpperCase()} — ${reqs.join(', ')}.`);
@@ -248,7 +249,8 @@ export class Runner extends EventEmitter {
     ].filter((l, i, a) => l !== '' || a[i - 1] !== '');
     const keyboard: Keyboard = [];
     if (isTelegramButtonUrl(cart.url)) {
-      keyboard.push([{ text: '🌐 Abrir la web del partido', url: cart.url }]);
+      lines.push('', `🔗 Enlace: ${escapeHtml(cart.url)}`, '<i>(el carrito está en la ventana del bot de tu PC; en el móvil verás la web del partido)</i>');
+      keyboard.push([{ text: '🔗 Abrir el enlace del partido', url: cart.url }]);
     } else {
       lines.push('', `Enlace al carrito (en tu PC): <code>${escapeHtml(cart.url)}</code>`);
     }

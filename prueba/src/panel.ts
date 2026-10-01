@@ -6,6 +6,7 @@ export interface PanelDefaults {
   zones: string;
   maxUnitPriceEur: number | null;
   contiguous: boolean;
+  fallbackFewer: boolean;
 }
 
 function attr(s: string): string {
@@ -52,6 +53,9 @@ export function panelHtml(d: PanelDefaults): string {
   <section class="card">
     <h1>Prueba de carrito · Real Madrid Femenino</h1>
     <p class="muted">Web del Real Madrid → partido del femenino → asientos → carrito → aviso por Telegram. El pago siempre lo haces tú.</p>
+    <button class="primary" id="quick" type="button" style="margin-top:4px">⚡ Prueba rápida: 3 entradas seguidas, cualquier zona</button>
+    <p class="note">Entra en tickets.realmadrid.com, coge el próximo partido del femenino a la venta, mete 3 entradas seguidas (si no hay 3, las que haya) en el carrito y te manda el aviso con el enlace por Telegram.</p>
+    <details style="margin-top:12px"><summary>Prueba con mis propios requisitos</summary>
     <form id="f">
       <label>Modo</label>
       <div class="modes">
@@ -67,6 +71,7 @@ export function panelHtml(d: PanelDefaults): string {
       <label for="quantity">Entradas</label>
       <input id="quantity" type="number" min="1" max="10" value="${d.quantity}">
       <label class="check"><input id="contiguous" type="checkbox" ${d.contiguous ? 'checked' : ''}> Asientos seguidos (misma fila)</label>
+      <label class="check"><input id="fallback" type="checkbox" ${d.fallbackFewer ? 'checked' : ''}> Si no hay tantas, acepta menos entradas</label>
       <label for="zones">Zonas preferidas (en orden, separadas por comas)</label>
       <input id="zones" type="text" placeholder="Lateral Oeste, Tribuna" value="${attr(d.zones)}">
       <p class="note">Vacío = la zona más barata que tenga sitio. Vale con parte del nombre («oeste», «tribuna»).</p>
@@ -82,6 +87,7 @@ export function panelHtml(d: PanelDefaults): string {
       </div>
       <button class="primary" id="go" type="submit">▶ Hacer prueba</button>
     </form>
+    </details>
     <p class="note" id="tg"></p>
     <details id="tgbox" style="margin-top:8px">
       <summary>Conectar Telegram</summary>
@@ -120,17 +126,20 @@ function syncMode(){ document.body.classList.toggle('real', document.querySelect
 document.querySelectorAll('input[name=mode]').forEach((r) => r.addEventListener('change', syncMode));
 syncMode();
 
-$('#f').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const body = {
-    mode: document.querySelector('input[name=mode]:checked').value,
-    eventUrl: $('#eventUrl').value, quantity: Number($('#quantity').value), zones: $('#zones').value,
-    maxUnitPrice: $('#maxUnitPrice').value, contiguous: $('#contiguous').checked,
-    entry: $('#entry').checked ? 'canal' : 'partido', queue: $('#queue').checked, challenge: $('#challenge').checked,
-    auto: $('#auto').checked, list: $('#list').checked, headless: $('#headless').checked,
-  };
+async function start(body) {
   const r = await fetch('/api/prueba', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify(body) });
   if (!r.ok) alert((await r.json()).error);
+}
+$('#quick').addEventListener('click', () => start({ mode: 'real', eventUrl: '', quantity: 3, zones: '', maxUnitPrice: '', contiguous: true, fallback: true }));
+$('#f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  await start({
+    mode: document.querySelector('input[name=mode]:checked').value,
+    eventUrl: $('#eventUrl').value, quantity: Number($('#quantity').value), zones: $('#zones').value,
+    maxUnitPrice: $('#maxUnitPrice').value, contiguous: $('#contiguous').checked, fallback: $('#fallback').checked,
+    entry: $('#entry').checked ? 'canal' : 'partido', queue: $('#queue').checked, challenge: $('#challenge').checked,
+    auto: $('#auto').checked, list: $('#list').checked, headless: $('#headless').checked,
+  });
 });
 document.querySelectorAll('[data-d]').forEach((b) => b.addEventListener('click', async () => {
   const r = await fetch('/api/decision', { method: 'POST', headers: {'content-type':'application/json'}, body: JSON.stringify({ decision: b.dataset.d }) });
@@ -151,6 +160,7 @@ function render(s) {
   $('#status').textContent = s.status; $('#status').className = 'pill ' + s.status;
   const busy = ['RUNNING','WAITING_HUMAN','CART_SECURED'].includes(s.status);
   $('#go').disabled = busy; $('#go').textContent = busy ? 'Prueba en marcha…' : '▶ Hacer prueba';
+  $('#quick').disabled = busy; $('#quick').textContent = busy ? 'Prueba en marcha…' : '⚡ Prueba rápida: 3 entradas seguidas, cualquier zona';
   $('#tg').textContent = 'Telegram: ' + s.telegram.detail;
   if (!tgOpened) { tgOpened = true; $('#tgbox').open = !s.telegram.configured; }
   $('#log').innerHTML = s.log.length ? s.log.map((l) => '<li class="l-' + l.level + '">' + new Date(l.at).toLocaleTimeString('es-ES') + '  ' + esc(l.message) + '</li>').join('') : '<li class="muted">Pulsa «Hacer prueba» para empezar.</li>';

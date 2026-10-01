@@ -393,7 +393,7 @@ async function pickRate(dialog: Locator, hooks: Hooks): Promise<void> {
   }
 }
 
-export type DialogOutcome = 'none' | 'seat-confirmed' | 'alert-continued' | 'alert-cancelled' | 'closed';
+export type DialogOutcome = 'none' | 'seat-confirmed' | 'alert-continued' | 'alert-cancelled' | 'alert-limit' | 'closed';
 
 /**
  * Atiende el diálogo abierto (si lo hay): tarifa de un asiento, aviso de asientos
@@ -450,10 +450,10 @@ export async function handleDialog(page: Page, hooks: Hooks, opts: { contiguous:
     return 'alert-cancelled';
   }
   if (limit && !orphan) {
-    hooks.log('warn', `Aviso de la web: ${t.slice(0, 160)}`);
+    hooks.log('warn', `Aviso de la web (límite): ${t.slice(0, 160)}`);
     await clickButton(cancel.b);
     await sleep(300);
-    return 'alert-cancelled';
+    return 'alert-limit';
   }
   hooks.log('info', `Aviso de la web: «${t.slice(0, 120)}» → «${action.t}».`);
   await clickButton(action.b);

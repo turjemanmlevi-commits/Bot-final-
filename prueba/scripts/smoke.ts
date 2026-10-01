@@ -194,6 +194,7 @@ await step('catálogo → partido → cola → login → 3 asientos seguidos en 
   assert.match(msg.text, /Total:<\/b> 75,00 €/);
   assert.match(msg.text, /asientos elegidos en el plano/);
   assert.ok(msg.keyboard.flat().every((b) => !b.url), 'URL local: no va en botón');
+  assert.match(msg.text, /Enlace al carrito \(en tu PC\)/);
   const yes = msg.keyboard.flat().find((b) => b.callback_data?.startsWith('comprar:'));
   assert.ok(yes);
   pendingPresses.push(yes.callback_data!);
@@ -250,6 +251,27 @@ await step('lista de zonas sin plano: la preferida agotada → siguiente; «No, 
   assert.ok(sent.some((s) => /no se compran/.test(s.text)));
 });
 
+await step('prueba rápida: pide 6 seguidas, el límite de la web es 4 → acepta 4 seguidas', async () => {
+  await resetMock();
+  sent.length = 0;
+  await api('/api/prueba', { mode: 'simulado', quantity: 6, zones: 'Tribuna Lateral', contiguous: true, fallback: true, headless: true, login: false });
+  await waitFor(['CART_SECURED', 'FAILED'], 150_000);
+  assert.equal(runner.state.status, 'CART_SECURED', runner.state.error ?? logText());
+  assert.equal(runner.state.cart!.qty, 4);
+  const items = (await mockState()).carts[0]!.items;
+  assert.equal(items.length, 4);
+  assert.ok(items.every((i) => i.row === items[0]!.row), 'misma fila');
+  const seats = items.map((i) => i.seat!).sort((a, b) => a - b);
+  assert.deepEqual(seats, [seats[0], seats[0]! + 1, seats[0]! + 2, seats[0]! + 3]);
+  assert.match(logText(), /Aviso de la web \(límite\)/);
+  assert.match(logText(), /pruebo con 4/);
+  assert.match(logText(), /Pedías 6 y hay 4/);
+  const msg = sent.find((s) => /Quieres comprar las entradas/.test(s.text));
+  assert.ok(msg);
+  assert.match(msg.text, /4 × |1 × Tribuna Lateral/);
+  await runner.closeSession();
+});
+
 await step('sin zona que cumpla el precio → pide ayuda humana; oculto → falla con mensaje claro', async () => {
   await resetMock();
   sent.length = 0;
@@ -269,6 +291,10 @@ await step('validación: modo real acepta URL vacía (elige el partido) y rechaz
   assert.equal(opts.headless, false);
   assert.deepEqual(opts.zones, ['Grada Oeste']);
   assert.equal(opts.contiguous, true);
+  assert.equal(opts.fallbackFewer, true);
+  // Lo que manda el botón «Prueba rápida» del panel.
+  const quick = parseRunOptions({ mode: 'real', eventUrl: '', quantity: 3, zones: '', maxUnitPrice: '', contiguous: true, fallback: true }, cfg, 3000);
+  assert.deepEqual([quick.quantity, quick.zones, quick.maxUnitPrice, quick.contiguous, quick.fallbackFewer, quick.headless], [3, [], null, true, true, false]);
   const real = parseRunOptions({ mode: 'real', eventUrl: 'https://tickets.realmadrid.com/realmadrid_femenino/select/3007478?hl=es-ES' }, cfg, 3000);
   assert.match(real.eventUrl, /^https:\/\/tickets\.realmadrid\.com/);
 });

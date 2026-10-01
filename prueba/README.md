@@ -48,8 +48,8 @@ En el panel, **Conectar Telegram**: pega el token de tu bot (de @BotFather), esc
 
 ## La prueba real, paso a paso
 
-1. En el panel deja **Web real**, pon **Entradas: 3**, marca **Asientos seguidos**, pon tus **zonas** (p. ej. `Grada Oeste, Tribuna`; vale con parte del nombre, en el orden que prefieras) y, si quieres, un **precio máximo**. El partido déjalo vacío: el bot coge el próximo del femenino a la venta.
-2. Pulsa **▶ Hacer prueba**. Se abre la ventana de Chrome del bot y en el panel ves cada paso.
+1. Pulsa **⚡ Prueba rápida** en el panel. Los requisitos ya van puestos: el próximo partido del femenino a la venta, **3 entradas seguidas**, cualquier zona (la más barata con sitio), sin tope de precio, y si no hay 3 seguidas coge las que haya. Si prefieres otros requisitos, despliega «Prueba con mis propios requisitos».
+2. Se abre la ventana de Chrome del bot y en el panel ves cada paso.
 3. **La primera vez** la web pedirá iniciar sesión: hazlo tú en esa ventana (el bot avisa por Telegram y espera). Queda guardado en `data/prueba/perfil-navegador/` para las siguientes.
 4. Cuando las entradas estén en el carrito te llega el Telegram con la captura. **Sí** → te deja el carrito abierto para que pagues tú. **No** → libera las entradas.
 

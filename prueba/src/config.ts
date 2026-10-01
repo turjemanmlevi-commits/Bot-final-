@@ -26,6 +26,8 @@ export interface PruebaConfig {
     maxUnitPriceEur: number | null;
     /** Exigir asientos seguidos en la misma fila. */
     contiguous: boolean;
+    /** Si no hay tantas, aceptar menos entradas. */
+    fallbackFewer: boolean;
   };
   /** Cuánto espera el bot a que resuelvas tú un login, CAPTCHA o cola. */
   humanWaitMs: number;
@@ -94,6 +96,7 @@ export function loadConfig(): PruebaConfig {
         .filter(Boolean),
       maxUnitPriceEur: maxPrice === null ? null : num('PRUEBA_PRECIO_MAX', 0),
       contiguous: (str('PRUEBA_JUNTOS') ?? '1') !== '0',
+      fallbackFewer: (str('PRUEBA_ACEPTAR_MENOS') ?? '1') !== '0',
     },
     humanWaitMs: num('PRUEBA_ESPERA_HUMANO_MIN', 5) * 60_000,
     cartHoldMs: num('PRUEBA_RETENCION_CARRITO_MIN', 10) * 60_000,
