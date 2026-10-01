@@ -32,6 +32,8 @@ export interface MockFlags {
   auto: boolean;
   /** Lista de zonas sin plano. */
   list: boolean;
+  /** Diálogo de venta cruzada al pulsar «Comprar entradas». */
+  cross: boolean;
 }
 
 export function mockEventUrl(cfg: PruebaConfig, port: number, flags: Partial<MockFlags> = {}): string {
@@ -42,6 +44,7 @@ export function mockEventUrl(cfg: PruebaConfig, port: number, flags: Partial<Moc
   if (flags.login === false) q.set('login', '0');
   if (flags.auto) q.set('auto', '1');
   if (flags.list) q.set('lista', '1');
+  if (flags.cross) q.set('cruzada', '1');
   const s = q.toString();
   return s ? `${base}?${s}` : base;
 }
@@ -71,6 +74,7 @@ export function parseRunOptions(body: Record<string, unknown>, cfg: PruebaConfig
       login: body['login'] !== false,
       auto: body['auto'] === true,
       list: body['list'] === true,
+      cross: body['cross'] === true,
     });
   } else {
     eventUrl = String(body['eventUrl'] ?? '').trim();

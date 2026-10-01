@@ -98,6 +98,7 @@ async function api(p: string, body?: unknown): Promise<{ status: number; json: R
 interface MockState {
   carts: Array<{ sid: string; items: Array<{ zoneName: string; row: number | null; seat: number | null; qty: number; priceCents: number }> }>;
   paid: boolean;
+  booked: boolean;
   checkoutVisited: boolean;
 }
 const mockState = async (): Promise<MockState> => (await api('/mock/api/state')).json as unknown as MockState;
@@ -154,7 +155,7 @@ await step('unidad: zonas y bloques de asientos seguidos', async () => {
   assert.equal(chooseSeatBlock([geo[3]!, geo[4]!], 3, true), null);
 });
 
-await step('catálogo → partido → cola → login → 3 asientos seguidos en «Grada Oeste» → Telegram «Sí»', async () => {
+await step('catálogo → partido → cola → login → 3 asientos seguidos en «Grada Oeste» → «Comprar entradas» → pantalla de pago → Telegram «Sí»', async () => {
   await resetMock();
   const { status } = await api('/api/prueba', {
     mode: 'simulado',
@@ -164,6 +165,7 @@ await step('catálogo → partido → cola → login → 3 asientos seguidos en 
     maxUnitPrice: '30',
     contiguous: true,
     queue: true,
+    cross: true,
     headless: true,
   });
   assert.equal(status, 202);
@@ -176,13 +178,19 @@ await step('catálogo → partido → cola → login → 3 asientos seguidos en 
   assert.ok(cart.items.every((i) => /Lateral Oeste/.test(i.sectionLabel)), JSON.stringify(cart.items));
   assert.ok(cart.expiresAt, 'debe leer la cuenta atrás del carrito');
   assert.equal(cart.eventTitle, 'Real Madrid Femenino - FC Barcelona');
-  // En la web: 3 asientos seguidos de la misma fila (fila 2: 5, 6, 7) y nada pagado.
+  // Tras el carrito, «Comprar entradas» → diálogo de venta cruzada → pantalla de pago (sin pagar ni reservar).
+  assert.equal(cart.stage, 'checkout');
+  assert.match(cart.url, /\/mock\/realmadrid_femenino\/checkout/);
+  assert.match(logText(), /Diálogo al ir al checkout: pulso «ir al checkout»/);
+  assert.match(logText(), /Pantalla de pago abierta en la ventana del bot/);
+  // En la web: 3 asientos seguidos de la misma fila (fila 2: 5, 6, 7), checkout abierto y nada pagado.
   const st = await mockState();
   assert.equal(st.carts.length, 1);
   const seats = st.carts[0]!.items.map((i) => [i.zoneName, i.row, i.seat]);
   assert.deepEqual(seats, [['Lateral Oeste', 2, 5], ['Lateral Oeste', 2, 6], ['Lateral Oeste', 2, 7]]);
+  assert.equal(st.checkoutVisited, true);
   assert.equal(st.paid, false);
-  assert.equal(st.checkoutVisited, false);
+  assert.equal(st.booked, false);
   assert.match(logText(), /En cola virtual/);
   assert.match(logText(), /Iniciando sesión con prueba@ejemplo\.com/);
   assert.match(logText(), /Partido elegido: Real Madrid Femenino - FC Barcelona/);
@@ -190,6 +198,8 @@ await step('catálogo → partido → cola → login → 3 asientos seguidos en 
   const msg = sent.find((s) => /Quieres comprar las entradas/.test(s.text));
   assert.ok(msg, 'debe enviar el aviso del carrito a Telegram');
   assert.equal(msg.method, 'sendPhoto');
+  assert.match(msg.text, /pantalla de pago abierta en tu PC/);
+  assert.ok(runner.state.cart!.screenshot && /\/pago-/.test(runner.state.cart!.screenshot), 'la captura es de la pantalla de pago');
   assert.match(msg.text, /1 × Lateral Oeste · Fila 2 Asiento 5 — 25,00 €/);
   assert.match(msg.text, /Total:<\/b> 75,00 €/);
   assert.match(msg.text, /asientos elegidos en el plano/);
@@ -197,11 +207,15 @@ await step('catálogo → partido → cola → login → 3 asientos seguidos en 
   assert.match(msg.text, /Enlace al carrito \(en tu PC\)/);
   const yes = msg.keyboard.flat().find((b) => b.callback_data?.startsWith('comprar:'));
   assert.ok(yes);
+  assert.equal(yes.text, '✅ Sí, voy a pagar');
   pendingPresses.push(yes.callback_data!);
   await waitFor(['OPENED']);
-  assert.ok(sent.some((s) => /Completa|Carrito listo/.test(s.text)));
+  // Oculto: el aviso lleva la URL; visible: «paga tú allí».
+  assert.ok(sent.some((s) => /paga tú allí|Carrito listo/.test(s.text)));
   // El carrito sigue vivo (ni pagado ni liberado).
-  assert.equal((await mockState()).carts[0]!.items.length, 3);
+  const after = await mockState();
+  assert.equal(after.carts[0]!.items.length, 3);
+  assert.equal(after.paid, false);
   await runner.closeSession();
 });
 
@@ -235,7 +249,7 @@ await step('zona sin numerar (contador + «Añadir al carrito»)', async () => {
   await runner.closeSession();
 });
 
-await step('lista de zonas sin plano: la preferida agotada → siguiente; «No, liberar» vacía el carrito', async () => {
+await step('lista de zonas sin plano: la preferida agotada → siguiente; «No, liberar» desde la pantalla de pago vacía el carrito', async () => {
   await resetMock();
   sent.length = 0;
   await api('/api/prueba', { mode: 'simulado', quantity: 2, zones: 'Fondo Norte, Fondo Sur', maxUnitPrice: '20', list: true, headless: true, login: false });
@@ -244,6 +258,7 @@ await step('lista de zonas sin plano: la preferida agotada → siguiente; «No, 
   assert.match(runner.state.cart!.strategy, /^lista:Fondo Sur/);
   assert.equal(runner.state.cart!.qty, 2);
   assert.equal(runner.state.cart!.total, 3000);
+  assert.equal(runner.state.cart!.stage, 'checkout');
   const r = await api('/api/decision', { decision: 'cancelar' });
   assert.equal(r.status, 200);
   await waitFor(['CANCELLED']);

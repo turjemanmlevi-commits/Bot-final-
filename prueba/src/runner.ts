@@ -234,8 +234,9 @@ export class Runner extends EventEmitter {
   private async sendCartMessage(id: string, cart: SecuredCart): Promise<void> {
     const strategyKey = cart.strategy.split(':')[0] ?? '';
     const strategyZone = cart.strategy.split(':').slice(1).join(':');
+    const inCheckout = cart.stage === 'checkout';
     const lines = [
-      '🎟️ <b>¡Entradas en el carrito!</b>',
+      inCheckout ? '🎟️ <b>¡Entradas en el carrito y pantalla de pago abierta en tu PC!</b>' : '🎟️ <b>¡Entradas en el carrito!</b>',
       '',
       `<b>Partido:</b> ${escapeHtml(cart.eventTitle)}`,
       `<b>Cuenta:</b> ${escapeHtml(this.state.account ?? '—')}`,
@@ -245,7 +246,7 @@ export class Runner extends EventEmitter {
       STRATEGY_LABEL[strategyKey] ? `<i>(${STRATEGY_LABEL[strategyKey]}${strategyZone ? ` · ${escapeHtml(strategyZone)}` : ''})</i>` : '',
       '',
       '<b>¿Quieres comprar las entradas?</b>',
-      '<i>El pago lo haces tú: el bot nunca paga.</i>',
+      inCheckout ? '<i>En la ventana del bot de tu PC solo queda rellenar los datos y pagar. El bot nunca paga.</i>' : '<i>El pago lo haces tú: el bot nunca paga.</i>',
     ].filter((l, i, a) => l !== '' || a[i - 1] !== '');
     const keyboard: Keyboard = [];
     if (isTelegramButtonUrl(cart.url)) {
@@ -255,7 +256,7 @@ export class Runner extends EventEmitter {
       lines.push('', `Enlace al carrito (en tu PC): <code>${escapeHtml(cart.url)}</code>`);
     }
     keyboard.push([
-      { text: '✅ Sí, ábreme el carrito', callback_data: `comprar:${id}` },
+      { text: inCheckout ? '✅ Sí, voy a pagar' : '✅ Sí, ábreme el carrito', callback_data: `comprar:${id}` },
       { text: '❌ No, liberar', callback_data: `cancelar:${id}` },
     ]);
     this.log('ok', this.telegram ? 'Enviando aviso a Telegram: «¿Quieres comprar las entradas?»' : 'Telegram sin configurar: responde desde este panel.');
@@ -293,15 +294,20 @@ export class Runner extends EventEmitter {
     if (decision === 'comprar') {
       await session.page.bringToFront().catch(() => undefined);
       const visible = !this.state.options?.headless;
+      const inCheckout = session.cart.stage === 'checkout';
       this.finish(
         'OPENED',
         visible
-          ? 'Carrito abierto en la ventana del bot. Completa tú el pago allí (el bot no toca nada más).'
+          ? inCheckout
+            ? 'Pantalla de pago abierta en la ventana del bot. Completa tú el pago allí (el bot no toca nada más).'
+            : 'Carrito abierto en la ventana del bot. Completa tú el pago allí (el bot no toca nada más).'
           : `Carrito listo en ${session.cart.url} (navegador oculto: ábrelo tú).`,
       );
       await this.notify(
         visible
-          ? '✅ Te he dejado el carrito abierto en la ventana del bot en tu ordenador. <b>Completa tú el pago allí.</b>'
+          ? inCheckout
+            ? '✅ La pantalla de pago está abierta en la ventana del bot de tu ordenador. <b>Rellena los datos y paga tú allí.</b>'
+            : '✅ Te he dejado el carrito abierto en la ventana del bot en tu ordenador. <b>Completa tú el pago allí.</b>'
           : `✅ Carrito listo. Ábrelo aquí: <code>${escapeHtml(session.cart.url)}</code>`,
       );
       return;

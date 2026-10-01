@@ -16,7 +16,9 @@ import {
   chooseSeatBlock,
   classifyOnebox,
   clickButton,
+  clickGoToCheckout,
   dumpDiagnostics,
+  handleGoToCheckoutDialog,
   goToFirstSession,
   handleDialog,
   isPaymentButton,
@@ -88,6 +90,8 @@ export interface SecuredCart {
   assisted: boolean;
   /** Cómo se seleccionó: plano, automático, lista… */
   strategy: string;
+  /** 'checkout' si la ventana del bot está ya en la pantalla de pago; 'cart' si se quedó en la selección. */
+  stage: 'checkout' | 'cart';
 }
 
 export interface BotSession {
@@ -424,8 +428,8 @@ async function selectAutomatic(ctx: FlowCtx, item: ViewItem): Promise<string | n
         const b = boxes.nth(i);
         if (!(await isVisible(b))) continue;
         const t = await innerText(b);
-        const cls = ((await b.getAttribute('class')) ?? '') + ' ' + ((await b.locator('.ob-pz-box').first().getAttribute('class').catch(() => null)) ?? '');
-        zones.push({ i, name: (await innerText(b.locator('.ob-pz-name').first())) || t.slice(0, 60), price: parseEuros(t), selected: /selected|active/.test(cls) || (await b.getAttribute('aria-selected')) === 'true' });
+        const cls = ((await b.getAttribute('class', { timeout: 600 })) ?? '') + ' ' + ((await b.locator('.ob-pz-box').first().getAttribute('class', { timeout: 600 }).catch(() => null)) ?? '');
+        zones.push({ i, name: (await innerText(b.locator('.ob-pz-name').first())) || t.slice(0, 60), price: parseEuros(t), selected: /selected|active/.test(cls) || (await b.getAttribute('aria-selected', { timeout: 600 })) === 'true' });
       }
       const ranked = zones
         .filter((z) => prefs.maxUnitPrice === null || z.price === null || z.price <= prefs.maxUnitPrice)
@@ -457,7 +461,7 @@ async function selectAutomatic(ctx: FlowCtx, item: ViewItem): Promise<string | n
       let clicked = false;
       for (let j = 0; j < no && !clicked; j++) {
         const o = opts.nth(j);
-        if ((await isVisible(o)) && (await o.getAttribute('aria-disabled')) !== 'true') {
+        if ((await isVisible(o)) && (await o.getAttribute('aria-disabled', { timeout: 600 })) !== 'true') {
           await o.click({ timeout: 3000 }).catch(() => undefined);
           clicked = true;
         }
@@ -472,7 +476,7 @@ async function selectAutomatic(ctx: FlowCtx, item: ViewItem): Promise<string | n
     for (let i = na - 1; i >= 0; i--) {
       const a = actions.nth(i);
       if (!(await isVisible(a)) || (await isPaymentButton(a))) continue;
-      const color = (await a.getAttribute('color')) ?? '';
+      const color = (await a.getAttribute('color', { timeout: 600 })) ?? '';
       const t = normalize(await innerText(a));
       if (color === 'primary' || /siguiente|next|buscar|search|a[ñn]adir|add|confirmar|confirm|continuar|continue/.test(t)) {
         primary = a;
@@ -486,7 +490,7 @@ async function selectAutomatic(ctx: FlowCtx, item: ViewItem): Promise<string | n
       return null;
     }
     const inner = primary.locator('button').first();
-    const enabled = (await inner.count()) > 0 ? await inner.isEnabled().catch(() => false) : await primary.isEnabled().catch(() => false);
+    const enabled = (await inner.count()) > 0 ? await inner.isEnabled({ timeout: 800 }).catch(() => false) : await primary.isEnabled({ timeout: 800 }).catch(() => false);
     if (!enabled) {
       await sleep(800, ctx.deps.signal);
       continue;
@@ -545,7 +549,7 @@ async function selectSeatsOnMap(ctx: FlowCtx, zoneName: string): Promise<boolean
       let confirmed = false;
       while (Date.now() < end) {
         await settleDialogs(ctx);
-        const cls = (await loc.getAttribute('class').catch(() => null)) ?? '';
+        const cls = (await loc.getAttribute('class', { timeout: 600 }).catch(() => null)) ?? '';
         const qty = await cartQuantity(page);
         if (/\bselected\b/.test(cls) || qty > before) {
           confirmed = true;
@@ -705,7 +709,32 @@ async function eventTitle(page: Page): Promise<string> {
   return (await page.title().catch(() => '')) || 'Partido';
 }
 
-function toSecuredCart(page: Page, cart: CartReadback, title: string, strategy: string, assisted: boolean): Omit<SecuredCart, 'screenshot'> {
+/** Tras el carrito: pulsa «Comprar entradas» y espera la pantalla de checkout (datos y pago). Nunca paga. */
+async function goToCheckout(ctx: FlowCtx): Promise<boolean> {
+  const { page, hooks } = ctx;
+  if (!(await clickGoToCheckout(page, hooks))) {
+    hooks.log('warn', 'No encuentro el botón «Comprar entradas»: te mando la captura del carrito tal cual.');
+    return false;
+  }
+  const end = Date.now() + 25_000;
+  while (Date.now() < end) {
+    await handleGoToCheckoutDialog(page, hooks);
+    const kind = await passGates(ctx, end);
+    if (kind === 'checkout') {
+      // La pantalla de pago carga su resumen.
+      await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
+      await sleep(1500, ctx.deps.signal);
+      hooks.log('ok', 'Pantalla de pago abierta en la ventana del bot. Aquí me paro: el pago lo haces tú.');
+      return true;
+    }
+    await sleep(700, ctx.deps.signal);
+  }
+  hooks.log('warn', 'La web no ha abierto la pantalla de pago: te mando la captura del carrito tal cual.');
+  await dumpDiagnostics(page, ctx.deps.capturesDir, 'sin-checkout', hooks);
+  return false;
+}
+
+function toSecuredCart(page: Page, cart: CartReadback, title: string, strategy: string, assisted: boolean, stage: SecuredCart['stage']): Omit<SecuredCart, 'screenshot'> {
   const items: CartItem[] = cart.items.map((i) => ({
     claimId: null,
     sectionId: null,
@@ -717,7 +746,7 @@ function toSecuredCart(page: Page, cart: CartReadback, title: string, strategy: 
   }));
   const known = items.filter((i) => i.unitPrice > 0);
   const total = cart.total ?? (known.length === items.length && items.length > 0 ? items.reduce((s, i) => s + i.qty * i.unitPrice, 0) : null);
-  return { url: page.url(), eventTitle: title, items, qty: cart.quantity, total, currency: 'EUR', expiresAt: cart.expiresAt, assisted, strategy };
+  return { url: page.url(), eventTitle: title, items, qty: cart.quantity, total, currency: 'EUR', expiresAt: cart.expiresAt, assisted, strategy, stage };
 }
 
 // ---------------------------------------------------------------------------
@@ -780,10 +809,15 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
     }
     if (cart.quantity < opts.quantity) hooks.log('warn', `Pedías ${opts.quantity} y hay ${cart.quantity} en el carrito (no había más que cumplieran).`);
     hooks.log('ok', `¡${cart.quantity} entrada(s) en el carrito! Total ${eur(cart.total)}${cart.expiresAt ? `, caduca a las ${new Date(cart.expiresAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' })}` : ''}.`);
-    const screenshot = path.join(deps.capturesDir, `carrito-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
+    // «Comprar entradas» → pantalla de pago. El resumen del checkout también se lee (líneas, total, cuenta atrás).
+    const inCheckout = await goToCheckout(ctx);
+    const finalCart = inCheckout ? ((await readCartSummary(page)) ?? cart) : cart;
+    const stage: SecuredCart['stage'] = inCheckout ? 'checkout' : 'cart';
+    const screenshot = path.join(deps.capturesDir, `${inCheckout ? 'pago' : 'carrito'}-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
     const shotOk = await page.screenshot({ path: screenshot }).then(() => true).catch(() => false);
     deps.signal.removeEventListener('abort', onAbort);
-    const secured: SecuredCart = { ...toSecuredCart(page, cart, title, strategy, assisted), screenshot: shotOk ? screenshot : null };
+    const merged: CartReadback = { ...finalCart, items: finalCart.items.length ? finalCart.items : cart.items, quantity: finalCart.quantity || cart.quantity, total: finalCart.total ?? cart.total, expiresAt: finalCart.expiresAt ?? cart.expiresAt };
+    const secured: SecuredCart = { ...toSecuredCart(page, merged, title, strategy, assisted, stage), screenshot: shotOk ? screenshot : null };
     return {
       context,
       page,

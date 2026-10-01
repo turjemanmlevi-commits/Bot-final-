@@ -21,7 +21,7 @@ export const MOCK_EVENT_ID = '9000001';
 export const MOCK_EVENT_PATH = `/mock/realmadrid_femenino/select/${MOCK_EVENT_ID}`;
 const MAX_PER_CART = 4;
 const CART_TTL_MS = 10 * 60_000;
-const FLAG_KEYS = ['cola', 'reto', 'login', 'auto', 'lista'] as const;
+const FLAG_KEYS = ['cola', 'reto', 'login', 'auto', 'lista', 'cruzada'] as const;
 
 export interface MockZone {
   id: string;
@@ -86,7 +86,7 @@ interface MockCart {
 
 const sessions = new Map<string, { email: string }>();
 const carts = new Map<string, MockCart>();
-const flags = { paid: false, checkoutVisited: false, pays: 0 };
+const flags = { paid: false, booked: false, checkoutVisited: false, pays: 0 };
 
 export function euros(cents: number): string {
   return (cents / 100).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
@@ -298,11 +298,12 @@ function setZoneQty(sid: string, zoneId: string, qty: number): AddResult {
 export function resetMock(): void {
   carts.clear();
   flags.paid = false;
+  flags.booked = false;
   flags.checkoutVisited = false;
   flags.pays = 0;
 }
 
-export function mockState(): { carts: Array<{ sid: string; items: MockCartItem[] }>; paid: boolean; checkoutVisited: boolean; pays: number } {
+export function mockState(): { carts: Array<{ sid: string; items: MockCartItem[] }>; paid: boolean; booked: boolean; checkoutVisited: boolean; pays: number } {
   expireCarts();
   return { carts: [...carts.values()].filter((c) => c.items.length).map((c) => ({ sid: c.sid, items: c.items })), ...flags };
 }
@@ -415,15 +416,36 @@ function queuePage(next: string): string {
   );
 }
 
-function checkoutPage(sid: string, email: string | null): string {
+function checkoutPage(url: URL, sid: string, email: string | null): string {
   const cart = cartView(sid);
-  const rows = cart.items.map((i) => `<li>${i.qty} × ${esc(i.zoneName)}${i.row ? ` · Fila ${i.row} Asiento ${i.seat}` : ''} — ${euros(i.priceCents)}</li>`).join('');
+  const items = cart.items.map((i) => `<ob-cart-summary-card-item><div class="ob-location-card"><div class="ob-item-card-header"><div class="ob-item-card-title"><span class="ob-item-card-name">${esc(i.zoneName)}</span></div></div>${i.row ? `<div class="ob-location"><span class="ob-location-key">Fila ${i.row}</span> <span class="ob-location-key">Asiento ${i.seat}</span></div>` : `<div class="ob-not-numbered"><span data-testid="counter-quantity">${i.qty}</span> entradas</div>`}<div class="ob-price-container"><span class="ob-price" data-testid="ob-summary-item-price">${euros(i.priceCents)}</span></div></div></ob-cart-summary-card-item>`).join('');
+  const selectUrl = `${MOCK_EVENT_PATH}${carry(url)}`;
   return shell(
     'Checkout',
-    `<ob-page-pre-checkout><div class="main-container"><div class="main-content"><h1>Datos del comprador</h1><p>${esc(MOCK_EVENT.name)}</p><ul>${rows}</ul>
-     <p><b>Total: <span data-testid="cart-summary-total">${euros(cart.totalCents)}</span></b></p>
-     <ob-button color="primary" data-testid="checkout-payment-button"><button id="pay">Pagar ${euros(cart.totalCents)}</button></ob-button></div></div></ob-page-pre-checkout>`,
-    { email, script: `document.getElementById('pay').addEventListener('click', async () => { await fetch('/mock/api/pay', { method: 'POST' }); alert('Pago SIMULADO: en la web real aquí pagarías tú.'); });` },
+    `<ob-page-pre-checkout><div class="main-container"><div class="main-content"><h1>Datos del comprador</h1><p>${esc(MOCK_EVENT.name)}</p>
+       <section class="section buyer-data"><label>Nombre<br><input type="text" name="name" style="width:100%;padding:8px"></label><label>Email<br><input type="email" name="email" style="width:100%;padding:8px"></label></section>
+       <section class="section delivery-methods" data-testid="ob-delivery-methods"><label><input type="radio" name="delivery" checked> Entrada en el móvil</label></section>
+       <section class="section" data-testid="ob-channels-checkout-agreements"><label><input type="checkbox" name="gdpr"> Acepto las condiciones de compra</label></section>
+       <ob-button color="primary" data-testid="checkout-payment-button" class="section"><button id="pay">Pagar ${euros(cart.totalCents)}</button></ob-button></div>
+     <div class="sidebar-content"><ob-checkout-summary><div class="card"><div class="ob-cart-summary-header"><span class="ob-cart-summary-title">Tu compra</span> <span class="ob-tag items-tag">${cart.qty} entradas</span> <ob-button type="ghost" prefixIcon="delete" class="only-icon small" aria-label="Vaciar carrito" id="clear"><button aria-label="Vaciar carrito">🗑</button></ob-button></div>
+       ${cart.expiresAt ? '<div class="ob-flat-countdown">⏳ <span class="ob-countdown-value" id="cd"></span></div>' : ''}
+       <div data-testid="ob-card-items-container">${items || '<div>Carrito vacío</div>'}</div>
+       <div class="ob-cart-summary-total">Total <span data-testid="cart-summary-total">${euros(cart.totalCents)}</span></div></div></ob-checkout-summary></div></div></ob-page-pre-checkout>`,
+    {
+      email,
+      script: `
+      document.getElementById('pay').addEventListener('click', async () => { await fetch('/mock/api/pay', { method: 'POST' }); alert('Pago SIMULADO: en la web real aquí pagarías tú.'); });
+      const expiresAt = ${JSON.stringify(cart.expiresAt)};
+      if (expiresAt) { const end = Date.parse(expiresAt); const tick = () => { const s = Math.max(0, Math.round((end - Date.now())/1000)); const n = document.getElementById('cd'); if (n) n.textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); }; tick(); setInterval(tick, 1000); }
+      document.getElementById('clear').addEventListener('click', () => {
+        const bd = document.createElement('div'); bd.className = 'cdk-overlay-backdrop'; document.body.appendChild(bd);
+        const d = document.createElement('mat-dialog-container'); d.setAttribute('role', 'dialog');
+        d.innerHTML = '<h2 mat-dialog-title>¿Eliminar todas las entradas del carrito?</h2><p>Se liberarán y podrán comprarlas otras personas.</p><mat-dialog-actions><ob-button type="ghost" id="dlgCancel"><button>Cancelar</button></ob-button><ob-button color="primary" id="dlgAction"><button>Eliminar</button></ob-button></mat-dialog-actions>';
+        document.body.appendChild(d);
+        d.querySelector('#dlgCancel').addEventListener('click', () => { d.remove(); bd.remove(); });
+        d.querySelector('#dlgAction').addEventListener('click', async () => { await fetch('/mock/api/cart/clear', { method: 'POST' }); location.href = ${JSON.stringify(selectUrl)}; });
+      });`,
+    },
   );
 }
 
@@ -431,7 +453,8 @@ function selectPage(url: URL, sid: string, email: string): string {
   const list = url.searchParams.get('lista') === '1';
   const auto = url.searchParams.get('auto') === '1';
   const zones = ZONES.map((z) => ({ id: z.id, name: z.name, priceCents: z.priceCents, kind: z.kind, available: zoneAvailability(z) }));
-  const cfg = JSON.stringify({ list, auto, zones, maxPerCart: MAX_PER_CART, checkoutUrl: `/mock/realmadrid_femenino/checkout${carry(url)}`, cart: cartView(sid) });
+  const cross = url.searchParams.get('cruzada') === '1';
+  const cfg = JSON.stringify({ list, auto, cross, zones, maxPerCart: MAX_PER_CART, checkoutUrl: `/mock/realmadrid_femenino/checkout${carry(url)}`, cart: cartView(sid) });
   const header = `<ob-page-header-item class="page-header-item"><h1 class="title">${esc(MOCK_EVENT.name)}</h1><div>${esc(MOCK_EVENT.venue)} · ${esc(MOCK_EVENT.startsAt.toLocaleString('es-ES', { dateStyle: 'full', timeStyle: 'short' }))}</div></ob-page-header-item>`;
   const body = list
     ? `<ob-page-select-locations>${header}<ob-not-graphic-selection><div class="main-container"><div class="main-content"><h2 id="selectYourTickets" class="ob-selection-title">Selecciona tus entradas</h2>
@@ -469,7 +492,14 @@ const SELECT_JS = String.raw`
       + (cart.expiresAt ? '<div class="ob-flat-countdown">⏳ <span class="ob-countdown-value" id="cd"></span></div>' : '')
       + '<div data-testid="ob-card-items-container" class="ob-card-items-container">' + (items || '<div class="muted">Carrito vacío</div>') + '</div>'
       + '<ob-cart-summary-actions-bar><div class="ob-summary-buttons"><ob-button color="primary" data-testid="' + (cfg.list ? 'sidebar-pzs-selection-payment-btn' : 'cart-summary-payment-btn') + '" class="ob-action-btn"><button id="pay"' + (cart.qty ? '' : ' disabled') + '>Comprar entradas</button></ob-button></div></ob-cart-summary-actions-bar></div>';
-    document.getElementById('pay').addEventListener('click', () => { location.href = cfg.checkoutUrl; });
+    document.getElementById('pay').addEventListener('click', () => {
+      if (!cfg.cross) { location.href = cfg.checkoutUrl; return; }
+      // Venta cruzada (ob-select-locations-dialog): «¿Quieres añadir algo más?»
+      const d = openDialog('<ob-select-locations-dialog><h2 mat-dialog-title class="header">¿Quieres añadir algo más?</h2><p>Otros eventos que te pueden interesar.</p><mat-dialog-actions><ob-button type="ghost" id="xsMore"><button>Comprar más</button></ob-button><ob-button type="stroked" color="secondary" id="xsBook"><button>Reservar entradas</button></ob-button><ob-button color="primary" id="xsGo"><button>Ir al checkout</button></ob-button></mat-dialog-actions></ob-select-locations-dialog>');
+      d.querySelector('#xsMore').addEventListener('click', closeDialogs);
+      d.querySelector('#xsBook').addEventListener('click', async () => { await fetch('/mock/api/book', { method: 'POST' }); closeDialogs(); });
+      d.querySelector('#xsGo').addEventListener('click', () => { location.href = cfg.checkoutUrl; });
+    });
     el.querySelectorAll('[data-testid="cart-summary-delete"]').forEach((b) => b.addEventListener('click', async () => { const r = await api('cart/remove', { itemId: b.dataset.item }); if (r.ok) { cart = r.cart; renderCart(); refreshSeats(); renderList(); } }));
     clearInterval(countdownTimer);
     if (cart.expiresAt) { const end = Date.parse(cart.expiresAt); const tick = () => { const s = Math.max(0, Math.round((end - Date.now())/1000)); const n = document.getElementById('cd'); if (n) n.textContent = String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); }; tick(); countdownTimer = setInterval(tick, 1000); }
@@ -609,6 +639,11 @@ export async function handleMock(req: IncomingMessage, res: ServerResponse, url:
     if (url.pathname === '/mock/api/state') return json(res, 200, mockState()), true;
     if (url.pathname === '/mock/api/reset') return resetMock(), json(res, 200, { ok: true }), true;
     if (url.pathname === '/mock/api/pay') return (flags.paid = true), flags.pays++, json(res, 200, { ok: true }), true;
+    if (url.pathname === '/mock/api/book') return (flags.booked = true), json(res, 200, { ok: true }), true;
+    if (url.pathname === '/mock/api/cart/clear') {
+      carts.delete(needSid());
+      return json(res, 200, { ok: true, cart: cartView(needSid()) }), true;
+    }
     if (url.pathname === '/mock/api/cart') return json(res, 200, { ok: true, cart: cartView(needSid()) }), true;
     if (url.pathname.startsWith('/mock/api/view/')) {
       const zone = ZONES.find((z) => z.id === url.pathname.split('/').pop());
@@ -674,7 +709,7 @@ export async function handleMock(req: IncomingMessage, res: ServerResponse, url:
   // --- Checkout (el bot nunca llega aquí solo) ------------------------------
   if (url.pathname === '/mock/realmadrid_femenino/checkout') {
     flags.checkoutVisited = true;
-    return send(res, 200, checkoutPage(sid ?? 'anon', email)), true;
+    return send(res, 200, checkoutPage(url, sid ?? 'anon', email)), true;
   }
 
   send(res, 404, shell('No encontrado', '<div class="reto"><h1>Página no encontrada</h1></div>'));

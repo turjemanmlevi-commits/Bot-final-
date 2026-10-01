@@ -54,7 +54,7 @@ export function panelHtml(d: PanelDefaults): string {
     <h1>Prueba de carrito · Real Madrid Femenino</h1>
     <p class="muted">Web del Real Madrid → partido del femenino → asientos → carrito → aviso por Telegram. El pago siempre lo haces tú.</p>
     <button class="primary" id="quick" type="button" style="margin-top:4px">⚡ Prueba rápida: 3 entradas seguidas, cualquier zona</button>
-    <p class="note">Entra en tickets.realmadrid.com, coge el próximo partido del femenino a la venta, mete 3 entradas seguidas (si no hay 3, las que haya) en el carrito y te manda el aviso con el enlace por Telegram.</p>
+    <p class="note">Entra en tickets.realmadrid.com, coge el próximo partido del femenino a la venta, mete 3 entradas seguidas (si no hay 3, las que haya) en el carrito, pulsa «Comprar entradas» para dejar abierta la pantalla de pago y te manda por Telegram la captura con el enlace. Pagar, lo pagas tú.</p>
     <details style="margin-top:12px"><summary>Prueba con mis propios requisitos</summary>
     <form id="f">
       <label>Modo</label>
@@ -83,6 +83,7 @@ export function panelHtml(d: PanelDefaults): string {
         <label class="check"><input id="challenge" type="checkbox"> Simular verificación (CAPTCHA)</label>
         <label class="check"><input id="auto" type="checkbox"> Zonas con «Buscar asientos» (selección automática)</label>
         <label class="check"><input id="list" type="checkbox"> Lista de zonas sin plano</label>
+        <label class="check"><input id="cross" type="checkbox"> Diálogo «¿quieres añadir más?» al ir a pagar</label>
         <label class="check"><input id="headless" type="checkbox"> Navegador oculto</label>
       </div>
       <button class="primary" id="go" type="submit">▶ Hacer prueba</button>
@@ -102,7 +103,7 @@ export function panelHtml(d: PanelDefaults): string {
 
   <section style="display:grid;gap:16px;align-content:start">
     <div class="card" id="cart">
-      <h2>🎟️ ¡Entradas en el carrito!</h2>
+      <h2 id="cartTitle">🎟️ ¡Entradas en el carrito!</h2>
       <div id="cartBody"></div>
       <p style="margin:12px 0 0;font-weight:600">¿Quieres comprar las entradas?</p>
       <div class="actions">
@@ -138,7 +139,7 @@ $('#f').addEventListener('submit', async (e) => {
     eventUrl: $('#eventUrl').value, quantity: Number($('#quantity').value), zones: $('#zones').value,
     maxUnitPrice: $('#maxUnitPrice').value, contiguous: $('#contiguous').checked, fallback: $('#fallback').checked,
     entry: $('#entry').checked ? 'canal' : 'partido', queue: $('#queue').checked, challenge: $('#challenge').checked,
-    auto: $('#auto').checked, list: $('#list').checked, headless: $('#headless').checked,
+    auto: $('#auto').checked, list: $('#list').checked, cross: $('#cross').checked, headless: $('#headless').checked,
   });
 });
 document.querySelectorAll('[data-d]').forEach((b) => b.addEventListener('click', async () => {
@@ -168,6 +169,7 @@ function render(s) {
   const c = s.cart;
   $('#cart').style.display = c ? 'block' : 'none';
   if (c) {
+    $('#cartTitle').textContent = c.stage === 'checkout' ? '🎟️ ¡Entradas en el carrito y pantalla de pago abierta!' : '🎟️ ¡Entradas en el carrito!';
     $('#cartBody').innerHTML = '<div><b>' + esc(c.eventTitle) + '</b></div><div class="muted">Cuenta: ' + esc(s.account || '—') + '</div>'
       + c.items.map((i) => '<div>' + i.qty + ' × ' + esc(i.sectionLabel) + ' — ' + eur(i.unitPrice) + '</div>').join('')
       + '<div><b>Total: ' + eur(c.total) + '</b></div>'

@@ -54,8 +54,14 @@ export const OB = {
   cartButton: '[data-testid="cart-button"]',
   cartCounter: '[data-testid="shopping-cart-counter"]',
   summaryTab: 'ob-graphic-selection-tabs [value="summary"], .tabs-group [value="summary"]',
-  /** Botones que llevan al pago: NUNCA se pulsan. */
+  /** Botones que llevan al pago: los gestores genéricos NUNCA los pulsan. */
   paymentButtons: '[data-testid="cart-summary-payment-btn"], [data-testid="sidebar-pzs-selection-payment-btn"], [data-testid="checkout-payment-button"], [data-testid="cart-payment-button"], [data-testid="cart-continue-button"]',
+  /** «Comprar entradas» en la selección: lleva a la pantalla de checkout (datos y pago). Solo lo pulsa `clickGoToCheckout`. */
+  goToCheckoutButtons: '[data-testid="cart-summary-payment-btn"], [data-testid="sidebar-pzs-selection-payment-btn"], [data-testid="cart-continue-button"], [data-testid="cart-payment-button"]',
+  /** Botón de pago de la pantalla de checkout: NUNCA se pulsa. */
+  checkoutPayButton: '[data-testid="checkout-payment-button"]',
+  /** Vaciar el carrito entero (cabecera del resumen en el checkout o en el carrito lateral). */
+  cartClearButtons: 'ob-checkout-summary ob-button[prefixIcon="delete"], ob-sidebar-cart ob-button[prefixIcon="delete"], ob-overlay-cart ob-button[prefixIcon="delete"], ob-cart-summary ob-button[prefixIcon="delete"], [data-testid="cart-summary-delete-session-btn"], ob-button[aria-label*="vaciar" i], ob-button[arialabel*="vaciar" i]',
   /** Catálogo y ficha de evento. */
   catalogCard: '.ob-catalog-card, [data-testid="catalog-item-card"]',
   catalogCardTitle: '[data-testid="catalog-card-title"], .title',
@@ -186,7 +192,7 @@ export async function clickButton(loc: Locator, timeout = 5000): Promise<void> {
 
 /** Es un botón que llevaría al pago o al checkout: prohibido. */
 export async function isPaymentButton(loc: Locator): Promise<boolean> {
-  const testid = (await loc.getAttribute('data-testid').catch(() => null)) ?? '';
+  const testid = (await loc.getAttribute('data-testid', { timeout: 600 }).catch(() => null)) ?? '';
   if (/payment|checkout|continue|booking|^pay/.test(testid)) return true;
   const t = normalize(await text(loc));
   // «Comprar entradas» en el catálogo solo lleva a la selección; el botón de pago de la selección se reconoce por su data-testid.
@@ -316,7 +322,7 @@ const READ_VIEW_ITEMS_JS = `(() => {
   return items.map((el, index) => {
     const titleEl = el.querySelector('.view-main-info-texts-title') || el.querySelector('.ob-item-name-container') || el.querySelector('.view-main-info-texts');
     const btns = Array.from(el.querySelectorAll('ob-button, button'));
-    const aria = btns.map((b) => norm((b.getAttribute('aria-label') || '') + ' ' + (b.textContent || ''))).join(' | ').toLowerCase();
+    const aria = btns.map((b) => norm((b.getAttribute('aria-label', { timeout: 600 }) || '') + ' ' + (b.textContent || ''))).join(' | ').toLowerCase();
     const cls = el.className || '';
     return {
       index,
@@ -324,7 +330,7 @@ const READ_VIEW_ITEMS_JS = `(() => {
       name: norm(titleEl ? titleEl.textContent : (el.textContent || '').split('\\n')[0]).slice(0, 120),
       text: norm(el.textContent).slice(0, 400),
       soldOut: /ob-sold-out/.test(cls) || !!el.querySelector('.ob-sold-out-text, .ob-unavailable-tag'),
-      disabled: /\\bdisabled\\b/.test(cls) || el.getAttribute('aria-disabled') === 'true',
+      disabled: /\\bdisabled\\b/.test(cls) || el.getAttribute('aria-disabled', { timeout: 600 }) === 'true',
       hasAutomatic: /buscar|search|autom[aá]tic|mejores asientos|best seats|ob-automatic-selection-btn/.test(aria + ' ' + Array.from(el.querySelectorAll('ob-button')).map((b) => b.className).join(' ')),
       isNnz: !!el.querySelector('ob-not-numbered-zone-selection, [data-testid="counter-add"]') || /ob-view-list-intermediate-nnz/.test(cls),
     };
@@ -373,7 +379,7 @@ async function pickRate(dialog: Locator, hooks: Hooks): Promise<void> {
     for (let j = 0; j < total; j++) {
       const opt = options.nth(j);
       if (!(await visible(opt))) continue;
-      const disabled = (await opt.getAttribute('aria-disabled')) === 'true';
+      const disabled = (await opt.getAttribute('aria-disabled', { timeout: 600 })) === 'true';
       if (disabled) continue;
       const t = normalize(await text(opt));
       fallback ??= opt;
@@ -406,7 +412,7 @@ export async function handleDialog(page: Page, hooks: Hooks, opts: { contiguous:
   if (await visible(confirm)) {
     await pickRate(dialog, hooks);
     const inner = confirm.locator('button').first();
-    const enabledNow = async (): Promise<boolean> => ((await inner.count()) > 0 ? inner.isEnabled().catch(() => false) : confirm.isEnabled().catch(() => false));
+    const enabledNow = async (): Promise<boolean> => ((await inner.count()) > 0 ? inner.isEnabled({ timeout: 800 }).catch(() => false) : confirm.isEnabled({ timeout: 800 }).catch(() => false));
     const end = Date.now() + 4000;
     while (!(await enabledNow()) && Date.now() < end) {
       await pickRate(dialog, hooks);
@@ -462,11 +468,13 @@ export async function handleDialog(page: Page, hooks: Hooks, opts: { contiguous:
 }
 
 async function isPrimary(b: Locator): Promise<boolean> {
-  const color = (await b.getAttribute('color').catch(() => null)) ?? '';
-  const cls = (await b.getAttribute('class').catch(() => null)) ?? '';
+  const color = (await b.getAttribute('color', { timeout: 600 }).catch(() => null)) ?? '';
+  const cls = (await b.getAttribute('class', { timeout: 600 }).catch(() => null)) ?? '';
   const inner = b.locator('button').first();
-  const innerCls = (await inner.getAttribute('class').catch(() => null)) ?? '';
-  return color === 'primary' || /mat-primary|mdc-button--unelevated|mat-mdc-unelevated-button|primary/.test(cls + ' ' + innerCls);
+  const innerCls = (await inner.count()) > 0 ? ((await inner.getAttribute('class', { timeout: 600 }).catch(() => null)) ?? '') : '';
+  // Un <button> dentro de un <ob-button color="primary"> también es principal.
+  const hostColor = (await b.locator('xpath=ancestor::ob-button[1]').first().getAttribute('color', { timeout: 600 }).catch(() => null)) ?? '';
+  return color === 'primary' || hostColor === 'primary' || /mat-primary|mdc-button--unelevated|mat-mdc-unelevated-button|primary/.test(cls + ' ' + innerCls);
 }
 
 // ---------------------------------------------------------------------------
@@ -483,10 +491,10 @@ const READ_SEATS_JS = `(() => {
   const seatRx = /(?:asiento|butaca|seat|si[eè]ge|platz|localidad)\\s*[:#]?\\s*([A-Za-z0-9]+)/i;
   return els.map((el) => {
     const b = el.getBoundingClientRect();
-    const label = el.getAttribute('aria-label') || el.getAttribute('aria-description') || '';
+    const label = el.getAttribute('aria-label', { timeout: 600 }) || el.getAttribute('aria-description', { timeout: 600 }) || '';
     const rm = rowRx.exec(label); const sm = seatRx.exec(label);
     return {
-      id: el.getAttribute('id') || '',
+      id: el.getAttribute('id', { timeout: 600 }) || '',
       x: b.left + b.width / 2, y: b.top + b.height / 2, r: Math.max(b.width, b.height) / 2,
       label,
       row: rm ? rm[1] : null,
@@ -591,12 +599,12 @@ export async function readCounter(scope: Locator): Promise<number | null> {
     const t = await text(q);
     const m = /\d+/.exec(t);
     if (m) return Number(m[0]);
-    const v = await q.locator('input').first().inputValue().catch(() => '');
+    const v = await q.locator('input').first().inputValue({ timeout: 600 }).catch(() => '');
     if (/^\d+$/.test(v)) return Number(v);
   }
   const input = scope.locator('input[formcontrolname="quantity"], input[type="number"]').first();
   if (await visible(input)) {
-    const v = await input.inputValue().catch(() => '');
+    const v = await input.inputValue({ timeout: 600 }).catch(() => '');
     if (/^\d+$/.test(v)) return Number(v);
   }
   return null;
@@ -611,7 +619,7 @@ export async function setCounter(scope: Locator, target: number, hooks: Hooks): 
     const btn = scope.locator(current < target ? OB.counterAdd : OB.counterRemove).first();
     if (!(await visible(btn))) return false;
     const inner = btn.locator('button').first();
-    const enabled = (await inner.count()) > 0 ? await inner.isEnabled().catch(() => false) : await btn.isEnabled().catch(() => false);
+    const enabled = (await inner.count()) > 0 ? await inner.isEnabled({ timeout: 800 }).catch(() => false) : await btn.isEnabled({ timeout: 800 }).catch(() => false);
     if (!enabled) {
       hooks.log('warn', `El contador no deja pasar de ${current} (límite de la web).`);
       return false;
@@ -717,7 +725,27 @@ export async function readCartSummary(page: Page): Promise<CartReadback | null> 
   };
 }
 
-/** Quita todas las entradas del carrito (para liberarlas o para empezar limpio). */
+/** Confirmación «¿Eliminar?»: pulsa la acción de eliminar/confirmar, nunca pagar. */
+async function confirmDeleteDialog(page: Page): Promise<void> {
+  const dialog = page.locator(OB.dialog).last();
+  if (!(await visible(dialog))) return;
+  const btns = dialog.locator('ob-button, button');
+  const n = await btns.count();
+  let clicked = false;
+  for (let j = n - 1; j >= 0; j--) {
+    const b = btns.nth(j);
+    const t = normalize(await text(b));
+    if ((await visible(b)) && !(await isPaymentButton(b)) && /eliminar|borrar|quitar|vaciar|delete|remove|s[ií]\b|confirmar|aceptar|ok/.test(t)) {
+      await clickButton(b, 3000).catch(() => undefined);
+      clicked = true;
+      break;
+    }
+  }
+  if (!clicked) await page.keyboard.press('Escape').catch(() => undefined);
+  await sleep(400);
+}
+
+/** Quita todas las entradas del carrito (para liberarlas o para empezar limpio). Funciona en la selección y en el checkout. */
 export async function releaseCart(page: Page, hooks: Hooks): Promise<number> {
   let removed = 0;
   for (let i = 0; i < 20; i++) {
@@ -725,28 +753,85 @@ export async function releaseCart(page: Page, hooks: Hooks): Promise<number> {
     if (!(await visible(del))) break;
     await clickButton(del, 3000).catch(() => undefined);
     await sleep(400);
-    // Confirmación «¿Eliminar?»: pulsa la acción principal (eliminar), nunca pagar.
-    const dialog = page.locator(OB.dialog).last();
-    if (await visible(dialog)) {
-      const btns = dialog.locator('ob-button, button');
-      const n = await btns.count();
-      let clicked = false;
-      for (let j = n - 1; j >= 0; j--) {
-        const b = btns.nth(j);
-        const t = normalize(await text(b));
-        if ((await visible(b)) && /eliminar|borrar|quitar|delete|remove|s[ií]\b|confirmar|aceptar|ok/.test(t)) {
-          await clickButton(b, 3000).catch(() => undefined);
-          clicked = true;
-          break;
-        }
-      }
-      if (!clicked) await page.keyboard.press('Escape').catch(() => undefined);
-      await sleep(400);
-    }
+    await confirmDeleteDialog(page);
     removed++;
+  }
+  // Sin borrado por línea (checkout): botón de vaciar el carrito entero.
+  if (removed === 0) {
+    const clear = page.locator(OB.cartClearButtons).first();
+    if (await visible(clear)) {
+      await clickButton(clear, 3000).catch(() => undefined);
+      await sleep(400);
+      await confirmDeleteDialog(page);
+      await sleep(800);
+      const after = await readCartSummary(page).catch(() => null);
+      if (!after || after.quantity === 0) removed = 1;
+    }
+  }
+  // Último recurso desde el checkout: volver a la selección y borrar allí.
+  if (removed === 0 && /\/checkout/i.test(page.url())) {
+    await page.goBack({ timeout: 10_000 }).catch(() => undefined);
+    await sleep(1500);
+    for (let i = 0; i < 20; i++) {
+      const del = page.locator(OB.cartItemDelete).first();
+      if (!(await visible(del))) break;
+      await clickButton(del, 3000).catch(() => undefined);
+      await sleep(400);
+      await confirmDeleteDialog(page);
+      removed++;
+    }
   }
   if (removed) hooks.log('info', `Carrito vaciado (${removed} línea(s)).`);
   return removed;
+}
+
+/**
+ * Pulsa «Comprar entradas» (va a la pantalla de checkout: datos del comprador y pago).
+ * NO es pagar: el botón de pago del checkout está prohibido. Devuelve true si lo pulsó.
+ */
+export async function clickGoToCheckout(page: Page, hooks: Hooks): Promise<boolean> {
+  const btns = page.locator(OB.goToCheckoutButtons);
+  const n = await btns.count();
+  for (let i = 0; i < n; i++) {
+    const b = btns.nth(i);
+    if (!(await visible(b))) continue;
+    const inner = b.locator('button').first();
+    const enabled = (await inner.count()) > 0 ? await inner.isEnabled({ timeout: 800 }).catch(() => false) : await b.isEnabled({ timeout: 800 }).catch(() => false);
+    if (!enabled) continue;
+    hooks.log('info', `Pulso «${(await text(b)) || 'Comprar entradas'}» para abrir la pantalla de pago (sin pagar).`);
+    await clickButton(b);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Diálogos que pueden salir al ir al checkout (venta cruzada «¿quieres añadir más?», asientos
+ * sueltos…): sigue hacia el checkout. Nunca «reservar», «comprar más» ni pagar.
+ */
+export async function handleGoToCheckoutDialog(page: Page, hooks: Hooks): Promise<'none' | 'continued' | 'cancelled'> {
+  const dialog = page.locator(OB.dialog).last();
+  if (!(await visible(dialog))) return 'none';
+  const btns = dialog.locator('ob-button, button');
+  const n = await btns.count();
+  const options: Array<{ b: Locator; t: string; primary: boolean }> = [];
+  for (let i = 0; i < n; i++) {
+    const b = btns.nth(i);
+    if (!(await visible(b))) continue;
+    options.push({ b, t: normalize(await text(b)), primary: await isPrimary(b) });
+  }
+  const forbidden = /reservar|book|comprar m[aá]s|buy more|seguir comprando|a[ñn]adir m[aá]s|pagar\b|pay\b/;
+  const go = options.find((o) => /checkout|tramitar|finalizar|ir a pagar|continuar|continue|confirmar|confirm|aceptar|accept|entendido|ok\b/.test(o.t) && !forbidden.test(o.t))
+    ?? options.find((o) => o.primary && !forbidden.test(o.t));
+  if (!go) {
+    hooks.log('warn', `Diálogo desconocido al ir al checkout: «${(await text(dialog)).slice(0, 120)}». Lo cierro.`);
+    await page.keyboard.press('Escape').catch(() => undefined);
+    return 'cancelled';
+  }
+  hooks.log('info', `Diálogo al ir al checkout: pulso «${go.t}».`);
+  await clickButton(go.b);
+  await sleep(500);
+  return 'continued';
 }
 
 // ---------------------------------------------------------------------------

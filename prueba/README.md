@@ -10,12 +10,12 @@ Pulsas **▶ Hacer prueba** en `http://127.0.0.1:3000` y el bot hace esto, solo:
    - Si la zona tiene **«Buscar asientos»**, usa la selección automática de la web.
    - Si no, abre el plano de la zona, elige un bloque de asientos seguidos (evitando dejar uno suelto) y los pulsa uno a uno, eligiendo la tarifa general.
    - Si la web muestra una lista de zonas sin plano, usa sus contadores.
-6. Comprueba el **carrito real** de la web (líneas, total y cuenta atrás) y hace una captura.
-7. Te manda por **Telegram** *«¿Quieres comprar las entradas?»* con la captura y los botones:
-   - **✅ Sí, ábreme el carrito**: trae al frente la ventana del bot con el carrito. **El pago lo haces tú.**
-   - **❌ No, liberar**: quita las entradas del carrito y cierra el navegador del bot.
+6. Comprueba el **carrito real** de la web (líneas, total y cuenta atrás), pulsa **«Comprar entradas»** (que en esta web abre la pantalla de datos y pago, sin pagar) y, con esa pantalla abierta, hace la captura.
+7. Te manda por **Telegram** *«¿Quieres comprar las entradas?»* con la captura de la pantalla de pago, el enlace y los botones:
+   - **✅ Sí, voy a pagar**: trae al frente la ventana del bot, donde solo queda rellenar los datos y pagar. **El pago lo haces tú.**
+   - **❌ No, liberar**: vacía el carrito y cierra el navegador del bot.
 
-Lo que el bot **no hace nunca**: pagar, pulsar «Comprar entradas»/checkout, resolver CAPTCHAs, saltarse colas o superar el límite de entradas de la web.
+Lo que el bot **no hace nunca**: pagar (el botón «Pagar» del checkout está prohibido en el código), aceptar condiciones por ti, reservar, resolver CAPTCHAs, saltarse colas o superar el límite de entradas de la web.
 
 ## Puesta en marcha (en tu PC)
 
@@ -51,7 +51,7 @@ En el panel, **Conectar Telegram**: pega el token de tu bot (de @BotFather), esc
 1. Pulsa **⚡ Prueba rápida** en el panel. Los requisitos ya van puestos: el próximo partido del femenino a la venta, **3 entradas seguidas**, cualquier zona (la más barata con sitio), sin tope de precio, y si no hay 3 seguidas coge las que haya. Si prefieres otros requisitos, despliega «Prueba con mis propios requisitos».
 2. Se abre la ventana de Chrome del bot y en el panel ves cada paso.
 3. **La primera vez** la web pedirá iniciar sesión: hazlo tú en esa ventana (el bot avisa por Telegram y espera). Queda guardado en `data/prueba/perfil-navegador/` para las siguientes.
-4. Cuando las entradas estén en el carrito te llega el Telegram con la captura. **Sí** → te deja el carrito abierto para que pagues tú. **No** → libera las entradas.
+4. Cuando las entradas estén en el carrito y la pantalla de pago abierta te llega el Telegram con la captura. **Sí** → la ventana del bot queda al frente para que pagues tú. **No** → libera las entradas.
 
 Si algo no cuadra con la web real (cambian un botón, aparece un diálogo que el bot no conoce…), el bot **no se inventa nada**: pasa a modo asistido («elige tú los asientos; yo detecto el carrito y te aviso») y guarda en `data/prueba/capturas/` una captura, el HTML y un JSON de diagnóstico. Pásamelos y lo ajusto en minutos.
 
@@ -68,12 +68,13 @@ Si algo no cuadra con la web real (cambian un botón, aparece un diálogo que el
 npm run prueba:smoke
 ```
 Ejecuta el flujo completo en modo simulado, con el navegador oculto y un **Telegram falso local**:
-- catálogo → partido → cola → login con credenciales → 3 asientos seguidos de la fila 2 de «Lateral Oeste» (pedido como «Grada Oeste») → Telegram → «Sí» deja el carrito abierto;
+- catálogo → partido → cola → login con credenciales → 3 asientos seguidos de la fila 2 de «Lateral Oeste» (pedido como «Grada Oeste») → «Comprar entradas» → diálogo de venta cruzada → pantalla de pago → Telegram con la captura de esa pantalla → «Sí» la deja abierta;
 - zona con «Buscar asientos» (diálogo de selección automática de la web);
 - zona sin numerar (contador);
 - lista de zonas sin plano, con la preferida agotada → siguiente; «No» vacía el carrito;
 - precio máximo imposible → pide ayuda humana y, oculto, falla con un mensaje claro;
-- comprueba que **nunca** se visita el checkout ni se pulsa pagar.
+- «No» desde la pantalla de pago vacía el carrito;
+- comprueba que **nunca** se pulsa pagar ni reservar.
 
 ## De dónde salen los selectores de la web real
 
