@@ -1,19 +1,21 @@
-# Prueba local: partido del femenino → carrito → Telegram
+# Prueba: Real Madrid Femenino → asientos → carrito → Telegram
 
-Pulsas **Hacer prueba** en `http://127.0.0.1:3000` y el bot hace esto:
+Pulsas **▶ Hacer prueba** en `http://127.0.0.1:3000` y el bot hace esto, solo:
 
-1. Abre un Chrome con **tu perfil guardado**, donde queda tu sesión del Real Madrid.
-2. Entra en la página de compra del partido. Las del femenino son `tickets.realmadrid.com/realmadrid_femenino/select/<id>` (plataforma Onebox).
-3. Pasa la cola si la hay, **esperando su turno**. Hace login con tu cuenta.
-4. Elige zona y cantidad según tus preferencias y precio máximo. Pulsa **Añadir al carrito**.
-5. Detecta el carrito y lee zonas, total y caducidad. Hace una captura.
-6. Te manda por **Telegram** el mensaje *«¿Quieres comprar las entradas?»* con la captura y estos botones:
-   - **🛒 Comprar entradas**: enlace al carrito. Solo aparece si la URL es pública.
+1. Abre un Chrome con **su propio perfil guardado** (ahí queda tu sesión del Real Madrid).
+2. Entra en `tickets.realmadrid.com/realmadrid_femenino` (la web de entradas del femenino, plataforma Onebox), o en la URL del partido si la pones.
+3. Si no has puesto partido, recorre el catálogo y entra en el **primer partido a la venta**.
+4. Pasa la cola si la hay **esperando su turno**. Si la web pide login o una verificación, te avisa y espera a que lo hagas tú en su ventana (la sesión se queda guardada).
+5. Lee las zonas del plano y elige según tus **requisitos**: cantidad, zonas preferidas, asientos **seguidos en la misma fila** y precio máximo.
+   - Si la zona tiene **«Buscar asientos»**, usa la selección automática de la web.
+   - Si no, abre el plano de la zona, elige un bloque de asientos seguidos (evitando dejar uno suelto) y los pulsa uno a uno, eligiendo la tarifa general.
+   - Si la web muestra una lista de zonas sin plano, usa sus contadores.
+6. Comprueba el **carrito real** de la web (líneas, total y cuenta atrás) y hace una captura.
+7. Te manda por **Telegram** *«¿Quieres comprar las entradas?»* con la captura y los botones:
    - **✅ Sí, ábreme el carrito**: trae al frente la ventana del bot con el carrito. **El pago lo haces tú.**
-   - **❌ No, liberar**: cierra el navegador del bot y el carrito se libera.
+   - **❌ No, liberar**: quita las entradas del carrito y cierra el navegador del bot.
 
-Lo que el bot **no hace nunca**: pagar, resolver CAPTCHAs, saltarse colas o superar el límite de entradas.
-Si aparece login, verificación o algo que no sabe seleccionar, te avisa por Telegram y en el panel. Tú lo resuelves en su ventana y él sigue.
+Lo que el bot **no hace nunca**: pagar, pulsar «Comprar entradas»/checkout, resolver CAPTCHAs, saltarse colas o superar el límite de entradas de la web.
 
 ## Puesta en marcha (en tu PC)
 
@@ -21,44 +23,44 @@ Si aparece login, verificación o algo que no sabe seleccionar, te avisa por Tel
 
 - **Windows**: abre *PowerShell* (tecla Windows, escribe `powershell`, Enter) y pega:
   ```powershell
-  irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/nifty-galileo-srzpso/instalar.ps1 | iex
+  irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex
   ```
 - **Mac**: abre *Terminal* y pega:
   ```bash
-  curl -fsSL https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/nifty-galileo-srzpso/instalar.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.sh | bash
   ```
 
-Se instala en la carpeta `bot-entradas` de tu usuario. Telegram se conecta desde el propio panel («Conectar Telegram»).
-
-**Lo más fácil:** doble clic en `iniciar.bat` (Windows) o `./iniciar.sh` (Mac/Linux) en la raíz del proyecto. Instala todo, arranca y abre el panel solo cuando el servidor ya está listo (`http://127.0.0.1:3000`; si ese puerto está ocupado usa el 3001, 3002…: mira la URL que sale en la ventana negra).
+Se instala en la carpeta `bot-entradas` de tu usuario y abre el panel. Las siguientes veces: doble clic en `iniciar.bat` (Windows) o `./iniciar.sh` (Mac/Linux) dentro de esa carpeta. Si el puerto 3000 está ocupado usa el 3001, 3002…: mira la URL que sale en la ventana negra.
 
 A mano:
 
 ```bash
 npm install
 npx playwright install chromium          # solo la primera vez
-cp prueba/.env.example prueba/.env       # y rellena Telegram (opcional)
+cp prueba/.env.example prueba/.env       # opcional
 npm run prueba                           # → abre http://127.0.0.1:3000
 ```
 
 ### Telegram
-1. Crea un bot en Telegram con **@BotFather** y copia el token en `TELEGRAM_BOT_TOKEN`.
-2. Escribe «hola» a tu bot. Luego ejecuta `npm run prueba:chat-id` y copia el número en `TELEGRAM_CHAT_ID`.
-3. Reinicia `npm run prueba`. El panel mostrará «Telegram: Conectado como @tu_bot».
+En el panel, **Conectar Telegram**: pega el token de tu bot (de @BotFather), escribe «hola» a tu bot en Telegram y pulsa «Guardar y probar». Te llega un mensaje de prueba y queda guardado en `prueba/.env`.
 
-Sin Telegram también funciona: la pregunta de comprar aparece en el panel.
+> Si el mismo bot lo usa también la sala de control (dashboard), **cierra la sala** mientras hagas esta prueba: Telegram solo deja a un programa recibir los botones de un bot a la vez («conflict»).
+
+## La prueba real, paso a paso
+
+1. En el panel deja **Web real**, pon **Entradas: 3**, marca **Asientos seguidos**, pon tus **zonas** (p. ej. `Grada Oeste, Tribuna`; vale con parte del nombre, en el orden que prefieras) y, si quieres, un **precio máximo**. El partido déjalo vacío: el bot coge el próximo del femenino a la venta.
+2. Pulsa **▶ Hacer prueba**. Se abre la ventana de Chrome del bot y en el panel ves cada paso.
+3. **La primera vez** la web pedirá iniciar sesión: hazlo tú en esa ventana (el bot avisa por Telegram y espera). Queda guardado en `data/prueba/perfil-navegador/` para las siguientes.
+4. Cuando las entradas estén en el carrito te llega el Telegram con la captura. **Sí** → te deja el carrito abierto para que pagues tú. **No** → libera las entradas.
+
+Si algo no cuadra con la web real (cambian un botón, aparece un diálogo que el bot no conoce…), el bot **no se inventa nada**: pasa a modo asistido («elige tú los asientos; yo detecto el carrito y te aviso») y guarda en `data/prueba/capturas/` una captura, el HTML y un JSON de diagnóstico. Pásamelos y lo ajusto en minutos.
 
 ## Modos
 
 | Modo | Qué abre | Para qué |
 |---|---|---|
-| **Simulado** | Réplica local del flujo en `/mock/...`: login, cola opcional, zonas con una agotada, carrito con temporizador y botón *Pagar* que no hace nada | Probar el bot y Telegram de principio a fin sin tocar la web real |
-| **Web real** | La URL del partido en `tickets.realmadrid.com`, con ventana **siempre visible** | La prueba de verdad con tu cuenta |
-
-### Primera prueba real
-- **Login**: la primera vez, inicia sesión tú en la ventana del bot. Queda guardado en `data/prueba/perfil-navegador/`. La próxima vez ya entra directo. También puedes poner `RM_EMAIL`/`RM_PASSWORD`, aunque es opcional.
-- **Selección**: los selectores de la web real **no se han podido verificar todavía**. Desde el servidor donde se escribió esto, `tickets.realmadrid.com` responde con un bloqueo de Cloudflare. El bot busca bloques con precio en € y un control de cantidad (desplegable, campo numérico o botón «+»). Después pulsa *Añadir al carrito / Comprar / Continuar*. Si no lo consigue, pasa a **modo asistido**: te pide que selecciones tú y él detecta el carrito y te avisa igual.
-- En cada fallo se guarda una captura en `data/prueba/capturas/`. Pásamela y ajusto la selección a la web real.
+| **Web real** | tickets.realmadrid.com, ventana **siempre visible** | La prueba de verdad con tu cuenta |
+| **Simulado** | Réplica local del front de Onebox en `/mock/realmadrid_femenino/…` (catálogo, cola, login, plano SVG con asientos, «Buscar asientos», lista de zonas, carrito con cuenta atrás, checkout) | Probar el bot y Telegram de principio a fin sin tocar la web real |
 
 ## Comprobación automática
 
@@ -66,16 +68,22 @@ Sin Telegram también funciona: la pregunta de comprar aparece en el panel.
 npm run prueba:smoke
 ```
 Ejecuta el flujo completo en modo simulado, con el navegador oculto y un **Telegram falso local**:
-- cola, login y la zona preferida agotada, con lo que salta a la siguiente;
-- carrito, aviso a Telegram y pulsación de «Sí», que deja el carrito abierto;
-- «No» desde el panel, que libera el carrito;
-- precio máximo imposible, que pide ayuda humana y, con el navegador oculto, falla con un mensaje claro;
-- validación de la URL en modo real.
+- catálogo → partido → cola → login con credenciales → 3 asientos seguidos de la fila 2 de «Lateral Oeste» (pedido como «Grada Oeste») → Telegram → «Sí» deja el carrito abierto;
+- zona con «Buscar asientos» (diálogo de selección automática de la web);
+- zona sin numerar (contador);
+- lista de zonas sin plano, con la preferida agotada → siguiente; «No» vacía el carrito;
+- precio máximo imposible → pide ayuda humana y, oculto, falla con un mensaje claro;
+- comprueba que **nunca** se visita el checkout ni se pulsa pagar.
+
+## De dónde salen los selectores de la web real
+
+El front de Onebox (`client-dists.oneboxtds.com/channels-client`, v0.2467) es una app Angular con componentes `ob-*` y atributos `data-testid`. De su código salen los selectores de `src/onebox.ts`: la página `ob-page-select-locations`, la lista de zonas `ob-view-list .view-item`, el visor SVG con asientos `circle.interactive.seat.available` (con `aria-label` «Fila X Asiento Y»), el diálogo de tarifa (`select-rate-dialog-confirm`), el diálogo «Buscar asientos» (`ob-select-automatic-seat-dialog`), los contadores (`counter-add` / `counter-quantity`), el resumen del carrito (`cart-summary-total`, `ob-cart-summary-card-item`, `ob-flat-countdown`) y los botones de pago, que están en una lista negra.
 
 ## Archivos
 
-- `src/bot.ts`: flujo en el navegador (Playwright). Detecta login, verificación, cola y carrito; hace la selección y lee el carrito.
+- `src/onebox.ts`: receta de Onebox (selectores, clasificación de página, catálogo, asientos seguidos, diálogos, carrito, diagnóstico).
+- `src/bot.ts`: flujo en el navegador (Playwright): puertas (login/cola/verificación), partido, estrategias de selección, carrito.
 - `src/runner.ts`: orquesta la prueba, los avisos de Telegram y la decisión de comprar o no.
 - `src/telegram.ts`: cliente mínimo de la Bot API (mensajes, foto, botones, long-polling).
-- `src/mock-site.ts`: réplica local del flujo de venta.
+- `src/mock-site.ts`: réplica local del front de Onebox.
 - `src/server.ts`, `src/panel.ts`: servidor local y panel.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Instala (o actualiza) y arranca la prueba local en Mac/Linux. Uso, en Terminal:
-#   curl -fsSL https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/nifty-galileo-srzpso/instalar.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.sh | bash
 set -e
-BRANCH="claude/nifty-galileo-srzpso"
+BRANCH="claude/confident-planck-41m20b"
 DEST="${BOT_DIR:-$HOME/bot-entradas}"
 echo ""
 echo "== Bot de entradas: preparando la prueba local =="

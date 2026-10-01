@@ -1,9 +1,9 @@
 # Instala (o actualiza) y arranca la prueba local en Windows. Uso, en PowerShell:
-#   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/nifty-galileo-srzpso/instalar.ps1 | iex
+#   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex
 function Start-PruebaBot {
   $ErrorActionPreference = 'Stop'
   $ProgressPreference = 'SilentlyContinue'
-  $branch = 'claude/nifty-galileo-srzpso'
+  $branch = 'claude/confident-planck-41m20b'
   $dest = Join-Path $HOME 'bot-entradas'
   Write-Host ''
   Write-Host '== Bot de entradas: preparando la prueba local ==' -ForegroundColor Cyan

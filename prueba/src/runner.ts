@@ -7,7 +7,6 @@ import { randomBytes } from 'node:crypto';
 import { saveEnvValues, type PruebaConfig } from './config.js';
 import { runBot, type BotSession, type HumanReason, type LogLevel, type RunOptions, type SecuredCart } from './bot.js';
 import { detectChatId, escapeHtml, isTelegramButtonUrl, TelegramClient, TelegramError, type Keyboard } from './telegram.js';
-import { releaseMockCart } from './mock-site.js';
 
 export type RunStatus = 'IDLE' | 'RUNNING' | 'WAITING_HUMAN' | 'CART_SECURED' | 'OPENED' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
 export type Decision = 'comprar' | 'cancelar';
@@ -34,6 +33,15 @@ const HUMAN_TITLES: Record<HumanReason, string> = {
   challenge: '🧩 Verificación en la web',
   queue: '⏳ En cola virtual',
   selection: '🖐️ Selección manual necesaria',
+  blocked: '⛔ Acceso bloqueado',
+};
+
+const STRATEGY_LABEL: Record<string, string> = {
+  plano: 'asientos elegidos en el plano',
+  automatica: 'selección automática de la web',
+  zona: 'zona sin numerar',
+  lista: 'lista de zonas',
+  manual: 'selección hecha a mano',
 };
 
 function eur(cents: number | null): string {
@@ -106,7 +114,7 @@ export class Runner extends EventEmitter {
       return username;
     } catch (err) {
       if (err instanceof TelegramError && /conflict|webhook/i.test(err.description)) {
-        throw new Error('Tu bot está conectado a otro programa (webhook u otro bot en marcha). Escribe tu chat ID a mano o para el otro programa.');
+        throw new Error('Tu bot está conectado a otro programa (webhook u otro bot en marcha, p. ej. la sala de control). Para el otro programa o escribe tu chat ID a mano.');
       }
       if (err instanceof TelegramError && /unauthorized|not found/i.test(err.description)) {
         throw new Error('Telegram no reconoce ese token. Cópialo otra vez de @BotFather.');
@@ -150,7 +158,7 @@ export class Runner extends EventEmitter {
     const id = randomBytes(4).toString('hex');
     const simulated = options.mode === 'simulado';
     const account = simulated
-      ? { email: 'prueba@ejemplo.com', password: 'simulado' }
+      ? { email: this.cfg.account.email ?? 'prueba@ejemplo.com', password: this.cfg.account.password ?? 'simulado' }
       : { email: this.cfg.account.email, password: this.cfg.account.password };
     Object.assign(this.state, {
       id,
@@ -170,7 +178,14 @@ export class Runner extends EventEmitter {
   }
 
   private async run(id: string, options: RunOptions, account: { email: string | null; password: string | null }, signal: AbortSignal): Promise<void> {
-    this.log('info', `Prueba ${id} en modo ${options.mode.toUpperCase()} — ${options.quantity} entrada(s)${options.zones.length ? `, zonas: ${options.zones.join(' > ')}` : ''}${options.maxUnitPrice !== null ? `, máx. ${eur(options.maxUnitPrice)}/entrada` : ''}.`);
+    const reqs = [
+      `${options.quantity} entrada(s)`,
+      options.contiguous && options.quantity > 1 ? 'seguidas' : null,
+      options.zones.length ? `zonas: ${options.zones.join(' > ')}` : 'zona: la más barata',
+      options.maxUnitPrice !== null ? `máx. ${eur(options.maxUnitPrice)}/entrada` : null,
+      options.eventUrl ? null : 'partido: el próximo a la venta',
+    ].filter(Boolean);
+    this.log('info', `Prueba ${id} en modo ${options.mode.toUpperCase()} — ${reqs.join(', ')}.`);
     await this.startPolling(id);
     try {
       const session = await runBot(options, {
@@ -192,7 +207,7 @@ export class Runner extends EventEmitter {
       this.session = session;
       session.context.on('close', () => {
         if (this.session === session) this.session = null;
-        if (this.state.id === id && this.state.status === 'CART_SECURED') this.finish('CANCELLED', 'Has cerrado la ventana del bot: el carrito se libera.');
+        if (this.state.id === id && this.state.status === 'CART_SECURED') this.finish('CANCELLED', 'Has cerrado la ventana del bot: el carrito caducará solo.');
       });
       this.state.cart = session.cart;
       this.state.status = 'CART_SECURED';
@@ -216,6 +231,8 @@ export class Runner extends EventEmitter {
   }
 
   private async sendCartMessage(id: string, cart: SecuredCart): Promise<void> {
+    const strategyKey = cart.strategy.split(':')[0] ?? '';
+    const strategyZone = cart.strategy.split(':').slice(1).join(':');
     const lines = [
       '🎟️ <b>¡Entradas en el carrito!</b>',
       '',
@@ -224,14 +241,14 @@ export class Runner extends EventEmitter {
       ...cart.items.map((i) => `• ${i.qty} × ${escapeHtml(i.sectionLabel)} — ${eur(i.unitPrice)}`),
       `<b>Total:</b> ${eur(cart.total)}`,
       cart.expiresAt ? `⏳ El carrito caduca sobre las <b>${clock(cart.expiresAt)}</b>` : '⏳ Caducidad desconocida: no tardes',
-      cart.assisted ? '<i>(Selección hecha a mano; el bot solo detectó el carrito.)</i>' : '',
+      STRATEGY_LABEL[strategyKey] ? `<i>(${STRATEGY_LABEL[strategyKey]}${strategyZone ? ` · ${escapeHtml(strategyZone)}` : ''})</i>` : '',
       '',
       '<b>¿Quieres comprar las entradas?</b>',
       '<i>El pago lo haces tú: el bot nunca paga.</i>',
     ].filter((l, i, a) => l !== '' || a[i - 1] !== '');
     const keyboard: Keyboard = [];
     if (isTelegramButtonUrl(cart.url)) {
-      keyboard.push([{ text: '🛒 Comprar entradas', url: cart.url }]);
+      keyboard.push([{ text: '🌐 Abrir la web del partido', url: cart.url }]);
     } else {
       lines.push('', `Enlace al carrito (en tu PC): <code>${escapeHtml(cart.url)}</code>`);
     }
@@ -287,10 +304,9 @@ export class Runner extends EventEmitter {
       );
       return;
     }
-    const cartId = /checkout\/([a-f0-9]+)/.exec(session.cart.url)?.[1];
-    if (this.state.options?.mode === 'simulado' && cartId) releaseMockCart(cartId);
-    this.finish('CANCELLED', 'Entradas liberadas: he cerrado el navegador del bot.');
-    await this.notify('❌ Vale, no se compran. He cerrado el navegador del bot y el carrito se libera.');
+    await session.release();
+    this.finish('CANCELLED', 'Entradas liberadas: he quitado las entradas del carrito y cerrado el navegador del bot.');
+    await this.notify('❌ Vale, no se compran. He quitado las entradas del carrito y cerrado el navegador del bot.');
     await this.closeSession();
   }
 

@@ -19,10 +19,13 @@ export interface PruebaConfig {
   /** Opcional: si no se rellenan, el login lo haces tú en la ventana del bot (recomendado). */
   account: { email: string | null; password: string | null };
   defaults: {
+    /** Vacía = el bot entra en el canal del femenino y elige el primer partido a la venta. */
     realEventUrl: string;
     quantity: number;
     zones: string[];
     maxUnitPriceEur: number | null;
+    /** Exigir asientos seguidos en la misma fila. */
+    contiguous: boolean;
   };
   /** Cuánto espera el bot a que resuelvas tú un login, CAPTCHA o cola. */
   humanWaitMs: number;
@@ -84,12 +87,13 @@ export function loadConfig(): PruebaConfig {
     account: { email: str('RM_EMAIL'), password: str('RM_PASSWORD') },
     defaults: {
       realEventUrl: str('PRUEBA_URL_EVENTO') ?? '',
-      quantity: num('PRUEBA_CANTIDAD', 2),
+      quantity: num('PRUEBA_CANTIDAD', 3),
       zones: (str('PRUEBA_ZONAS') ?? '')
         .split(',')
         .map((z) => z.trim())
         .filter(Boolean),
       maxUnitPriceEur: maxPrice === null ? null : num('PRUEBA_PRECIO_MAX', 0),
+      contiguous: (str('PRUEBA_JUNTOS') ?? '1') !== '0',
     },
     humanWaitMs: num('PRUEBA_ESPERA_HUMANO_MIN', 5) * 60_000,
     cartHoldMs: num('PRUEBA_RETENCION_CARRITO_MIN', 10) * 60_000,

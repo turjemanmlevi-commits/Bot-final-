@@ -6,7 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createReadStream } from 'node:fs';
 import type { PruebaConfig } from './config.js';
 import type { RunOptions } from './bot.js';
-import { handleMock, MOCK_EVENT_PATH } from './mock-site.js';
+import { handleMock, MOCK_CHANNEL_PATH, MOCK_EVENT_PATH } from './mock-site.js';
 import { panelHtml } from './panel.js';
 import type { Runner } from './runner.js';
 
@@ -22,8 +22,28 @@ function json(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body));
 }
 
-export function mockEventUrl(cfg: PruebaConfig, port: number): string {
-  return `http://${cfg.host}:${port}${MOCK_EVENT_PATH}`;
+export interface MockFlags {
+  /** Entrar por el canal (catálogo → partido → sesión) en vez de por la URL del partido. */
+  entry: 'canal' | 'partido';
+  queue: boolean;
+  challenge: boolean;
+  login: boolean;
+  /** Zonas con botón «Buscar asientos» (selección automática). */
+  auto: boolean;
+  /** Lista de zonas sin plano. */
+  list: boolean;
+}
+
+export function mockEventUrl(cfg: PruebaConfig, port: number, flags: Partial<MockFlags> = {}): string {
+  const base = `http://${cfg.host}:${port}${flags.entry === 'canal' ? MOCK_CHANNEL_PATH : MOCK_EVENT_PATH}`;
+  const q = new URLSearchParams();
+  if (flags.queue) q.set('cola', '1');
+  if (flags.challenge) q.set('reto', '1');
+  if (flags.login === false) q.set('login', '0');
+  if (flags.auto) q.set('auto', '1');
+  if (flags.list) q.set('lista', '1');
+  const s = q.toString();
+  return s ? `${base}?${s}` : base;
 }
 
 /** Valida lo que llega del panel y lo convierte en opciones de ejecución. */
@@ -38,20 +58,30 @@ export function parseRunOptions(body: Record<string, unknown>, cfg: PruebaConfig
   const rawMax = String(body['maxUnitPrice'] ?? '').trim().replace(',', '.');
   const maxEur = rawMax === '' ? null : Number(rawMax);
   if (maxEur !== null && (!Number.isFinite(maxEur) || maxEur <= 0)) throw new Error('El precio máximo no es válido.');
+  const contiguous = body['contiguous'] === undefined ? cfg.defaults.contiguous : body['contiguous'] === true || body['contiguous'] === 'true' || body['contiguous'] === 1;
 
   let eventUrl: string;
   if (mode === 'simulado') {
-    eventUrl = mockEventUrl(cfg, port) + (body['queue'] === true ? '?cola=1' : '');
+    eventUrl = mockEventUrl(cfg, port, {
+      entry: body['entry'] === 'canal' ? 'canal' : 'partido',
+      queue: body['queue'] === true,
+      challenge: body['challenge'] === true,
+      login: body['login'] !== false,
+      auto: body['auto'] === true,
+      list: body['list'] === true,
+    });
   } else {
     eventUrl = String(body['eventUrl'] ?? '').trim();
-    let u: URL;
-    try {
-      u = new URL(eventUrl);
-    } catch {
-      throw new Error('Pon la URL del partido (la de «Comprar entradas» en realmadrid.com).');
-    }
-    if (u.protocol !== 'https:' || !/(^|\.)(realmadrid\.com|oneboxtds\.com)$/.test(u.hostname)) {
-      throw new Error('En modo real la URL debe ser de tickets.realmadrid.com (o oneboxtds.com).');
+    if (eventUrl) {
+      let u: URL;
+      try {
+        u = new URL(eventUrl);
+      } catch {
+        throw new Error('La URL del partido no es válida. Déjala vacía para que el bot elija el próximo partido del femenino.');
+      }
+      if (u.protocol !== 'https:' || !/(^|\.)(realmadrid\.com|oneboxtds\.com)$/.test(u.hostname)) {
+        throw new Error('En modo real la URL debe ser de tickets.realmadrid.com (o vacía: el bot elige el próximo partido del femenino).');
+      }
     }
   }
   return {
@@ -60,6 +90,7 @@ export function parseRunOptions(body: Record<string, unknown>, cfg: PruebaConfig
     quantity,
     zones,
     maxUnitPrice: maxEur === null ? null : Math.round(maxEur * 100),
+    contiguous,
     // En modo real la ventana siempre es visible: puede hacer falta que intervengas.
     headless: mode === 'simulado' && body['headless'] === true,
   };
@@ -75,7 +106,15 @@ export function createAppServer(cfg: PruebaConfig, runner: Runner): Server {
 
         if (url.pathname === '/' && req.method === 'GET') {
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-          res.end(panelHtml({ realEventUrl: cfg.defaults.realEventUrl, quantity: cfg.defaults.quantity, zones: cfg.defaults.zones.join(', '), maxUnitPriceEur: cfg.defaults.maxUnitPriceEur }));
+          res.end(
+            panelHtml({
+              realEventUrl: cfg.defaults.realEventUrl,
+              quantity: cfg.defaults.quantity,
+              zones: cfg.defaults.zones.join(', '),
+              maxUnitPriceEur: cfg.defaults.maxUnitPriceEur,
+              contiguous: cfg.defaults.contiguous,
+            }),
+          );
           return;
         }
         if (url.pathname === '/api/estado' && req.method === 'GET') return json(res, 200, runner.state);
