@@ -84,6 +84,8 @@ export interface BotDeps {
   profileDir: string;
   /** Chrome o Edge del PC con el que abrir el perfil (null = Chromium de Playwright). */
   browser?: SystemBrowser | null;
+  /** Argumentos extra de Chrome (pruebas: --no-sandbox). */
+  browserArgs?: string[];
   capturesDir: string;
   account: { email: string | null; password: string | null };
   humanWaitMs: number;
@@ -772,7 +774,7 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
   const browser = deps.browser ?? null;
   hooks.log('info', `Abriendo ${browser ? browser.name : 'el navegador del bot'} (${opts.headless ? 'oculto' : 'visible'}) con el perfil guardado…`);
   const context = await chromium.launchPersistentContext(deps.profileDir, {
-    ...launchOptionsFor(browser),
+    ...launchOptionsFor(browser, deps.browserArgs ?? []),
     headless: opts.headless,
     locale: 'es-ES',
     timezoneId: 'Europe/Madrid',

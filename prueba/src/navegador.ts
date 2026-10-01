@@ -8,7 +8,7 @@
  * cookies de Chrome en Windows solo las lee el propio Chrome) y sin la bandera de automatización.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readlinkSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
@@ -67,40 +67,89 @@ export function browserAvailable(): boolean {
   }
 }
 
-/** Opciones de lanzamiento de Playwright para que la web vea un Chrome normal. */
-export function launchOptionsFor(browser: SystemBrowser | null): { channel?: 'chrome' | 'msedge'; ignoreDefaultArgs: string[]; args: string[] } {
+/**
+ * Opciones de lanzamiento de Playwright para que la web vea un Chrome normal: el ejecutable del PC
+ * (por ruta, así vale cualquier Chrome/Edge o el indicado en BOT_BROWSER) y sin la bandera de automatización.
+ */
+export function launchOptionsFor(browser: SystemBrowser | null, extraArgs: string[] = []): { executablePath?: string; ignoreDefaultArgs: string[]; args: string[] } {
   return {
-    ...(browser ? { channel: browser.channel } : {}),
+    ...(browser ? { executablePath: browser.executablePath } : {}),
     ignoreDefaultArgs: ['--enable-automation'],
-    args: ['--disable-blink-features=AutomationControlled', '--disable-background-mode', '--no-first-run', '--no-default-browser-check'],
+    args: ['--disable-blink-features=AutomationControlled', '--disable-background-mode', '--no-first-run', '--no-default-browser-check', ...extraArgs],
   };
 }
 
+// ---------------------------------------------------------------------------
+// ¿Hay un Chrome usando el perfil?
+// ---------------------------------------------------------------------------
+
+/**
+ * true si algún Chrome tiene abierto el perfil `profileDir` (dos Chrome no pueden usar el mismo
+ * perfil a la vez). Windows: Chrome mantiene bloqueado el archivo «lockfile». Linux/Mac: el enlace
+ * «SingletonLock» apunta a «equipo-pid» y ese proceso sigue vivo.
+ */
+export function profileInUse(profileDir: string): boolean {
+  if (process.platform === 'win32') {
+    const lock = path.join(profileDir, 'lockfile');
+    if (!existsSync(lock)) return false;
+    try {
+      const fd = openSync(lock, 'r+');
+      closeSync(fd);
+      return false;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      return code === 'EBUSY' || code === 'EPERM' || code === 'EACCES';
+    }
+  }
+  const lock = path.join(profileDir, 'SingletonLock');
+  let target: string;
+  try {
+    target = readlinkSync(lock);
+  } catch {
+    return false;
+  }
+  const pid = Number(/-(\d+)$/.exec(target)?.[1] ?? NaN);
+  if (!Number.isFinite(pid) || pid <= 0) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** Espera a que ningún Chrome use el perfil. true si quedó libre antes de `timeoutMs`. */
+export async function waitProfileFree(profileDir: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+  const end = Date.now() + timeoutMs;
+  while (profileInUse(profileDir)) {
+    if (Date.now() > end || signal?.aborted) return false;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Chrome normal (sin automatización) para iniciar sesión
+// ---------------------------------------------------------------------------
+
 export interface LoginBrowser {
   pid: number | null;
+  /** true mientras haya un Chrome con el perfil abierto. */
   running(): boolean;
-  /** Se resuelve cuando la persona cierra la ventana (o se agota `timeoutMs`): true si se cerró. */
+  /** Se resuelve cuando la persona cierra la ventana (el perfil queda libre) o se agota `timeoutMs`: true si se cerró. */
   waitClosed(timeoutMs: number, signal?: AbortSignal): Promise<boolean>;
-  /** Cierra la ventana con cuidado (para que Chrome guarde las cookies) y espera a que termine. */
+  /** Cierra la ventana con cuidado (para que Chrome guarde las cookies) y espera a que el perfil quede libre. */
   close(): Promise<void>;
 }
 
 /**
- * Abre el Chrome del PC como un proceso normal (sin automatización) con el perfil del bot, en la URL
- * dada, para que la persona inicie sesión. Devuelve el proceso para poder cerrarlo antes de una prueba.
+ * Abre el Chrome del PC como un proceso normal (sin automatización, sin puerto de depuración) con el
+ * perfil del bot, en las URL dadas, para que la persona inicie sesión: Google lo trata como un Chrome
+ * cualquiera. Si ese perfil ya está abierto, Chrome solo abre las pestañas en esa ventana.
  */
-export function openLoginBrowser(browser: SystemBrowser, profileDir: string, url: string): LoginBrowser {
-  const args = [
-    `--user-data-dir=${profileDir}`,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-background-mode',
-    '--disable-sync-preferences',
-    '--window-size=1366,900',
-    '--lang=es-ES',
-    '--new-window',
-    url,
-  ];
+export function openLoginBrowser(browser: SystemBrowser, profileDir: string, urls: string | string[], extraArgs: string[] = []): LoginBrowser {
+  const list = Array.isArray(urls) ? urls : [urls];
+  const args = [`--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--disable-background-mode', '--lang=es-ES', '--new-window', ...extraArgs, ...list];
   const child: ChildProcess = spawn(browser.executablePath, args, { stdio: 'ignore', windowsHide: false });
   let exited = false;
   child.once('exit', () => {
@@ -109,48 +158,39 @@ export function openLoginBrowser(browser: SystemBrowser, profileDir: string, url
   child.once('error', () => {
     exited = true;
   });
-  const running = () => !exited && child.exitCode === null;
-  const waitExit = (ms: number) =>
-    new Promise<boolean>((resolve) => {
-      if (!running()) return resolve(true);
-      const t = setTimeout(() => resolve(!running()), ms);
-      child.once('exit', () => {
-        clearTimeout(t);
-        resolve(true);
-      });
-    });
+  const childAlive = () => !exited && child.exitCode === null;
+  const running = () => childAlive() || profileInUse(profileDir);
   return {
     pid: child.pid ?? null,
     running,
-    waitClosed: (timeoutMs, signal) =>
-      new Promise<boolean>((resolve) => {
-        const t = setInterval(() => {
-          if (!running() || signal?.aborted) {
-            clearInterval(t);
-            resolve(!running());
-          }
-        }, 500);
-        setTimeout(() => {
-          clearInterval(t);
-          resolve(!running());
-        }, timeoutMs).unref?.();
-      }),
-    close: async () => {
-      if (!running()) return;
-      if (process.platform === 'win32' && child.pid) {
-        // Sin /F: Chrome recibe «cerrar ventana» y guarda el perfil antes de salir.
-        await new Promise<void>((resolve) => {
-          const k = spawn('taskkill', ['/PID', String(child.pid)], { stdio: 'ignore', windowsHide: true });
-          k.once('exit', () => resolve());
-          k.once('error', () => resolve());
-        });
-      } else {
-        child.kill('SIGTERM');
+    waitClosed: async (timeoutMs, signal) => {
+      // Un instante para que Chrome cree su bloqueo (o entregue las pestañas al Chrome que ya tenía el perfil).
+      await new Promise((r) => setTimeout(r, 1500));
+      const end = Date.now() + timeoutMs;
+      while (running()) {
+        if (Date.now() > end || signal?.aborted) return false;
+        await new Promise((r) => setTimeout(r, 500));
       }
-      if (await waitExit(10_000)) return;
-      if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-      else child.kill('SIGKILL');
-      await waitExit(3000);
+      return true;
+    },
+    close: async () => {
+      if (childAlive()) {
+        if (process.platform === 'win32' && child.pid) {
+          // Sin /F: Chrome recibe «cerrar ventana» y guarda el perfil antes de salir.
+          await new Promise<void>((resolve) => {
+            const k = spawn('taskkill', ['/PID', String(child.pid), '/T'], { stdio: 'ignore', windowsHide: true });
+            k.once('exit', () => resolve());
+            k.once('error', () => resolve());
+          });
+        } else {
+          child.kill('SIGTERM');
+        }
+        if (!(await waitProfileFree(profileDir, 10_000))) {
+          if (process.platform === 'win32' && child.pid) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+          else child.kill('SIGKILL');
+          await waitProfileFree(profileDir, 3000);
+        }
+      }
     },
   };
 }
