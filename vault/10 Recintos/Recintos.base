@@ -1,0 +1,13 @@
+filters:
+  and:
+    - 'note.type == "venue"'
+views:
+  - type: table
+    name: Recintos
+    order:
+      - file.name
+      - note.city
+      - note.capacity
+      - note.confidence
+      - note.verifiedAt
+      - note.source

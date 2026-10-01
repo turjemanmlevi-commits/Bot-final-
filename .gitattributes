@@ -1,0 +1,8 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.woff2 binary
+# Los .bat necesitan CRLF en Windows: se guardan tal cual.
+*.bat -text
+*.cmd -text
+*.ps1 -text

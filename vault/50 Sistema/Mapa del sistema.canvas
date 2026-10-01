@@ -1,0 +1,222 @@
+{
+  "nodes": [
+    {
+      "id": "g-datos",
+      "type": "group",
+      "label": "Datos (Obsidian)",
+      "x": -40,
+      "y": -60,
+      "width": 380,
+      "height": 520
+    },
+    {
+      "id": "g-runtime",
+      "type": "group",
+      "label": "Runtime (servidor)",
+      "x": 420,
+      "y": -60,
+      "width": 700,
+      "height": 520
+    },
+    {
+      "id": "g-fuera",
+      "type": "group",
+      "label": "Fuera del sistema",
+      "x": 1200,
+      "y": -60,
+      "width": 380,
+      "height": 520
+    },
+    {
+      "id": "vault",
+      "type": "text",
+      "text": "## Vault\n`10 Recintos` · `20 Eventos` · `30 Proveedores`\nFrontmatter = datos",
+      "x": 0,
+      "y": 0,
+      "width": 300,
+      "height": 140,
+      "color": "4"
+    },
+    {
+      "id": "f-vault",
+      "type": "file",
+      "file": "00 Guía/Cómo funciona el vault.md",
+      "x": 0,
+      "y": 170,
+      "width": 300,
+      "height": 100
+    },
+    {
+      "id": "compiler",
+      "type": "text",
+      "text": "## Compilador\nVenueArtifact con **hash**\nSe recompila al guardar",
+      "x": 0,
+      "y": 300,
+      "width": 300,
+      "height": 120,
+      "color": "4"
+    },
+    {
+      "id": "ops",
+      "type": "text",
+      "text": "## Operaciones\nBorrador → Armada → T0 → Asegurada\n(snapshot congelado)",
+      "x": 460,
+      "y": 0,
+      "width": 300,
+      "height": 120,
+      "color": "5"
+    },
+    {
+      "id": "f-sm",
+      "type": "file",
+      "file": "50 Sistema/Máquina de estados.md",
+      "x": 460,
+      "y": 150,
+      "width": 300,
+      "height": 90
+    },
+    {
+      "id": "engine",
+      "type": "text",
+      "text": "## Motor\nDecisión **pura** + asignación con invariantes\n(límites, presupuesto, precio)",
+      "x": 800,
+      "y": 0,
+      "width": 280,
+      "height": 150,
+      "color": "5"
+    },
+    {
+      "id": "f-sel",
+      "type": "file",
+      "file": "50 Sistema/Selección de entradas.md",
+      "x": 800,
+      "y": 180,
+      "width": 280,
+      "height": 90
+    },
+    {
+      "id": "gateway",
+      "type": "text",
+      "text": "## Gateway\nkill switch → autorización del vault → circuito\nantes de **cada** llamada",
+      "x": 460,
+      "y": 280,
+      "width": 300,
+      "height": 140,
+      "color": "1"
+    },
+    {
+      "id": "journal",
+      "type": "text",
+      "text": "## Journal\nPGlite / Postgres\nbase del **replay**",
+      "x": 800,
+      "y": 300,
+      "width": 280,
+      "height": 120,
+      "color": "5"
+    },
+    {
+      "id": "provider",
+      "type": "text",
+      "text": "## Proveedor\nSimulador · API autorizada\n*(nunca: pagar, retos, colas, límites)*",
+      "x": 1240,
+      "y": 0,
+      "width": 300,
+      "height": 140,
+      "color": "6"
+    },
+    {
+      "id": "humans",
+      "type": "text",
+      "text": "## Personas\nsesiones, retos, tareas manuales y **pago**",
+      "x": 1240,
+      "y": 180,
+      "width": 300,
+      "height": 120,
+      "color": "3"
+    },
+    {
+      "id": "dash",
+      "type": "text",
+      "text": "## Dashboard + Telegram\ntiempo real (SSE)",
+      "x": 1240,
+      "y": 330,
+      "width": 300,
+      "height": 110,
+      "color": "3"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "vault",
+      "fromSide": "bottom",
+      "toNode": "compiler",
+      "toSide": "top",
+      "label": "lee"
+    },
+    {
+      "id": "e2",
+      "fromNode": "compiler",
+      "fromSide": "right",
+      "toNode": "ops",
+      "toSide": "left",
+      "label": "artefactos"
+    },
+    {
+      "id": "e3",
+      "fromNode": "ops",
+      "fromSide": "right",
+      "toNode": "engine",
+      "toSide": "left",
+      "label": "RUNNING"
+    },
+    {
+      "id": "e4",
+      "fromNode": "engine",
+      "fromSide": "bottom",
+      "toNode": "journal",
+      "toSide": "top",
+      "label": "decisiones"
+    },
+    {
+      "id": "e5",
+      "fromNode": "ops",
+      "fromSide": "bottom",
+      "toNode": "gateway",
+      "toSide": "top",
+      "label": "acciones"
+    },
+    {
+      "id": "e6",
+      "fromNode": "gateway",
+      "fromSide": "right",
+      "toNode": "provider",
+      "toSide": "left",
+      "label": "cart.add …"
+    },
+    {
+      "id": "e7",
+      "fromNode": "ops",
+      "fromSide": "right",
+      "toNode": "humans",
+      "toSide": "left",
+      "label": "tareas"
+    },
+    {
+      "id": "e8",
+      "fromNode": "journal",
+      "fromSide": "right",
+      "toNode": "dash",
+      "toSide": "left",
+      "label": "stream"
+    },
+    {
+      "id": "e9",
+      "fromNode": "humans",
+      "fromSide": "bottom",
+      "toNode": "dash",
+      "toSide": "top",
+      "label": "responden"
+    }
+  ]
+}

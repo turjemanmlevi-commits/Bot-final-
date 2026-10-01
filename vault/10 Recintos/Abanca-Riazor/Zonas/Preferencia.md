@@ -1,0 +1,17 @@
+---
+type: "zone"
+id: "abanca-riazor.zona-2-preferencia"
+venue: "[[10 Recintos/Abanca-Riazor/Abanca-Riazor|Abanca-Riazor]]"
+name: "Preferencia"
+aliases: []
+tags:
+  - "zona"
+---
+
+# Preferencia
+
+Grada lateral enfrente de la principal, a lo largo del campo. Zona de [[10 Recintos/Abanca-Riazor/Abanca-Riazor|Abanca-Riazor]].
+
+## Secciones
+
+- [[10 Recintos/Abanca-Riazor/Secciones/Preferencia|Preferencia]]

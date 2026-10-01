@@ -11,20 +11,21 @@
     "prueba"
   ],
   "engines": {
-    "node": ">=20.11"
+    "node": ">=20.19"
   },
   "scripts": {
     "dev": "npm run dev -w @to/server",
     "dev:dashboard": "npm run dev -w @to/dashboard",
     "build": "npm run build -w @to/dashboard",
     "start": "npm run start -w @to/server",
-    "typecheck": "npm run typecheck -w @to/shared && npm run typecheck -w @to/server && npm run typecheck -w @to/dashboard",
+    "typecheck": "npm run typecheck -w @to/shared && npm run typecheck -w @to/server && npm run typecheck -w @to/dashboard && npm run typecheck -w @to/prueba",
     "test": "npm run test -w @to/server",
     "vault:compile": "npm run vault:compile -w @to/server",
     "seed:demo": "npm run seed:demo -w @to/server",
     "bench": "npm run bench -w @to/server",
     "gates": "npm run gates -w @to/server",
     "replay": "npm run replay -w @to/server",
+    "verify": "npm run typecheck && npm test && npm run gates",
     "prueba": "npm run start -w @to/prueba",
     "prueba:smoke": "npm run smoke -w @to/prueba",
     "prueba:chat-id": "npm run chat-id -w @to/prueba"
