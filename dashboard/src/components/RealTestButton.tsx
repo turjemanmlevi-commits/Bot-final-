@@ -1,46 +1,76 @@
 import { useNavigate } from 'react-router';
+import { BROWSER_TEST_QUICK } from '@to/shared';
 import { Api } from '../lib/api';
 import { useAction } from '../lib/hooks';
+import { useLive } from '../lib/store';
 import { useDialog } from './Dialog';
 import { Icon } from './Icon';
 
 /**
- * «Prueba Real Madrid»: con las cuentas del Real Madrid de «Cuentas», arma una
- * operación de prueba (1 entrada por cuenta) en un partido de prueba a la venta.
- * El plan llega al momento por Telegram y la tarea de compra a la hora elegida.
+ * «Prueba Real Madrid»: el bot abre su propio Chrome con una cuenta de «Cuentas», entra en la
+ * web de entradas del Real Madrid (femenino), mete las entradas en el carrito, pulsa «Comprar
+ * entradas» y, con la pantalla de pago abierta, avisa por Telegram con la captura y los botones.
+ * Nunca paga. Los requisitos los pone el bot (3 seguidas, cualquier zona, sin tope; si no hay, menos).
  */
 export function RealTestButton({ className = 'btn', size = 15 }: { className?: string; size?: number }) {
   const ask = useDialog();
   const navigate = useNavigate();
+  const s = useLive();
   const { run, busy } = useAction();
 
   const start = async () => {
-    const minutes = await ask({
-      title: 'Prueba real con el Real Madrid',
+    const accounts = Object.values(s.accounts)
+      .filter((a) => a.enabled)
+      .sort((a, b) => Number(b.providerId === 'real-madrid') - Number(a.providerId === 'real-madrid') || a.label.localeCompare(b.label, 'es'));
+    if (accounts.length === 0) {
+      await ask({
+        title: 'Falta una cuenta',
+        body: 'Crea tu cuenta del Real Madrid en «Cuentas» (proveedor Real Madrid) y vuelve a pulsar.',
+        confirmText: 'Entendido',
+      });
+      navigate('/cuentas');
+      return;
+    }
+    const q = BROWSER_TEST_QUICK;
+    const chosen = await ask({
+      title: 'Prueba real: el bot mete las entradas al carrito',
       body: (
         <div className="stack" style={{ gap: 8 }}>
           <div>
-            Usa <b>tus cuentas del Real Madrid</b> (las de «Cuentas») en un partido de prueba que esté a la venta: <b>1 entrada por cuenta</b>, máximo 60 € por entrada.
+            El bot abre <b>su propio Chrome</b> con la cuenta elegida, entra en <b>tickets.realmadrid.com</b> (femenino), elige el próximo partido a la venta y mete{' '}
+            <b>
+              {q.quantity} entradas{q.contiguous ? ' seguidas' : ''}
+            </b>{' '}
+            en el carrito (cualquier zona, sin tope de precio; si no hay {q.quantity}, las que haya).
           </div>
           <div>
-            Te llega <b>ahora</b> el plan por Telegram: entra en realmadrid.com con tu cuenta y pulsa <b>✅ Sesión lista</b>. A la hora te llega la tarea con la zona; añade la entrada al
-            carrito en la web oficial y pulsa <b>✅ 1 en carrito</b> (o <b>❌ No pude</b>).
+            Pulsa <b>«Comprar entradas»</b> y, con la pantalla de pago abierta, te manda por Telegram la <b>captura</b>, el <b>enlace</b> y los botones{' '}
+            <b>✅ Sí, voy a pagar</b> / <b>❌ No, liberar</b>. Aquí abajo lo ves en vivo.
           </div>
-          <div className="small muted">La sala no entra en la web ni paga: eso lo haces tú. Si no quieres la entrada, no pagues y pulsa «Liberar» en Carritos.</div>
+          <div className="small muted">
+            Nunca paga. Si la web pide iniciar sesión, cola o verificación, te avisa y lo haces tú en su ventana (queda guardado para la siguiente).
+          </div>
         </div>
       ),
-      input: { label: 'Minutos hasta que abra la venta de prueba', type: 'number', defaultValue: '2', hint: 'Entre 1 y 60. También puedes pulsar «Empezar ya» en la operación.' },
-      confirmText: 'Armar la prueba',
+      input: {
+        label: 'Con qué cuenta entra el bot',
+        options: accounts.map((a) => ({ value: a.id, label: `${a.label}${a.providerId === 'real-madrid' ? '' : ` · ${a.providerId}`}` })),
+        defaultValue: accounts[0]?.id ?? '',
+        hint: 'Mejor una cuenta que ya haya iniciado sesión en «Cuentas → Abrir navegador».',
+      },
+      confirmText: 'Empezar la prueba',
     });
-    if (typeof minutes !== 'string') return;
-    const m = Math.min(60, Math.max(1, Math.round(Number(minutes.replace(',', '.')) || 2)));
-    const r = await run(() => Api.realTest({ startInSeconds: m * 60 }), (x) => x.message);
-    if (r) navigate(`/operaciones/${r.operationId}`);
+    if (typeof chosen !== 'string' || !chosen) return;
+    const r = await run(() => Api.browserTestStart({ ...q, accountId: chosen }), 'Prueba en marcha: mira la tarjeta «Prueba real con el navegador»');
+    if (r) {
+      navigate('/');
+      setTimeout(() => document.getElementById('prueba-navegador')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 150);
+    }
   };
 
   return (
     <button type="button" className={className} onClick={() => void start()} disabled={busy}>
-      <Icon name="send" size={size} /> Prueba Real Madrid
+      <Icon name="play" size={size} /> Prueba Real Madrid
     </button>
   );
 }

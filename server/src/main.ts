@@ -18,6 +18,8 @@ import { FeedControl } from './feeds/control';
 import { EventWatcher } from './feeds/watcher';
 import { asideName, claimDataDir, copyLegacyData, probePglite, releaseDataDir } from './store/dbcheck';
 import { MemoryDriver, PgliteDriver, PostgresDriver, type JournalDriver } from './store/drivers';
+import { CredentialStore } from './runtime/credenciales';
+import { BrowserTestService } from './runtime/prueba-navegador';
 import { TelegramControl } from './telegram/control';
 import { TelegramNotifier } from './telegram/telegram';
 import { log } from './util/log';
@@ -215,8 +217,13 @@ async function main(): Promise<void> {
   await top.load();
   app.runtime.ctx.topMatches = top;
 
+  // Prueba real con el navegador del bot (perfiles por cuenta en data/navegador).
+  const credentials = new CredentialStore(env.dataDir);
+  for (const id of credentials.ids()) if (app.runtime.store.accounts.get(id)) app.runtime.ctx.accounts.setHasSecret(id, true, 'sistema');
+  const browserTest = new BrowserTestService({ app, dataDir: env.dataDir, credentials, humanWaitMs: env.manualTaskMinutes * 60_000 });
+
   const dist = existsSync(path.join(env.dashboardDist, 'index.html')) ? env.dashboardDist : null;
-  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram, feeds, ai, authoring });
+  const http = createHttpApp(app, { dashboardDist: dist ?? env.dashboardDist, operatorToken: env.operatorToken, telegram, feeds, ai, authoring, browserTest, credentials });
   const server = serve({ fetch: http.fetch, port: env.port, hostname: env.host }, (info) => {
     const url = `http://${env.host === '0.0.0.0' ? 'localhost' : env.host}:${info.port}`;
     console.log('');
@@ -239,6 +246,7 @@ async function main(): Promise<void> {
     console.log(
       `  Claude      ${env.anthropicKey ? 'conectado: busca los eventos de cada web de venta (dashboard y /evento en Telegram)' : 'sin clave: pégala en el dashboard → Ajustes · Claude (IA)'}`,
     );
+    console.log(`  Navegador   ${browserTest.isAvailable() ? 'listo para la prueba real (botón «Prueba Real Madrid»)' : 'NO instalado: ejecuta  npx playwright install chromium'}`);
     console.log('');
     console.log('  Demo: botón "Nueva demo" en el dashboard, o  npm run seed:demo');
     console.log('');
@@ -264,6 +272,7 @@ async function main(): Promise<void> {
     log.info(`Cerrando (${signal})…`);
     telegram.stop();
     watcher.stop();
+    await browserTest.close().catch(() => undefined);
     server.close();
     await app.stop().catch((err: Error) => log.error('Error al cerrar', { error: err.message }));
     process.exit(0);

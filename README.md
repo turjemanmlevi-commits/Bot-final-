@@ -97,18 +97,20 @@ Con estas ticketeras el sistema trabaja en **asistencia manual**. En el dashboar
 
 Guía completa en el vault: `00 Guía/Comprar entradas reales (paso a paso).md`.
 
-### Prueba real con el Real Madrid en un clic
+### Prueba real con el Real Madrid en un clic (el bot mete las entradas al carrito)
 
-Botón **Prueba Real Madrid** (menú de la izquierda y Resumen), o **`/prueba`** en el chat principal de Telegram. Usa **tus cuentas del Real Madrid** de *Cuentas* (no crea cuentas de mentira; las de otras webs no se tocan), elige un partido de prueba del vault (etiqueta `prueba`) que **ya esté a la venta** y en el que a esas cuentas les quede cupo, y arma una operación de **1 entrada por cuenta**, máximo 60 € por entrada, que abre en 2 minutos (en el dashboard eliges los minutos).
+Botón **Prueba Real Madrid** (menú de la izquierda y Resumen), o **`/prueba`** en el chat principal de Telegram. El bot abre **su propio Chrome** con una cuenta de *Cuentas*, entra en **tickets.realmadrid.com** (femenino), elige el próximo partido a la venta, mete **3 entradas seguidas** en el carrito (cualquier zona, sin tope de precio; si no hay 3, las que haya), pulsa **«Comprar entradas»** y, con la **pantalla de pago abierta** en su ventana, manda por Telegram la **captura**, el **enlace** y los botones **✅ Sí, voy a pagar** / **❌ No, liberar**. **Nunca paga.** En el Resumen, la tarjeta **Prueba real con el navegador del bot** lo enseña en vivo (registro, carrito, captura y los mismos botones).
 
-1. Al momento te llega por Telegram el **plan** con **✅ Sesión lista**: entra en realmadrid.com con tu cuenta y púlsalo.
-2. A la hora llega **«🚦 ¡Abre la venta!»** y tu tarea (zona, 1 entrada, precio máximo) con el botón a la web oficial. O pulsa **Empezar ya** en la operación.
-3. Añade la entrada al carrito en la web oficial y pulsa **✅ 1 en carrito** (o **❌ No pude**: te llega la siguiente zona).
-4. Si no la quieres, **no pagues** y pulsa **Liberar** en *Carritos*; si la pagas, **💳 Ya lo he pagado**. Después, **Parar** y **Cerrar** la operación (una prueba ya terminada se cierra sola al lanzar la siguiente).
+Cómo se hace, paso a paso:
 
-El cupo es de 1 entrada por persona y partido: cada prueba con carrito ocupa el de ese partido y la siguiente va a otro partido de prueba. Si una cuenta está en una compra de verdad, la prueba no la usa.
+1. **Una sola vez por cuenta: Cuentas → «Abrir navegador e iniciar sesión».** Se abre el Chrome del bot con el perfil de esa cuenta (carpeta `data/navegador/<cuenta>`). Inicia sesión ahí en la web del Real Madrid **como lo hagas siempre** (Google, Apple o email) y cierra la ventana. Las cookies se quedan en ese perfil: la cuenta pasa a **Sesión guardada** y en las pruebas entra ya logueada, igual que tu Chrome recuerda Gmail. No hace falta guardar contraseñas; si entras con email y contraseña puedes guardarlos en **Editar cuenta → Acceso del bot** (solo en este PC, `data/credenciales.json`) para que el bot rellene el formulario él mismo.
+2. **Ajustes · Telegram**: el bot conectado y el chat principal elegido (ya lo tienes si te llegan avisos).
+3. **Prueba Real Madrid → elige la cuenta → Empezar la prueba.** Verás abrirse la ventana del bot y, en el Resumen, el registro en vivo. Si la web pide iniciar sesión, cola o verificación, el bot **te avisa** (Telegram y tarjeta) y espera a que lo hagas tú en su ventana; después sigue solo.
+4. **Te llega el Telegram** con la captura de la pantalla de pago, el partido, las entradas, el total, el tiempo del carrito y los botones. **✅ Sí**: la ventana del bot se queda abierta en la pantalla de pago y pagas tú ahí. **❌ No**: el bot quita las entradas del carrito y cierra. Si no respondes antes de que caduque el carrito, lo libera y avisa. **Parar** en la tarjeta cierra el navegador en cualquier momento (libera lo que hubiera).
 
-> La directiva europea Ómnibus prohíbe revender entradas compradas con medios automatizados que eludan los límites o controles del vendedor. Aquí todo lo hace una persona. Cada cuenta debe ser de una persona real que va a asistir; las entradas de socio del Real Madrid son personales e intransferibles.
+El navegador del bot (Chromium de Playwright) se instala solo al abrir «Sala de control»; si falla, `npx playwright install chromium` en la carpeta del proyecto. La prueba antigua con plan por Telegram (operación manual de 1 entrada por cuenta) sigue disponible en la API (`/api/demo/real-test`).
+
+> La directiva europea Ómnibus prohíbe revender entradas compradas con medios automatizados que eludan los límites o controles del vendedor. El bot no pasa colas ni CAPTCHA (los hace una persona), respeta los límites de la web y no paga. Cada cuenta debe ser de una persona real que va a asistir; las entradas de socio del Real Madrid son personales e intransferibles.
 
 ## ⭐ Grandes partidos
 

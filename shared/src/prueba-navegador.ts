@@ -70,6 +70,7 @@ export const BrowserTestStartSchema = z
 export type BrowserTestStartInput = z.infer<typeof BrowserTestStartSchema>;
 
 export const BrowserTestDecisionSchema = z.object({ decision: z.enum(['comprar', 'cancelar']) }).strict();
+export type BrowserTestDecision = z.infer<typeof BrowserTestDecisionSchema>['decision'];
 
 /** Email y contraseña de la web oficial de una cuenta: el bot los usa para iniciar sesión. Null = quitarlos. */
 export const AccountCredentialsSchema = z

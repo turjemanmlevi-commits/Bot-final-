@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { AlertRow, sortAlerts } from '../components/AlertList';
+import { BrowserTestCard } from '../components/BrowserTestCard';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { OperationHero } from '../components/OperationHero';
@@ -87,6 +88,7 @@ export function OverviewPage() {
             en T0 cada persona pone sus entradas en el carrito de la web oficial → <b>paga allí</b> y lo marca aquí.
           </Empty>
         </Card>
+        <BrowserTestCard />
         <RealPurchaseChecklist />
         <VaultCard />
       </div>
@@ -130,6 +132,8 @@ export function OverviewPage() {
         <Stat label="Alertas críticas" value={critical} detail={`${openAlerts.length} abiertas en total`} />
         <Stat label="Tareas humanas" value={openTasks.length} detail={openTasks.length ? 'Te esperan en Tareas' : 'Nada pendiente'} />
       </div>
+
+      <BrowserTestCard />
 
       <RealPurchaseChecklist />
 

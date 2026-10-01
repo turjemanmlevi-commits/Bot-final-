@@ -97,6 +97,16 @@ export class AccountService {
     return next;
   }
 
+  /** La cuenta tiene (o deja de tener) email y contraseña guardados en este PC para el navegador del bot. */
+  setHasSecret(id: Id, hasSecret: boolean, actor: string): Account {
+    const a = this.get(id);
+    if (a.hasSecret === hasSecret) return a;
+    const next: Account = { ...a, hasSecret, updatedAt: iso(this.ctx.now()) };
+    this.ctx.store.putAccount(next);
+    this.ctx.journal.audit('account.secret', { accountId: id, hasSecret }, { actor });
+    return next;
+  }
+
   /** Operación activa (armada o en curso) que usa la cuenta. */
   private activeOperation(accountId: Id): Id | null {
     const a = this.ctx.store.accounts.get(accountId);

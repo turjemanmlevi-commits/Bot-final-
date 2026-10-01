@@ -34,6 +34,12 @@ export interface Notifier {
   prewarm?(accountIds: import('@to/shared').Id[]): void;
   /** Una cuenta acaba de quedar vinculada a su chat de Telegram. */
   accountLinked?(account: import('@to/shared').Account): void;
+  /** Mensaje a un chat concreto (prueba con el navegador). Devuelve el message_id. */
+  sendTo?(chatId: string, text: string, keyboard?: Array<Array<{ text: string; callback_data: string } | { text: string; url: string }>>): Promise<number | null>;
+  /** Foto desde un archivo local con pie y botones (captura de la pantalla de pago). */
+  sendPhotoTo?(chatId: string, file: string, caption: string, keyboard?: Array<Array<{ text: string; callback_data: string } | { text: string; url: string }>>): Promise<number | null>;
+  /** Quita los botones de un mensaje. */
+  clearButtons?(chatId: string, messageId: number): void;
 }
 
 export interface RuntimeConfig {
@@ -95,6 +101,8 @@ export class Ctx {
   eventAssistant: import('../ai/assistant').EventAssistant | null = null;
   /** ⭐ Grandes partidos (lista de Claude guardada en disco). */
   topMatches: import('../ai/top').TopMatches | null = null;
+  /** Prueba real con el navegador del bot (la pone el servidor al arrancar). */
+  browserTest: import('./prueba-navegador').BrowserTestService | null = null;
   readonly startedAt: number;
 
   constructor(

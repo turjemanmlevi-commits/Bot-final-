@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router';
 import type { Account, AccountInput, ProviderMode } from '@to/shared';
 import { useDialog } from '../components/Dialog';
 import { Icon } from '../components/Icon';
 import { Callout, Card, Empty, Pill, QueuePill, SessionPill } from '../components/ui';
 import { Api, ApiError } from '../lib/api';
-import { useAction } from '../lib/hooks';
+import { useAction, useAsync } from '../lib/hooks';
 import { useLive } from '../lib/store';
 
 const EMPTY_FORM: AccountInput = {
@@ -95,6 +95,10 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
   const chosen = providers.find((p) => p.id === f.providerId);
   const officialUrl = s.providerAuthorizations.find((a) => a.providerId === f.providerId)?.url ?? null;
   const set = <K extends keyof AccountInput>(k: K, v: AccountInput[K]) => setF((x) => ({ ...x, [k]: v }));
+  // Acceso del bot a la web oficial (opcional): solo se guarda en este PC y la API nunca lo devuelve.
+  const [credEmail, setCredEmail] = useState('');
+  const [credPassword, setCredPassword] = useState('');
+  const [credRemove, setCredRemove] = useState(false);
   const submit = async () => {
     const body: AccountInput = {
       ...f,
@@ -103,7 +107,14 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
       telegramChatId: f.telegramChatId?.trim() ? f.telegramChatId.trim() : null,
     };
     const r = await run(
-      () => withFieldLabels(() => (initial ? Api.updateAccount(initial.id, body) : Api.createAccount(body))),
+      () =>
+        withFieldLabels(async () => {
+          const saved = initial ? await Api.updateAccount(initial.id, body) : await Api.createAccount(body);
+          if (credRemove) return Api.setAccountCredentials(saved.id, { email: null, password: null });
+          if (credEmail.trim() && credPassword) return Api.setAccountCredentials(saved.id, { email: credEmail.trim(), password: credPassword });
+          if (credEmail.trim() || credPassword) throw new ApiError(400, 'BAD_REQUEST', 'Acceso del bot: pon el email y la contraseña, o deja los dos vacíos.');
+          return saved;
+        }),
       initial ? 'Cuenta actualizada' : 'Cuenta creada',
     );
     if (r) onDone();
@@ -206,6 +217,34 @@ function AccountForm({ initial, onDone }: { initial?: Account; onDone: () => voi
           <input type="checkbox" checked={f.enabled ?? true} onChange={(e) => set('enabled', e.target.checked)} />
           <span>Activa</span>
         </label>
+        <details open={Boolean(initial?.hasSecret)}>
+          <summary className="small ink2" style={{ cursor: 'pointer' }}>
+            Acceso del bot a la web oficial (opcional) {initial?.hasSecret ? <span className="tag">contraseña guardada</span> : null}
+          </summary>
+          <div className="stack" style={{ gap: 8, marginTop: 8 }}>
+            <div className="small muted">
+              Lo normal es <b>no</b> rellenar esto: abre el navegador de la cuenta (botón «Abrir navegador» en la lista), inicia sesión ahí una vez (Google, Apple o email) y la sesión
+              queda guardada. Solo si entras con <b>email y contraseña</b> del Real Madrid, puedes guardarlos aquí para que el bot inicie sesión solo cuando la web lo pida. Se guardan
+              únicamente en este PC (<span className="mono">data/credenciales.json</span>) y nunca se envían a Telegram ni se muestran.
+            </div>
+            <div className="form-grid">
+              <div className="field">
+                <label htmlFor="acc-cred-email">Email de la web oficial</label>
+                <input id="acc-cred-email" className="input" type="email" autoComplete="off" value={credEmail} onChange={(e) => { setCredEmail(e.target.value); setCredRemove(false); }} placeholder={initial?.hasSecret ? '(guardado; escribe para cambiarlo)' : 'ana@ejemplo.com'} />
+              </div>
+              <div className="field">
+                <label htmlFor="acc-cred-pass">Contraseña</label>
+                <input id="acc-cred-pass" className="input" type="password" autoComplete="new-password" value={credPassword} onChange={(e) => { setCredPassword(e.target.value); setCredRemove(false); }} placeholder={initial?.hasSecret ? '(guardada)' : ''} />
+              </div>
+            </div>
+            {initial?.hasSecret ? (
+              <label className="check">
+                <input type="checkbox" checked={credRemove} onChange={(e) => { setCredRemove(e.target.checked); if (e.target.checked) { setCredEmail(''); setCredPassword(''); } }} />
+                <span>Quitar el email y la contraseña guardados</span>
+              </label>
+            ) : null}
+          </div>
+        </details>
         <div className="row">
           <button type="button" className="btn primary" disabled={busy || !f.providerId || !f.label.trim() || !f.holderRef.trim()} onClick={() => void submit()}>
             {initial ? 'Guardar cambios' : 'Crear cuenta'}
@@ -236,6 +275,30 @@ export function AccountsPage() {
   useEffect(() => {
     if (highlight) document.getElementById(`acc-${highlight}`)?.scrollIntoView({ block: 'center' });
   }, [highlight]);
+
+  // Sesión guardada en el navegador del bot (perfil de Chrome por cuenta).
+  const ids = accounts.map((a) => a.id).join(',');
+  const browserInfo = useAsync(async () => {
+    const out: Record<string, { profileExists: boolean; hasCredentials: boolean }> = {};
+    await Promise.all(
+      accounts.map(async (a) => {
+        try {
+          out[a.id] = await Api.accountBrowser(a.id);
+        } catch {
+          // sin navegador del bot en este servidor
+        }
+      }),
+    );
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids]);
+  const openBrowser = useCallback(
+    async (a: Account) => {
+      await run(() => Api.openAccountBrowser(a.id), (r) => r.message);
+      setTimeout(() => browserInfo.reload(), 1500);
+    },
+    [run, browserInfo],
+  );
 
   const kill = async (a: Account) => {
     const engaged = s.killSwitches[`account:${a.id}`]?.engaged ?? false;
@@ -278,6 +341,7 @@ export function AccountsPage() {
                   <th>Sesión</th>
                   <th>Cola</th>
                   <th>Telegram</th>
+                  <th>Navegador del bot</th>
                   <th>En uso por</th>
                   <th />
                 </tr>
@@ -327,6 +391,32 @@ export function AccountsPage() {
                             —
                           </span>
                         )}
+                      </td>
+                      <td style={{ minWidth: 200 }}>
+                        {(() => {
+                          const info = browserInfo.data?.[a.id];
+                          return (
+                            <div className="stack" style={{ gap: 4 }}>
+                              <div className="row" style={{ gap: 6 }}>
+                                {info?.profileExists ? (
+                                  <Pill tone="good" title="Esta cuenta ya inició sesión en el Chrome del bot: la prueba entra directamente">Sesión guardada</Pill>
+                                ) : (
+                                  <Pill tone="neutral" title="Abre el navegador de esta cuenta e inicia sesión una vez">Sin sesión</Pill>
+                                )}
+                                {info?.hasCredentials ? <span className="tag" title="El bot puede iniciar sesión solo con email y contraseña">contraseña</span> : null}
+                              </div>
+                              <button
+                                type="button"
+                                className="btn sm"
+                                disabled={busy}
+                                onClick={() => void openBrowser(a)}
+                                title="Abre el Chrome del bot con el perfil de esta cuenta: inicia sesión ahí (Google, Apple o email) y cierra la ventana. Queda guardado."
+                              >
+                                <Icon name="external" size={12} /> {info?.profileExists ? 'Abrir navegador' : 'Abrir navegador e iniciar sesión'}
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="small" style={{ minWidth: 130 }}>
                         {op ? <Link to={`/operaciones/${op.id}`}>{op.name}</Link> : '—'}

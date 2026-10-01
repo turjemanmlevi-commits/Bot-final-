@@ -90,7 +90,7 @@ export const HELP =
   '<b>Comandos</b>\n' +
   '/evento — crear un evento con Claude: web de venta → evento → dónde sentaros (chat principal)\n' +
   '/top — los grandes partidos del año (Clásico, Champions, finales…), listos para preparar (chat principal)\n' +
-  '/prueba — prueba real con el Real Madrid: tus cuentas, 1 entrada cada una, la venta abre en 2 min (chat principal)\n' +
+  '/prueba — prueba real con el navegador del bot: entra en la web del Real Madrid con tu cuenta, mete 3 entradas seguidas en el carrito y te manda la captura (chat principal)\n' +
   '/tareas — tus tareas abiertas, con botones\n' +
   '/estado — cómo va cada operación y si Claude está conectado\n' +
   '/pausa — pausar lo que está en marcha (chat principal)\n' +
@@ -101,7 +101,7 @@ export const HELP =
 export const BOT_COMMANDS: Array<{ command: string; description: string }> = [
   { command: 'evento', description: 'Crear un evento con Claude (chat principal)' },
   { command: 'top', description: 'Grandes partidos del año (chat principal)' },
-  { command: 'prueba', description: 'Prueba real con el Real Madrid: abre en 2 min (chat principal)' },
+  { command: 'prueba', description: 'Prueba real: el bot mete 3 entradas en el carrito (chat principal)' },
   { command: 'tareas', description: 'Tus tareas abiertas, con botones' },
   { command: 'estado', description: 'Cómo va cada operación y si Claude está conectado' },
   { command: 'ayuda', description: 'Cómo responder rápido' },
@@ -443,6 +443,39 @@ export class TelegramNotifier implements Notifier {
     this.runtime = runtime;
     this.checked = this.check();
     void this.poll();
+  }
+
+  /** Mensaje a un chat concreto (prueba con el navegador): se resuelve cuando Telegram lo acepta. */
+  async sendTo(chatId: string, text: string, keyboard?: Button[][]): Promise<number | null> {
+    const r = await this.enqueue(chatId, text, keyboard);
+    return typeof r?.message_id === 'number' ? r.message_id : null;
+  }
+
+  /** Foto desde un archivo local (captura de la pantalla de pago) con pie y botones. Si falla, va el texto. */
+  async sendPhotoTo(chatId: string, file: string, caption: string, keyboard?: Button[][]): Promise<number | null> {
+    try {
+      const { readFile } = await import('node:fs/promises');
+      const data = await readFile(file);
+      const form = new FormData();
+      form.set('chat_id', chatId);
+      form.set('caption', caption.slice(0, 1024));
+      form.set('parse_mode', 'HTML');
+      if (keyboard) form.set('reply_markup', JSON.stringify({ inline_keyboard: keyboard }));
+      form.set('photo', new Blob([data], { type: 'image/png' }), 'captura.png');
+      const res = await fetch(`${this.apiBase}/bot${this.opts.token}/sendPhoto`, { method: 'POST', body: form, signal: AbortSignal.timeout(30_000) });
+      const json = (await res.json()) as { ok: boolean; description?: string; result?: { message_id?: number } };
+      if (!json.ok) throw new Error(json.description ?? `HTTP ${res.status}`);
+      // El pie de una foto tiene 1024 caracteres: si el texto es más largo, va aparte.
+      if (caption.length > 1024) await this.enqueue(chatId, caption).catch(() => undefined);
+      return typeof json.result?.message_id === 'number' ? json.result.message_id : null;
+    } catch (err) {
+      log.warn('Telegram: no se pudo enviar la captura; va el texto', { error: (err as Error).message });
+      return this.sendTo(chatId, caption, keyboard);
+    }
+  }
+
+  clearButtons(chatId: string, messageId: number): void {
+    this.setKeyboard(chatId, messageId);
   }
 
   /** Espera a la primera comprobación del bot (como mucho `ms`). */
@@ -972,6 +1005,14 @@ export class TelegramNotifier implements Notifier {
         await this.flow.callback(chat, q.message?.message_id ?? null, q.id, q.data ?? '', actor, chat === this.chatId);
         return;
       }
+      if (kind === 'pb' && ref && result) {
+        // Prueba con el navegador: «Sí, voy a pagar» / «No, liberar».
+        const service = rt.ctx.browserTest;
+        const ok = service && (result === 'comprar' || result === 'cancelar') ? service.decide(ref, result, `telegram:${q.from.username ?? q.from.id}`) : false;
+        this.answer(q.id, ok ? (result === 'comprar' ? 'Abriendo la ventana del bot…' : 'Liberando…') : 'Esa prueba ya no está pendiente.');
+        if (q.message) this.setKeyboard(q.message.chat.id, q.message.message_id);
+        return;
+      }
       if (kind === 'p' && ref) {
         // «Ya lo he pagado» (en la web oficial).
         let text = 'Pagado ✅';
@@ -1122,8 +1163,14 @@ export class TelegramNotifier implements Notifier {
         return;
       }
       try {
-        const r = await seedRealTest(rt, { actor: 'telegram' });
-        this.send(chat, `🧪 ${esc(r.message)}`);
+        const service = rt.ctx.browserTest;
+        if (service) {
+          const st = service.start({}, 'telegram');
+          this.send(chat, `🧪 Prueba en marcha con la cuenta «${esc(st.accountLabel ?? '')}»: 3 entradas seguidas del próximo partido del femenino. Te aviso aquí con la captura cuando estén en el carrito.`);
+        } else {
+          const r = await seedRealTest(rt, { actor: 'telegram' });
+          this.send(chat, `🧪 ${esc(r.message)}`);
+        }
       } catch (err) {
         this.send(chat, `❌ ${esc((err as Error).message)}`);
       }

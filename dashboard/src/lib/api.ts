@@ -1,6 +1,10 @@
 import type {
   Account,
+  AccountCredentialsInput,
   AccountInput,
+  BrowserTestDecision,
+  BrowserTestStartInput,
+  BrowserTestState,
   AiDetailsQuery,
   AiEventDetails,
   AiEventsQuery,
@@ -169,7 +173,26 @@ export const Api = {
   gates: () => api<GatesReport | null>('/api/gates'),
   runGates: (full = false) => post<GatesReport>(`/api/gates/run${full ? '?full=1' : ''}`),
   seedDemo: (body: { startInSeconds?: number; scenarioId?: string }) => post<{ operationId: string; message: string }>('/api/demo/seed', body),
-  /** Prueba real con el Real Madrid: arma una operación de prueba con las cuentas del Real Madrid. */
+  /** Prueba real con el navegador del bot: estado actual (se consulta cada segundo y medio mientras corre). */
+  browserTest: () => api<BrowserTestState>('/api/prueba-navegador'),
+  /** Arranca la prueba: el bot abre su Chrome con la cuenta, mete las entradas y avisa por Telegram. */
+  browserTestStart: (input: BrowserTestStartInput) => post<BrowserTestState>('/api/prueba-navegador', input),
+  /** Responde a la pregunta del carrito («comprar» = dejar la ventana abierta; «cancelar» = liberar). */
+  browserTestDecide: (decision: BrowserTestDecision) => post<{ ok: boolean }>('/api/prueba-navegador/decision', { decision }),
+  /** Para la prueba y cierra el navegador del bot (si había carrito, se libera). */
+  browserTestStop: () => post<{ ok: boolean }>('/api/prueba-navegador/parar'),
+  /** URL de la captura de la pantalla de pago (con el token para el <img>). */
+  browserTestCaptureUrl: (version: string) => {
+    const token = getToken();
+    return `/api/prueba-navegador/captura?v=${encodeURIComponent(version)}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+  },
+  /** Abre el Chrome del bot con el perfil de la cuenta para iniciar sesión (Google, Apple o email) una vez. */
+  openAccountBrowser: (id: string) => post<{ ok: boolean; message: string }>(`/api/accounts/${id}/navegador`),
+  /** ¿La cuenta tiene sesión guardada en el navegador del bot? ¿Y credenciales? */
+  accountBrowser: (id: string) => api<{ profileExists: boolean; hasCredentials: boolean }>(`/api/accounts/${id}/navegador`),
+  /** Email y contraseña de la web oficial (null = quitarlos). Solo se guardan en este PC. */
+  setAccountCredentials: (id: string, input: AccountCredentialsInput) => api<Account>(`/api/accounts/${id}/credenciales`, { method: 'PUT', body: input }),
+  /** Prueba antigua con plan por Telegram: arma una operación de prueba con las cuentas del Real Madrid. */
   realTest: (body: { startInSeconds?: number }) => post<{ operationId: string; eventName: string; t0: string; telegram: boolean; message: string }>('/api/demo/real-test', body),
   /** Crea la nota del evento en el vault (20 Eventos) y recompila. */
   createEventNote: (input: EventNoteInput) => post<EventNoteResult>('/api/vault/events', input),

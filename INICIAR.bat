@@ -96,6 +96,16 @@ if errorlevel 1 (
 echo   [OK] Dependencias listas
 
 echo.
+echo   Comprobando el navegador del bot ^(Chromium: solo se descarga la primera vez^)...
+call npx --no-install playwright install chromium >nul 2>nul
+if errorlevel 1 (
+  echo   [!] No se pudo instalar el navegador del bot. La sala funciona igual, pero la
+  echo       "Prueba Real Madrid" con el navegador no: revisa Internet y vuelve a abrir INICIAR.bat.
+) else (
+  echo   [OK] Navegador del bot listo
+)
+
+echo.
 echo   Compilando el dashboard...
 call npm run build --silent
 if errorlevel 1 (

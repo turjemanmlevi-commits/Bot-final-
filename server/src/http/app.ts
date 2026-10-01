@@ -29,6 +29,9 @@ import {
   PreferredTargetsSchema,
   SaleZonesSchema,
   SessionHumanSchema,
+  AccountCredentialsSchema,
+  BrowserTestDecisionSchema,
+  BrowserTestStartSchema,
   TelegramMainChatSchema,
   TelegramTestSchema,
   TelegramTokenSchema,
@@ -55,6 +58,8 @@ import { CartError } from '../runtime/carts';
 import { seedDemo } from '../runtime/demo';
 import { OperationError } from '../runtime/operations';
 import { seedRealTest } from '../runtime/prueba';
+import { BrowserTestError, type BrowserTestService } from '../runtime/prueba-navegador';
+import type { CredentialStore } from '../runtime/credenciales';
 import { TaskError } from '../runtime/tasks';
 import type { TelegramControl } from '../telegram/control';
 import { log } from '../util/log';
@@ -73,6 +78,10 @@ export interface HttpOptions {
   ai?: ClaudeControl | null;
   /** Alta de eventos y recintos (compartida con el bot de Telegram). */
   authoring?: VaultAuthoring | null;
+  /** Prueba real con el navegador del bot. */
+  browserTest?: BrowserTestService | null;
+  /** Email y contraseña por cuenta (solo en este PC). */
+  credentials?: CredentialStore | null;
 }
 
 class ApiError extends Error {
@@ -692,6 +701,68 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     } catch (err) {
       throw new ApiError(409, 'DEMO_FAILED', (err as Error).message);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Prueba real con el navegador del bot
+  // ---------------------------------------------------------------------------
+
+  const browserTest = () => {
+    if (!opts.browserTest) throw new ApiError(409, 'BROWSER_TEST_UNAVAILABLE', 'Este servidor no tiene el navegador del bot.');
+    return opts.browserTest;
+  };
+  const browserError = (err: unknown): never => {
+    if (err instanceof BrowserTestError) throw new ApiError(err.code === 'BUSY' ? 409 : err.code === 'ACCOUNT_NOT_FOUND' ? 404 : 400, err.code, err.message);
+    throw err;
+  };
+  http.get('/api/prueba-navegador', (c) => c.json(browserTest().state()));
+  http.post('/api/prueba-navegador', async (c) => {
+    const b = await body(c, BrowserTestStartSchema);
+    try {
+      return c.json(browserTest().start(b, actorOf(c)), 202);
+    } catch (err) {
+      return browserError(err);
+    }
+  });
+  http.post('/api/prueba-navegador/decision', async (c) => {
+    const b = await body(c, BrowserTestDecisionSchema);
+    const ok = browserTest().decide(null, b.decision, `dashboard:${actorOf(c)}`);
+    if (!ok) throw new ApiError(409, 'NO_DECISION_PENDING', 'No hay ningún carrito pendiente de decisión.');
+    return c.json({ ok: true });
+  });
+  http.post('/api/prueba-navegador/parar', (c) => {
+    browserTest().stop();
+    return c.json({ ok: true });
+  });
+  http.get('/api/prueba-navegador/captura', async (c) => {
+    const file = browserTest().screenshotPath();
+    if (!file) throw new ApiError(404, 'NO_SCREENSHOT', 'Sin captura');
+    const data = await readFile(file).catch(() => null);
+    if (!data) throw new ApiError(404, 'NO_SCREENSHOT', 'Sin captura');
+    return c.body(data, 200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+  });
+  /** Navegador de una cuenta: para iniciar sesión (Google, Apple o email) una sola vez. */
+  http.post('/api/accounts/:id/navegador', async (c) => {
+    try {
+      return c.json(await browserTest().openAccountBrowser(c.req.param('id')));
+    } catch (err) {
+      return browserError(err);
+    }
+  });
+  http.get('/api/accounts/:id/navegador', (c) => {
+    const id = c.req.param('id');
+    return c.json({ profileExists: browserTest().profileExists(id), hasCredentials: Boolean(opts.credentials?.has(id)) });
+  });
+  /** Email y contraseña de la web oficial (null = quitarlos). Solo se guardan en este PC; la API nunca los devuelve. */
+  http.put('/api/accounts/:id/credenciales', async (c) => {
+    const b = await body(c, AccountCredentialsSchema);
+    if (!opts.credentials) throw new ApiError(409, 'CREDENTIALS_UNAVAILABLE', 'Este servidor no guarda credenciales.');
+    const id = c.req.param('id');
+    const has = Boolean(b.email && b.password);
+    if ((b.email && !b.password) || (!b.email && b.password)) throw new ApiError(400, 'BAD_REQUEST', 'Pon el email y la contraseña, o deja los dos vacíos.');
+    const account = ctx.accounts.get(id);
+    opts.credentials.set(account.id, has ? { email: b.email!, password: b.password! } : null);
+    return c.json(ctx.accounts.setHasSecret(account.id, has, actorOf(c)));
   });
 
   http.post('/api/demo/real-test', async (c) => {
