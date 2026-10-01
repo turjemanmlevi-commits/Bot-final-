@@ -27,7 +27,7 @@ Particularidades de cada web: [[Real Madrid]] · [[Ticketmaster]] · [[Entradas.
 - Doble clic en **Sala de control** (acceso directo del Escritorio) o en **`INICIAR.bat`** (carpeta `bot final`). Comprueba Node.js (lo instala si falta), instala lo demás, compila y abre el dashboard en <http://localhost:8787>.
 - Deja **abierta la ventana negra** mientras uses el sistema. Si la cierras, se para. Hacer clic dentro ya no la pausa (`INICIAR.bat` desactiva la «Edición rápida»); si aun así su título empieza por «Seleccionar», pulsa `Esc`.
 - Si Windows muestra «Windows protegió su PC»: **Más información → Ejecutar de todas formas** (pasa con archivos descargados de Internet).
-- ¿Primera vez? En PowerShell pega `irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex` y sigue [[Bajar el proyecto a tu ordenador]].
+- ¿Primera vez? En PowerShell pega `irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex` y sigue [[Bajar el proyecto a tu ordenador]].
 
 ### 2. Telegram
 

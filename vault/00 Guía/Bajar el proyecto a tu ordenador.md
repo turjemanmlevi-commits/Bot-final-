@@ -13,13 +13,13 @@ Todo el proyecto —código, dashboard y este vault— está en GitHub. El objet
 2. Copia esta línea, pégala en PowerShell (clic derecho) y pulsa **Enter**:
 
    ```powershell
-   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex
+   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex
    ```
 
    ¿Sale `"irm" no se reconoce como un comando…`? Estás en **Símbolo del sistema** (cmd), no en PowerShell. Pega esta otra línea, que funciona en los dos:
 
    ```bat
-   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex"
+   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex"
    ```
 
 3. Si Windows pregunta si quieres permitir que se instale **Node.js**, pulsa **Sí**.
@@ -34,7 +34,7 @@ Qué hace el comando, paso a paso:
 | Paso | Qué hace |
 |---|---|
 | 1. Node.js | Si no está instalado, instala **Node.js LTS** con `winget` (el instalador de programas de Windows). Si tu Windows no tiene `winget`, abre nodejs.org y se para: instálalo con las opciones por defecto y vuelve a pegar el comando |
-| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en la carpeta `bot final` de tu Escritorio (en este PC, `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada** y nunca toca tu `.env` (configuración y claves) ni tus datos (cuentas, operaciones, carritos: ver [[#Dónde están tus datos y cómo hacer copia]]). Tampoco pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), ni tu configuración de Obsidian (`vault\.obsidian`) si ya existe |
+| 2. Proyecto | Descarga la rama `claude/confident-planck-41m20b` y la copia en la carpeta `bot final` de tu Escritorio (en este PC, `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada** y nunca toca tu `.env` (configuración y claves) ni tus datos (cuentas, operaciones, carritos: ver [[#Dónde están tus datos y cómo hacer copia]]). Tampoco pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), ni tu configuración de Obsidian (`vault\.obsidian`) si ya existe |
 | 3. Acceso directo | Crea **Sala de control** en el Escritorio: abre `INICIAR.bat` |
 | 4. Obsidian | Si respondes `s`, lo instala con `winget` |
 | 5. Arranque | Abre `INICIAR.bat` (ver el punto 3) |
@@ -46,9 +46,9 @@ Qué hace el comando, paso a paso:
 
 ### Opción B · ZIP
 
-1. Abre <https://github.com/turjemanmlevi-commits/Bot-final-> y, en el selector de ramas, elige `claude/confident-bell-yb79l7`.
-2. Pulsa **Code → Download ZIP**. Enlace directo: <https://github.com/turjemanmlevi-commits/Bot-final-/archive/refs/heads/claude/confident-bell-yb79l7.zip>
-3. Clic derecho en el ZIP → **Extraer todo…**. Dentro hay una carpeta (`Bot-final--claude-confident-bell-yb79l7` o parecida): copia **su contenido** en `C:\Users\Leviç\OneDrive\Desktop\bot final`, de forma que `INICIAR.bat` quede directamente dentro de `bot final`.
+1. Abre <https://github.com/turjemanmlevi-commits/Bot-final-> y, en el selector de ramas, elige `claude/confident-planck-41m20b`.
+2. Pulsa **Code → Download ZIP**. Enlace directo: <https://github.com/turjemanmlevi-commits/Bot-final-/archive/refs/heads/claude/confident-planck-41m20b.zip>
+3. Clic derecho en el ZIP → **Extraer todo…**. Dentro hay una carpeta (`Bot-final--claude-confident-planck-41m20b` o parecida): copia **su contenido** en `C:\Users\Leviç\OneDrive\Desktop\bot final`, de forma que `INICIAR.bat` quede directamente dentro de `bot final`.
 4. Doble clic en `INICIAR.bat`. Con esta opción no se crea el acceso directo «Sala de control».
 
 > [!warning] «Windows protegió su PC»
@@ -60,7 +60,7 @@ Necesitas **Git** (<https://git-scm.com/download/win>). Abre **PowerShell** y ej
 
 ```powershell
 cd "C:\Users\Leviç\OneDrive\Desktop"
-git clone -b claude/confident-bell-yb79l7 https://github.com/turjemanmlevi-commits/Bot-final-.git "bot final"
+git clone -b claude/confident-planck-41m20b https://github.com/turjemanmlevi-commits/Bot-final-.git "bot final"
 cd "bot final"
 ```
 

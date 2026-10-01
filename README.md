@@ -13,13 +13,13 @@ Sala de control para que un grupo de personas consiga entradas coordinando **has
 2. Copia esta línea, pégala (clic derecho) y pulsa **Enter**:
 
    ```powershell
-   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex
+   irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex
    ```
 
    ¿Sale `"irm" no se reconoce como un comando…`? Estás en **Símbolo del sistema** (cmd), no en PowerShell. Pega esta otra línea, que funciona en los dos:
 
    ```bat
-   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex"
+   powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex"
    ```
 
 3. Si Windows pide permiso para instalar Node.js, pulsa **Sí**. Cuando pregunte `Instalar tambien Obsidian para ver el vault? (s/n)`, escribe `s` y Enter (o `n` si ya lo tienes).
@@ -30,7 +30,7 @@ Qué hace el comando (`instalar.ps1`):
 | Paso | Qué hace |
 |---|---|
 | 1. Node.js | Si no lo tienes, instala **Node.js LTS** con `winget` (el instalador de Windows). Si tu Windows no tiene `winget`, abre nodejs.org y se para: instálalo y repite el comando |
-| 2. Proyecto | Descarga la rama `claude/confident-bell-yb79l7` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada**: nunca toca tu `.env` (configuración y claves) ni tus datos (cuentas, operaciones, carritos: ver [Dónde están tus datos](#dónde-están-tus-datos)); no pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), y si ya existe `vault\.obsidian` (tu configuración de Obsidian) no la toca |
+| 2. Proyecto | Descarga la rama `claude/confident-planck-41m20b` y la copia en `Escritorio\bot final` (en este PC: `C:\Users\Leviç\OneDrive\Desktop\bot final`) con `robocopy /XO`. **No borra nada**: nunca toca tu `.env` (configuración y claves) ni tus datos (cuentas, operaciones, carritos: ver [Dónde están tus datos](#dónde-están-tus-datos)); no pisa un archivo si el tuyo es más reciente que el de la descarga (tus notas editadas del vault), y si ya existe `vault\.obsidian` (tu configuración de Obsidian) no la toca |
 | 3. Acceso directo | Crea **Sala de control** en el Escritorio (abre `INICIAR.bat`) |
 | 4. Obsidian | Opcional: lo instala con `winget` si respondes `s` |
 | 5. Arranque | Abre `INICIAR.bat`, que instala dependencias, compila y abre el navegador |
@@ -57,7 +57,7 @@ Con el servidor en marcha, un error inesperado en segundo plano (en el scheduler
 
 ### Alternativa: ZIP
 
-1. En GitHub, rama `claude/confident-bell-yb79l7` → **Code → Download ZIP** (enlace directo: <https://github.com/turjemanmlevi-commits/Bot-final-/archive/refs/heads/claude/confident-bell-yb79l7.zip>).
+1. En GitHub, rama `claude/confident-planck-41m20b` → **Code → Download ZIP** (enlace directo: <https://github.com/turjemanmlevi-commits/Bot-final-/archive/refs/heads/claude/confident-planck-41m20b.zip>).
 2. Extrae el ZIP y copia **el contenido** de la carpeta de dentro en `C:\Users\Leviç\OneDrive\Desktop\bot final` (que `INICIAR.bat` quede directamente dentro de `bot final`).
 3. Doble clic en `INICIAR.bat`. Si Windows muestra «Windows protegió su PC»: **Más información → Ejecutar de todas formas**.
 
@@ -69,7 +69,7 @@ Requisitos: [Git](https://git-scm.com/download/win) y [Node.js LTS](https://node
 
 ```powershell
 cd "C:\Users\Leviç\OneDrive\Desktop"
-git clone -b claude/confident-bell-yb79l7 https://github.com/turjemanmlevi-commits/Bot-final-.git "bot final"
+git clone -b claude/confident-planck-41m20b https://github.com/turjemanmlevi-commits/Bot-final-.git "bot final"
 cd "bot final"
 npm install
 npm run build

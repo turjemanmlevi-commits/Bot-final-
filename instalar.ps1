@@ -1,9 +1,9 @@
 # ==========================================================================
 #  Ticket Orchestrator - instalador para Windows
 #  Uso (en PowerShell, una sola linea):
-#    irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex
+#    irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex
 #  Desde Simbolo del sistema (cmd):
-#    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex"
+#    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex"
 #
 #  1) Instala Node.js LTS si falta (winget).
 #  2) Descarga el proyecto en "Escritorio\bot final" SIN borrar nada tuyo:
@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
 
 $Repo = 'turjemanmlevi-commits/Bot-final-'
-$Branch = 'claude/confident-bell-yb79l7'
+$Branch = 'claude/confident-planck-41m20b'
 $ZipUrl = "https://github.com/$Repo/archive/refs/heads/$Branch.zip"
 $Desktop = [Environment]::GetFolderPath('Desktop')
 $Dest = Join-Path $Desktop 'bot final'

@@ -27,7 +27,7 @@ Evento ya preparado en la sala: [[Real Madrid - Villarreal CF · LaLiga J8]]. Gu
 ## Antes del día (15 minutos)
 
 1. **Actualiza la sala** (el comando de siempre, en cmd):
-   `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex"`
+   `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex"`
 2. **Cuentas** (menú *Cuentas → Nueva cuenta*): **una por cada persona que va**, web **Real Madrid**, con un **alias** (nada de emails, teléfonos ni DNI). Si una misma persona tiene varias cuentas, pon el **mismo titular**: la sala las cuenta como una sola persona y nunca pasa de su límite.
 3. **Telegram**: cada persona escribe **/start** a tu bot desde su móvil; en *Ajustes → Telegram → Asignar a una cuenta* le das su chat. Pulsa **Probar** en cada una: le debe llegar un mensaje.
 4. **Límites** (*Eventos → Editar el partido → 4 · Límites de compra*):

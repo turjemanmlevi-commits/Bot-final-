@@ -13,7 +13,7 @@ tags:
 > [!tip] ¿Compras entradas reales mañana?
 > Arranca con doble clic en **Sala de control** (Escritorio) o en `INICIAR.bat` (carpeta `bot final`). En el dashboard, la página **Cómo se compra** lo resume en 9 pasos con el plano; aquí, el detalle en [[Comprar entradas reales (paso a paso)]].
 >
-> ¿Aún no está instalado? En PowerShell, una sola línea: `irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-bell-yb79l7/instalar.ps1 | iex` (ver [[Bajar el proyecto a tu ordenador]]).
+> ¿Aún no está instalado? En PowerShell, una sola línea: `irm https://raw.githubusercontent.com/turjemanmlevi-commits/Bot-final-/claude/confident-planck-41m20b/instalar.ps1 | iex` (ver [[Bajar el proyecto a tu ordenador]]).
 
 > [!important] El sistema no compra por ti
 > En Ticketmaster, entradas.com y Real Madrid **cada persona compra y paga en la web oficial con su cuenta**. El sistema coordina: quién va a por qué zona, cuántas, hasta qué precio, límites, presupuesto, carritos y avisos. Ver [[Uso legítimo y guardarraíles]].
