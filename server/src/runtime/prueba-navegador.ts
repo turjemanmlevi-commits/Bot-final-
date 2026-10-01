@@ -14,6 +14,7 @@ import {
   browserAvailable,
   findSystemBrowser,
   launchOptionsFor,
+  LoginHandoff,
   openLoginBrowser,
   runBot as defaultRunBot,
   REAL_MADRID_CHANNEL_HOME,
@@ -183,7 +184,23 @@ export class BrowserTestService {
     context.on('close', () => {
       open = false;
     });
-    this.loginBrowsers.set(account.id, { pid: null, running: () => open, close: () => context.close().catch(() => undefined) });
+    this.loginBrowsers.set(account.id, {
+      pid: null,
+      running: () => open,
+      waitClosed: (timeoutMs) => new Promise<boolean>((resolve) => {
+        const t = setInterval(() => {
+          if (!open) {
+            clearInterval(t);
+            resolve(true);
+          }
+        }, 500);
+        setTimeout(() => {
+          clearInterval(t);
+          resolve(!open);
+        }, timeoutMs).unref?.();
+      }),
+      close: () => context.close().catch(() => undefined),
+    });
     this.deps.app.runtime.ctx.journal.audit('browser_test.account_browser_opened', { accountId: account.id, browser: 'chromium' }, { actor: 'dashboard' });
     return {
       ok: true,
@@ -326,7 +343,8 @@ export class BrowserTestService {
     return this.state();
   }
 
-  private async run(id: string, options: RunOptions, account: Account, signal: AbortSignal): Promise<void> {
+  private async run(id: string, options: RunOptions, account: Account, signal: AbortSignal, handoffs = 0): Promise<void> {
+    if (handoffs > 0) return this.runOnce(id, options, account, signal, handoffs);
     const reqs = [
       `${options.quantity} entrada(s)`,
       options.contiguous && options.quantity > 1 ? 'seguidas' : null,
@@ -337,12 +355,23 @@ export class BrowserTestService {
     ].filter(Boolean);
     this.log('info', `Prueba con la cuenta «${account.label}» — ${reqs.join(', ')}.`);
     const creds = this.deps.credentials.get(account.id);
-    if (!this.profileExists(account.id) && !creds) {
-      this.log('warn', 'Esta cuenta no ha iniciado sesión nunca en el navegador del bot: cuando la web lo pida, inicia sesión tú en su ventana (queda guardado).');
-    }
     const browser = this.systemBrowser();
     if (browser) this.log('info', `Navegador: ${browser.name} con el perfil del bot de esta cuenta.`);
     else this.log('warn', 'No hay Google Chrome en este PC: se usa el Chromium de Playwright (para entrar con Google hace falta Chrome).');
+    if (!this.profileExists(account.id) && !creds) {
+      this.log(
+        'warn',
+        browser
+          ? 'Esta cuenta no ha iniciado sesión nunca: cuando la web lo pida, abriré tu Chrome normal para que entres (queda guardado).'
+          : 'Esta cuenta no ha iniciado sesión nunca: cuando la web lo pida, inicia sesión tú en la ventana del bot (queda guardado).',
+      );
+    }
+    return this.runOnce(id, options, account, signal, 0);
+  }
+
+  private async runOnce(id: string, options: RunOptions, account: Account, signal: AbortSignal, handoffs: number): Promise<void> {
+    const creds = this.deps.credentials.get(account.id);
+    const browser = this.systemBrowser();
     await this.closeSession();
     if (this.loginBrowsers.get(account.id)?.running()) this.log('info', 'Cierro la ventana de inicio de sesión de esta cuenta para que el perfil quede libre…');
     await this.closeAccountBrowser(account.id);
@@ -356,7 +385,8 @@ export class BrowserTestService {
         signal,
         hooks: {
           log: (level, message) => this.log(level, message),
-          needHuman: async (reason, message) => {
+          needHuman: async (reason, message, url) => {
+            if (reason === 'login' && browser && handoffs < 2) throw new LoginHandoff(url);
             if (reason !== 'queue') this.status = 'WAITING_HUMAN';
             this.publish();
             await this.notify(`<b>${HUMAN_TITLES[reason]}</b> (cuenta «${esc(account.label)}»)\n${esc(message)}`);
@@ -375,6 +405,10 @@ export class BrowserTestService {
       await this.sendCartMessage(id, session.cart, account);
       await this.awaitDecision(session);
     } catch (err) {
+      if (!signal.aborted && err instanceof LoginHandoff && browser) {
+        await this.loginHandoff(id, options, account, signal, handoffs, browser, err.url);
+        return;
+      }
       if (signal.aborted) {
         this.finish('CANCELLED', 'Prueba detenida.');
       } else {
@@ -385,6 +419,46 @@ export class BrowserTestService {
         await this.notify(`❌ <b>La prueba ha fallado</b> (cuenta «${esc(account.label)}»)\n${esc(msg)}`);
       }
     }
+  }
+
+  /**
+   * Google rechaza iniciar sesión en un navegador automatizado («este navegador puede no ser seguro»):
+   * se cierra la ventana del bot, se abre el Chrome normal con el mismo perfil para que la persona
+   * entre, y al cerrarla se reanuda la prueba con la sesión ya guardada.
+   */
+  private async loginHandoff(id: string, options: RunOptions, account: Account, signal: AbortSignal, handoffs: number, browser: NonNullable<ReturnType<BrowserTestService['systemBrowser']>>, url: string): Promise<void> {
+    await this.closeSession();
+    this.status = 'WAITING_HUMAN';
+    const waitMs = this.deps.humanWaitMs ?? 10 * 60_000;
+    const minutes = Math.round(waitMs / 60_000);
+    this.log(
+      'human',
+      `He cerrado mi ventana y he abierto ${browser.name} normal (sin automatización) con el perfil de «${account.label}». Inicia sesión ahí (Google, Apple o email) y CIERRA esa ventana: la prueba continúa sola. Tienes ${minutes} min.`,
+    );
+    await this.notify(
+      `<b>${HUMAN_TITLES.login}</b> (cuenta «${esc(account.label)}»)\nEn tu PC se ha abierto ${esc(browser.name)} con el perfil de esta cuenta. Inicia sesión ahí (Google, Apple o email) y <b>cierra esa ventana</b>: la prueba continúa sola.`,
+    );
+    const safeUrl = /^https:\/\/[^/]*(realmadrid\.com|oneboxtds\.com)/i.test(url) ? url : REAL_MADRID_CHANNEL_HOME;
+    const login = openLoginBrowser(browser, this.profileDir(account.id), safeUrl);
+    this.loginBrowsers.set(account.id, login);
+    const closed = await login.waitClosed(waitMs, signal);
+    if (signal.aborted) {
+      await this.closeAccountBrowser(account.id);
+      this.finish('CANCELLED', 'Prueba detenida.');
+      return;
+    }
+    if (!closed) {
+      await this.closeAccountBrowser(account.id);
+      this.error = 'Se agotó el tiempo para iniciar sesión.';
+      this.log('error', `${this.error} Inicia sesión desde Cuentas → «Abrir navegador» y vuelve a lanzar la prueba.`);
+      this.finish('FAILED');
+      await this.notify(`❌ <b>La prueba ha fallado</b> (cuenta «${esc(account.label)}»)\nSe agotó el tiempo para iniciar sesión.`);
+      return;
+    }
+    this.loginBrowsers.delete(account.id);
+    this.status = 'RUNNING';
+    this.log('ok', 'Ventana cerrada: reanudo la prueba con la sesión guardada.');
+    await this.run(id, options, account, signal, handoffs + 1);
   }
 
   private async sendCartMessage(id: string, cart: SecuredCart, account: Account): Promise<void> {

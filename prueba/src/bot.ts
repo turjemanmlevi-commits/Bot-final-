@@ -65,8 +65,19 @@ export type HumanReason = 'login' | 'challenge' | 'queue' | 'selection' | 'block
 
 export interface BotHooks {
   log(level: LogLevel, message: string): void;
-  /** Se llama una vez por cada bloqueo que requiere a una persona delante de la ventana. */
-  needHuman(reason: HumanReason, message: string): Promise<void>;
+  /**
+   * Se llama una vez por cada bloqueo que requiere a una persona delante de la ventana (`url` es la
+   * página en la que está el bot). Puede lanzar `LoginHandoff` para que el bot cierre su ventana y
+   * quien lo llama abra un navegador sin automatización para iniciar sesión (Google lo exige).
+   */
+  needHuman(reason: HumanReason, message: string, url: string): Promise<void>;
+}
+
+/** Lanzada desde `needHuman('login')`: el bot cierra su navegador y deja el inicio de sesión a quien lo llama. */
+export class LoginHandoff extends Error {
+  constructor(readonly url: string) {
+    super('Inicio de sesión en un navegador sin automatización');
+  }
 }
 
 export interface BotDeps {
@@ -208,7 +219,7 @@ async function humanOnce(ctx: FlowCtx, reason: HumanReason, message: string): Pr
     throw new Error(`${message} — pero el navegador está en modo oculto (headless). Repite la prueba con la ventana visible.`);
   }
   ctx.deps.hooks.log('human', message);
-  await ctx.deps.hooks.needHuman(reason, message);
+  await ctx.deps.hooks.needHuman(reason, message, ctx.page.url());
 }
 
 /** Intenta el login con credenciales del .env. Devuelve true si lo ha enviado. */
@@ -259,14 +270,14 @@ async function passGates(ctx: FlowCtx, deadline: number): Promise<ObPageKind> {
       }
       if (!ctx.notified.has('queue') && ctx.opts.mode === 'real') {
         ctx.notified.add('queue');
-        await deps.hooks.needHuman('queue', 'Estoy en la cola virtual del Real Madrid. Espero turno; no hace falta que hagas nada.');
+        await deps.hooks.needHuman('queue', 'Estoy en la cola virtual del Real Madrid. Espero turno; no hace falta que hagas nada.', page.url());
       }
     } else if (kind === 'login') {
       loginSince ??= Date.now();
       await acceptCookies(page);
       const sent = await tryCredentialLogin(ctx);
       if (!sent && Date.now() - loginSince > 3000) {
-        await humanOnce(ctx, 'login', 'Necesito que inicies sesión con tu cuenta del Real Madrid en la ventana del bot (se queda guardada para la próxima).');
+        await humanOnce(ctx, 'login', 'La web pide iniciar sesión con tu cuenta del Real Madrid (la sesión se queda guardada para la próxima).');
       }
     }
     await sleep(1000, deps.signal);
@@ -838,7 +849,7 @@ export async function runBot(opts: RunOptions, deps: BotDeps): Promise<BotSessio
   } catch (err) {
     deps.signal.removeEventListener('abort', onAbort);
     const page = context.pages()[0];
-    if (page && !deps.signal.aborted) {
+    if (page && !deps.signal.aborted && !(err instanceof LoginHandoff)) {
       const file = path.join(deps.capturesDir, `fallo-${new Date().toISOString().replace(/[:.]/g, '-')}.png`);
       if (await page.screenshot({ path: file }).then(() => true).catch(() => false)) hooks.log('info', `Captura del fallo: ${file}`);
       await dumpDiagnostics(page, deps.capturesDir, 'fallo', hooks).catch(() => undefined);

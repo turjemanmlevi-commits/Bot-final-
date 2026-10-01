@@ -199,7 +199,7 @@ export class Runner extends EventEmitter {
         signal,
         hooks: {
           log: (level, message) => this.log(level, message),
-          needHuman: async (reason, message) => {
+          needHuman: async (reason, message, _url) => {
             if (reason !== 'queue') this.state.status = 'WAITING_HUMAN';
             this.changed();
             await this.notify(`<b>${HUMAN_TITLES[reason]}</b>\n${escapeHtml(message)}`);

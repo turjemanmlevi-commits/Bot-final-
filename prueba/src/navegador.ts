@@ -79,6 +79,8 @@ export function launchOptionsFor(browser: SystemBrowser | null): { channel?: 'ch
 export interface LoginBrowser {
   pid: number | null;
   running(): boolean;
+  /** Se resuelve cuando la persona cierra la ventana (o se agota `timeoutMs`): true si se cerró. */
+  waitClosed(timeoutMs: number, signal?: AbortSignal): Promise<boolean>;
   /** Cierra la ventana con cuidado (para que Chrome guarde las cookies) y espera a que termine. */
   close(): Promise<void>;
 }
@@ -120,6 +122,19 @@ export function openLoginBrowser(browser: SystemBrowser, profileDir: string, url
   return {
     pid: child.pid ?? null,
     running,
+    waitClosed: (timeoutMs, signal) =>
+      new Promise<boolean>((resolve) => {
+        const t = setInterval(() => {
+          if (!running() || signal?.aborted) {
+            clearInterval(t);
+            resolve(!running());
+          }
+        }, 500);
+        setTimeout(() => {
+          clearInterval(t);
+          resolve(!running());
+        }, timeoutMs).unref?.();
+      }),
     close: async () => {
       if (!running()) return;
       if (process.platform === 'win32' && child.pid) {
