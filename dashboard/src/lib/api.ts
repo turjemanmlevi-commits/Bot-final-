@@ -153,6 +153,8 @@ export const Api = {
   resolveLabel: (hash: string, label: string) => api<LabelResolutionResult>(`/api/venues/${hash}/resolve?label=${encodeURIComponent(label)}`),
   createAccount: (input: AccountInput) => post<Account>('/api/accounts', input),
   updateAccount: (id: string, patch: AccountPatch) => api<Account>(`/api/accounts/${id}`, { method: 'PATCH', body: patch }),
+  /** Elimina la cuenta (y su sesión guardada en el navegador del bot y sus credenciales). */
+  deleteAccount: (id: string) => post<{ ok: boolean; id: string; label: string }>(`/api/accounts/${id}/eliminar`),
   openSession: (id: string) => post<Account>(`/api/accounts/${id}/session/open`),
   sessionReady: (id: string, note?: string) => post<Account>(`/api/accounts/${id}/session/ready`, note ? { note } : {}),
   ackAlert: (id: string) => post<Alert>(`/api/alerts/${id}/ack`),

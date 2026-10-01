@@ -595,6 +595,23 @@ export function createHttpApp(app: App, opts: HttpOptions): Hono {
     checkChat(b.telegramChatId);
     return c.json(ctx.accounts.update(c.req.param('id'), b, actorOf(c)));
   });
+  /** Elimina la cuenta, su sesión guardada en el navegador del bot y sus credenciales. */
+  http.post('/api/accounts/:id/eliminar', async (c) => {
+    sameSite(c);
+    const id = c.req.param('id');
+    const blocker = ctx.accounts.removalBlocker(id);
+    if (blocker) throw new ApiError(409, 'IN_USE', blocker);
+    if (opts.browserTest) {
+      try {
+        await opts.browserTest.forgetAccount(id);
+      } catch (err) {
+        browserError(err);
+      }
+    }
+    const removed = ctx.accounts.remove(id, actorOf(c));
+    opts.credentials?.set(id, null);
+    return c.json({ ok: true, id: removed.id, label: removed.label });
+  });
   http.post('/api/accounts/:id/session/open', async (c) => c.json(await ctx.accounts.openSession(c.req.param('id'), actorOf(c))));
   http.post('/api/accounts/:id/session/ready', async (c) => {
     const b = await body(c, SessionHumanSchema);

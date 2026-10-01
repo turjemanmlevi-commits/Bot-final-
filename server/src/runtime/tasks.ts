@@ -204,6 +204,14 @@ export class HumanTaskService {
     return this.ctx.store.humanTasks.get(taskId) ?? done;
   }
 
+  /** Cancela una tarea abierta (p. ej. su cuenta se ha eliminado). */
+  cancel(taskId: Id, reason: string): void {
+    const t = this.ctx.store.humanTasks.get(taskId);
+    if (!t || t.state !== 'OPEN') return;
+    const next = this.finish(t, 'CANCELLED', { result: 'FAILED', actor: 'system', note: reason });
+    if (t.kind === 'ADD_TO_CART') this.ctx.claims.onManualTaskCancelled(next);
+  }
+
   /** Cancela las tareas abiertas de una operación que ya no las necesita. */
   cancelOpenFor(operationId: Id, reason: string): void {
     for (const t of [...this.ctx.store.humanTasks.values()]) {

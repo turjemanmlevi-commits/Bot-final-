@@ -147,6 +147,12 @@ export class Store {
     this.hub.upsert('account', a.id, a);
   }
 
+  removeAccount(id: Id): void {
+    if (!this.accounts.delete(id)) return;
+    this.journal.remove('account', id);
+    this.hub.remove('account', id);
+  }
+
   putWatch(w: EventWatch): void {
     this.watches.set(w.eventId, w);
     this.journal.persist('eventWatch', w.eventId, w);

@@ -88,7 +88,7 @@ En Obsidian: **Abrir carpeta como vault** → `bot final\vault`. Empieza por la 
 
 Con estas ticketeras el sistema trabaja en **asistencia manual**. En el dashboard, **Cómo se compra** lo explica en 9 pasos con el plano. En resumen:
 
-1. **Cuentas → Nueva cuenta**: una por persona (alias y, si quiere, su chat de Telegram).
+1. **Cuentas → Nueva cuenta**: una por persona (alias y, si quiere, su chat de Telegram). **Eliminar** la borra de la sala con su sesión guardada del navegador del bot (no se puede si está en una operación o tiene carritos abiertos).
 2. **Eventos → Nuevo evento**: eliges **dónde se vende** y, con **Claude** conectado (**Ajustes · Claude (IA)**), Claude busca sus próximos eventos; al elegir uno lo analiza entero: la fecha, la apertura de la venta (T0), **cuántas entradas se pueden comprar por persona** (y en cada fase, con la frase de las condiciones oficiales), el recinto, **cómo está estructurada la venta**, el **enlace oficial de compra** y su **plano oficial**. En **5 · Dónde queréis las entradas** tocas hasta 3 sitios del plano (🟢 1ª, 🟠 2ª, 🔵 3ª preferencia) y en **6 · Con qué cuentas se compra** marcas las cuentas que van a comprar (hasta 10; **Todas** / **Ninguna**): la operación de ese evento empieza con ellas marcadas. También desde Telegram con **/evento**. Sin Claude: marcador «📥 Enviar a la sala» o la lista oficial de Ticketmaster / partidos.
 3. **Recintos · vault**: el Estadio Santiago Bernabéu ya viene incluido, con su plano. Para otro recinto, **Nuevo recinto**.
 4. **Operaciones → Nueva operación**: empieza con las zonas y las cuentas elegidas en el evento (se pueden cambiar), cantidad, precio máximo → **Crear y validar → Armar**. Cada persona recibe su **plan** (zonas en orden, cuántas, precio máximo).

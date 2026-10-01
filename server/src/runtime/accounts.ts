@@ -107,6 +107,37 @@ export class AccountService {
     return next;
   }
 
+  /** Por qué no se puede eliminar la cuenta ahora (null = se puede). */
+  removalBlocker(id: Id): string | null {
+    const a = this.get(id);
+    if (a.leasedBy) {
+      const op = this.ctx.store.operations.get(a.leasedBy);
+      return `La cuenta está en la operación «${op?.config.name ?? a.leasedBy}». Párala o ciérrala y vuelve a intentarlo.`;
+    }
+    const open = [...this.ctx.store.carts.values()].filter((c) => c.accountId === id && (c.state === 'ACTIVE' || c.state === 'REVIEW_REQUIRED'));
+    if (open.length > 0) return `La cuenta tiene ${open.length} carrito(s) abiertos. En «Carritos», márcalos como pagados o libéralos y vuelve a intentarlo.`;
+    return null;
+  }
+
+  /**
+   * Elimina la cuenta. Lo que ya pasó (carritos cerrados, auditoría) se conserva con su id; sus
+   * tareas abiertas se cancelan y sus alertas se cierran.
+   */
+  remove(id: Id, actor: string): Account {
+    const a = this.get(id);
+    const blocker = this.removalBlocker(id);
+    if (blocker) throw new AccountError(blocker, 'IN_USE');
+    for (const t of [...this.ctx.store.humanTasks.values()]) {
+      if (t.accountId === id && t.state === 'OPEN') this.ctx.tasks.cancel(t.id, 'Cuenta eliminada');
+    }
+    this.ctx.alerts.resolveWhere((al) => al.accountId === id, actor);
+    this.lastSessionPoll.delete(id);
+    this.queueWaitStart.delete(id);
+    this.ctx.store.removeAccount(id);
+    this.ctx.journal.audit('account.deleted', { accountId: id, label: a.label, providerId: a.providerId }, { actor });
+    return a;
+  }
+
   /** Operación activa (armada o en curso) que usa la cuenta. */
   private activeOperation(accountId: Id): Id | null {
     const a = this.ctx.store.accounts.get(accountId);

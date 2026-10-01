@@ -300,6 +300,26 @@ export function AccountsPage() {
     [run, browserInfo],
   );
 
+  const remove = async (a: Account) => {
+    const ok = await ask({
+      title: `Eliminar la cuenta «${a.label}»`,
+      body: (
+        <div className="stack" style={{ gap: 8 }}>
+          <div>
+            Se borra de la sala, junto con su <b>sesión guardada en el navegador del bot</b> y su email y contraseña (si los tenía). No se puede deshacer: para volver a usarla
+            habría que crearla de nuevo e iniciar sesión otra vez.
+          </div>
+          <div className="small muted">No toca tu cuenta en la web del Real Madrid ni en ninguna otra web. Los carritos ya cerrados y la auditoría se conservan.</div>
+        </div>
+      ),
+      danger: true,
+      confirmText: 'Eliminar cuenta',
+    });
+    if (!ok) return;
+    const r = await run(() => Api.deleteAccount(a.id), (x) => `Cuenta «${x.label}» eliminada`);
+    if (r && editing !== null && editing !== 'new' && editing.id === a.id) setEditing(null);
+  };
+
   const kill = async (a: Account) => {
     const engaged = s.killSwitches[`account:${a.id}`]?.engaged ?? false;
     if (!engaged) {
@@ -460,6 +480,16 @@ export function AccountsPage() {
                           </button>
                           <button type="button" className={`btn sm ${killed ? 'danger solid' : 'ghost'}`} disabled={busy} onClick={() => void kill(a)} title={killed ? 'Soltar kill switch de la cuenta' : 'Parar esta cuenta'}>
                             <Icon name="power" size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            disabled={busy || Boolean(a.leasedBy)}
+                            onClick={() => void remove(a)}
+                            title={a.leasedBy ? 'Está en una operación: párala o ciérrala para poder eliminarla' : 'Eliminar esta cuenta'}
+                            aria-label={`Eliminar la cuenta ${a.label}`}
+                          >
+                            <Icon name="x" size={14} /> Eliminar
                           </button>
                         </div>
                       </td>

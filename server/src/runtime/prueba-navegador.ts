@@ -7,7 +7,7 @@
  * la pantalla de pago y avisa por Telegram (chat principal y chat de la cuenta) con la captura
  * y los botones «Sí, voy a pagar» / «No, liberar». Nunca paga.
  */
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import {
@@ -198,6 +198,20 @@ export class BrowserTestService {
       ok: true,
       message: `Se ha abierto ${browser.name} con el perfil de «${account.label}». Pulsa «Acceder», entra con Google (o Apple o email) y, cuando estés dentro, cierra la ventana: queda guardado.`,
     };
+  }
+
+  /** La cuenta se va a eliminar: cierra su Chrome y borra su perfil (la sesión guardada). */
+  async forgetAccount(accountId: Id): Promise<void> {
+    if (this.busy && this.account?.id === accountId) throw new BrowserTestError('Esa cuenta está en una prueba ahora mismo: pulsa «Parar» y vuelve a intentarlo.', 'BUSY');
+    await this.closeAccountBrowser(accountId);
+    const dir = this.profileDir(accountId);
+    if (!existsSync(dir)) return;
+    if (!(await waitProfileFree(dir, 5000))) throw new BrowserTestError('La ventana de Chrome de esa cuenta sigue abierta: ciérrala y vuelve a intentarlo.', 'BUSY');
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
+    } catch (err) {
+      log.warn(`No se pudo borrar el perfil del navegador de ${accountId}: ${(err as Error).message}`);
+    }
   }
 
   async closeAccountBrowser(accountId: Id): Promise<void> {
